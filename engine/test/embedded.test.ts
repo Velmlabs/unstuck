@@ -166,6 +166,18 @@ describe('createEmbeddedTransport', () => {
     agent.destroy();
   });
 
+  it('close() does not wait for a request still in flight (a human tab mid-request)', async () => {
+    const t = await createEmbeddedTransport({ assets: ASSETS });
+    const sock = net.connect(t.port, '127.0.0.1');
+    await new Promise((r) => sock.once('connect', r));
+    sock.write('GET /s/abc HTTP/1.1\r\nHost: x\r\n'); // headers never finished
+    await new Promise((r) => setTimeout(r, 50));
+    const t0 = Date.now();
+    await t.close();
+    expect(Date.now() - t0).toBeLessThan(1000);
+    sock.destroy();
+  });
+
   it('rejects when the port is taken', async () => {
     const t = await make();
     await expect(createEmbeddedTransport({ assets: ASSETS, port: t.port })).rejects.toThrow(/EADDRINUSE/);

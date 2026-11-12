@@ -35,3 +35,21 @@ The `Target.setAutoAttach` probe was inconclusive for both browsers: neither rep
 - **Watch mode (Plan 2):** when attached to a browser that fails the iframe-paint check and a `captcha.*` rule matches, return `failed` with detail `browser_cannot_render_captcha` and a hint to use Chromium, rather than opening a takeover the human can't complete.
 - **Docs:** recommend agents that run Obscura for scale fall back to Chromium for the pages where a CAPTCHA appears.
 - Re-run this probe on each new Obscura release (it moves quickly); CI keeps it in the Tier 2 compatibility suite.
+
+## `unstuck-engine doctor` report (Plan 2a, 2026-11-12)
+
+Obscura 0.2.6 started with `obscura serve --port 9333 --allow-private-network`:
+
+```
+Browser: Chrome/145.0.0.0
+✓ live view (screencast)
+✓ paste (insertText)
+✓ mouse and keyboard input
+✗ cross-origin iframes painted (CAPTCHA widgets)
+✗ popups reported
+Verdict: LIMITED
+  - CAPTCHA widgets in cross-origin iframes will not be visible; use Chromium for CAPTCHAs
+  - popups are not reported: a CAPTCHA that opens a window cannot be followed
+```
+
+This matches the spike: Limited. Running the doctor also showed that Obscura scopes tabs to the CDP connection that created them, so the doctor (and anything that opens a tab) must create and attach on one connection.

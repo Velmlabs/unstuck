@@ -105,6 +105,16 @@ describe('connectCdp against real Chromium (Review Focus 3)', () => {
     await cdp.close();
   });
 
+  it('createUrl opens a new tab on this same connection and attaches to it', async () => {
+    const cdp = await connectCdp(`127.0.0.1:${chrome.port}`, { createUrl: 'about:blank#created' });
+    await vi.waitFor(async () => {
+      const r = await cdp.send<{ result: { value: string } }>('Runtime.evaluate', { expression: 'location.href', returnByValue: true });
+      expect(r.result.value).toBe('about:blank#created');
+    });
+    await cdp.browser.send('Target.closeTarget', { targetId: cdp.targetId });
+    await cdp.close();
+  });
+
   it('unknown targetId rejects with "target … not found"', async () => {
     await expect(connectCdp(`127.0.0.1:${chrome.port}`, { targetId: 'nope' })).rejects.toThrow('target nope not found');
   });

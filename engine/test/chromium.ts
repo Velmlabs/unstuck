@@ -39,7 +39,7 @@ export async function startChromium(): Promise<DebugChromium> {
     async stop() {
       proc.kill();
       await new Promise((r) => proc.once('exit', r));
-      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     },
   };
 }

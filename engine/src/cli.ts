@@ -4,16 +4,20 @@ import { runStdioHost } from './stdio-host';
 import { JsonlFileEventLog, defaultLogPath } from './jsonl-log';
 import { VERSION } from './version';
 import { createMcpServer } from './mcp';
+import { formatReport, runDoctor } from './doctor';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { Readable, Writable } from 'node:stream';
 
 export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <port>]
        unstuck-engine --mcp [--open] [--host <host>] [--port <port>]
+       unstuck-engine doctor --cdp <url>
        unstuck-engine --version | --help
 
 --mcp runs an MCP server (tool: request_human_takeover) on stdin/stdout.
       The browser comes from the tool's cdp_url or UNSTUCK_CDP_URL; --open opens
       each takeover link in this machine's browser.
+doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
+      in a tab of its own and prints whether Unstuck works fully with it.
 
 Runs the Unstuck engine for one SDK process over JSON lines on stdin/stdout.
 The viewer is served on 127.0.0.1 by default (UNSTUCK_HOST, UNSTUCK_PORT,
@@ -30,11 +34,13 @@ export interface CliIO {
 
 /** Returns the process exit code. */
 export async function main(argv: string[], io: CliIO): Promise<number> {
-  let values: { stdio?: boolean; mcp?: boolean; open?: boolean; version?: boolean; help?: boolean; host?: string; port?: string };
+  let positionals: string[];
+  let values: { cdp?: string; stdio?: boolean; mcp?: boolean; open?: boolean; version?: boolean; help?: boolean; host?: string; port?: string };
   try {
-    ({ values } = parseArgs({
+    ({ values, positionals } = parseArgs({
       args: argv,
-      options: { stdio: { type: 'boolean' }, mcp: { type: 'boolean' }, open: { type: 'boolean' }, version: { type: 'boolean' }, help: { type: 'boolean' }, host: { type: 'string' }, port: { type: 'string' } },
+      allowPositionals: true,
+      options: { cdp: { type: 'string' }, stdio: { type: 'boolean' }, mcp: { type: 'boolean' }, open: { type: 'boolean' }, version: { type: 'boolean' }, help: { type: 'boolean' }, host: { type: 'string' }, port: { type: 'string' } },
       strict: true,
     }));
   } catch (e) {
@@ -48,6 +54,24 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
   if (values.help) {
     io.stdout.write(USAGE);
     return 0;
+  }
+  if (positionals[0] === 'doctor') {
+    if (!values.cdp || positionals.length > 1) {
+      io.stderr.write(USAGE);
+      return 2;
+    }
+    try {
+      const report = await runDoctor(values.cdp);
+      io.stdout.write(formatReport(report));
+      return report.verdict === 'unsupported' ? 1 : 0;
+    } catch (e) {
+      io.stderr.write(`[unstuck] doctor: ${(e as Error).message}\n`);
+      return 1;
+    }
+  }
+  if (positionals.length > 0 || values.cdp) {
+    io.stderr.write(USAGE);
+    return 2;
   }
   const port = values.port === undefined ? undefined : Number(values.port);
   const modes = Number(!!values.stdio) + Number(!!values.mcp);

@@ -61,13 +61,6 @@ async function resolveWsUrl(url: string, fetchImpl: typeof fetch): Promise<strin
 
 type Handlers = Map<string, Set<(p: any) => void>>;
 
-interface Session {
-  targetId: string;
-  handlers: Handlers;
-  closeHandlers: Set<(reason: string) => void>;
-  closedReason: string | null;
-}
-
 const addHandler = (map: Handlers, event: string, h: (p: any) => void) => {
   const set = map.get(event) ?? new Set();
   set.add(h);
@@ -75,8 +68,63 @@ const addHandler = (map: Handlers, event: string, h: (p: any) => void) => {
   return () => void set.delete(h);
 };
 
+/** A browser-level connection with no page attached (e.g. to open a tab of our own). */
+export async function connectBrowser(url: string, opts: { fetchImpl?: typeof fetch } = {}): Promise<BrowserCdp & { close(): Promise<void> }> {
+  const ws = new WebSocket(await resolveWsUrl(normalizeCdpUrl(url), opts.fetchImpl ?? fetch), { perMessageDeflate: false });
+  await new Promise<void>((resolve, reject) => {
+    ws.once('open', () => resolve());
+    ws.once('error', (e) => reject(new Error(`could not reach the browser at ${url}: ${e.message}`)));
+  });
+  let nextId = 1;
+  let disconnected: string | null = null;
+  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  const handlers: Handlers = new Map();
+  ws.on('message', (data) => {
+    const msg = JSON.parse(String(data)) as { id?: number; result?: unknown; error?: { message: string }; method?: string; params?: any; sessionId?: string };
+    if (msg.id !== undefined) {
+      const p = pending.get(msg.id);
+      pending.delete(msg.id);
+      if (msg.error) p?.reject(new Error(msg.error.message));
+      else p?.resolve(msg.result);
+    } else if (msg.method && !msg.sessionId) for (const h of [...(handlers.get(msg.method) ?? [])]) h(msg.params);
+  });
+  ws.on('close', () => {
+    disconnected = 'browser disconnected';
+    for (const p of pending.values()) p.reject(new Error(disconnected));
+    pending.clear();
+  });
+  return {
+    send<T>(method: string, params?: object): Promise<T> {
+      if (disconnected !== null) return Promise.reject(new Error(disconnected));
+      const id = nextId++;
+      return new Promise<T>((resolve, reject) => {
+        pending.set(id, { resolve, reject });
+        ws.send(JSON.stringify({ id, method, params: params ?? {} }));
+      });
+    },
+    on: (e, h) => addHandler(handlers, e, h),
+    async close() {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      const closed = new Promise((r) => ws.once('close', r));
+      ws.close();
+      await closed;
+    },
+  };
+}
+
+interface Session {
+  targetId: string;
+  handlers: Handlers;
+  closeHandlers: Set<(reason: string) => void>;
+  closedReason: string | null;
+}
+
+
 /** Connects straight to a browser's DevTools endpoint and attaches to one page target. */
-export async function connectCdp(url: string, opts: { targetId?: string; fetchImpl?: typeof fetch } = {}): Promise<DirectCdp> {
+export async function connectCdp(
+  url: string,
+  opts: { targetId?: string; createUrl?: string; fetchImpl?: typeof fetch } = {},
+): Promise<DirectCdp> {
   const ws = new WebSocket(await resolveWsUrl(normalizeCdpUrl(url), opts.fetchImpl ?? fetch), { perMessageDeflate: false, maxPayload: 256 * 1024 * 1024 });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', () => resolve());
@@ -161,8 +209,13 @@ export async function connectCdp(url: string, opts: { targetId?: string; fetchIm
   let main: { client: CdpClient; sessionId: string };
   let targetId: string;
   try {
-    const { targetInfos } = await browser.send<{ targetInfos: TargetInfo[] }>('Target.getTargets');
-    targetId = pickTarget(targetInfos, opts.targetId).targetId;
+    if (opts.createUrl !== undefined) {
+      // Some browsers (e.g. Obscura) scope tabs to the connection that created them, so create here.
+      ({ targetId } = await browser.send<{ targetId: string }>('Target.createTarget', { url: opts.createUrl }));
+    } else {
+      const { targetInfos } = await browser.send<{ targetInfos: TargetInfo[] }>('Target.getTargets');
+      targetId = pickTarget(targetInfos, opts.targetId).targetId;
+    }
     await browser.send('Target.setDiscoverTargets', { discover: true });
     main = await attach(targetId);
   } catch (e) {

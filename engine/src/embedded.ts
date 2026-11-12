@@ -124,7 +124,10 @@ export async function createEmbeddedTransport(opts: EmbeddedOptions): Promise<Tr
     async close() {
       for (const ws of sockets) ws.terminate();
       wss.close();
-      await new Promise<void>((r) => server.close(() => r()));
+      await new Promise<void>((r) => {
+        server.close(() => r());
+        server.closeAllConnections(); // a human tab mid-request must not stall shutdown
+      });
     },
   };
 }
