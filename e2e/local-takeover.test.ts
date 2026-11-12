@@ -110,7 +110,18 @@ describe('local takeover end to end', () => {
     const { ctx, human } = await openHuman(link.url);
     await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
     await human.reload();
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    try {
+      await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    } catch (e) {
+      // Say what the human is looking at, so a timeout is diagnosable.
+      const seen = await human.evaluate(() => ({
+        heading: document.querySelector('h1')?.textContent ?? null,
+        status: document.querySelector('[role=status]')?.textContent ?? null,
+        canvasWidth: (document.querySelector('canvas') as HTMLCanvasElement | null)?.width ?? null,
+        stored: Object.keys(localStorage),
+      }));
+      throw new Error(`after reload the viewer showed ${JSON.stringify(seen)}: ${(e as Error).message}`);
+    }
     expect(await human.getByRole('heading', { name: /already in use/i }).count()).toBe(0);
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved' });
