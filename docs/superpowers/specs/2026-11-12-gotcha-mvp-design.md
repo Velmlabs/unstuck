@@ -41,6 +41,7 @@ Success criteria:
 | Topic | Decision |
 |---|---|
 | Environments | Browser only, over CDP. Desktop/VNC is out of scope. |
+| Browser support | Tier 1: Chrome/Chromium. Tier 2 (experimental): Obscura and CDP-based hosted browsers. The engine checks capabilities when it attaches and falls back where it can (§4.4). |
 | SDKs | TypeScript and Python on day one, plus an MCP server |
 | Architecture | One engine, thin SDKs (Approach 1) |
 | Engine runtime | Runtime-agnostic core on web-standard APIs, with a Node host (compiled binary) and an in-process host |
@@ -110,6 +111,29 @@ gotcha/                      (pnpm workspace + uv workspace)
 - Node-only features (SMTP, desktop notifications, stdio, child processes, binding a port) live only in `engine/` and `relay-node/`.
 - The TypeScript SDK picks its mode automatically: **binary mode** under Node, **in-process mode** elsewhere. The API is the same in both.
 - In-process mode on Workers has no embedded server, so it requires a relay.
+
+### 4.4 Browser compatibility
+
+Gotcha attaches to any browser that speaks CDP; it never launches or bundles one.
+
+| Tier | Browsers | Guarantee |
+|---|---|---|
+| **Tier 1** (recommended) | Chrome / Chromium via Playwright or Puppeteer | Full end-to-end test matrix in CI (§11) |
+| **Tier 2** (experimental) | [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura serve`, own Rust engine, not Chromium); CDP-based hosted browsers: Browserbase, Steel, Cloudflare Browser Rendering | CDP compatibility suite in CI (§11); documented known gaps |
+
+**Capability check:** when it attaches, the engine checks which CDP features the browser supports and records them on the session (event log + `result.detail`):
+
+| Capability | Check | Fallback when missing |
+|---|---|---|
+| Screencast | `Page.startScreencast` succeeds | Poll `Page.captureScreenshot` at ~5 fps |
+| Text paste | `Input.insertText` succeeds | Per-character `Input.dispatchKeyEvent` |
+| Cross-origin iframes | `Target.setAutoAttach` reports iframe targets on a fixture page | Warn: "CAPTCHA iframes may not be detectable or done-checkable; human Done button required" |
+| Popup tracking | `Target.targetCreated` fires for `window.open` | Warn; stream stays on the original page |
+| Input | `Input.dispatchMouseEvent` / `dispatchKeyEvent` succeed | None. Takeover fails with `failed: browser does not support input` |
+
+`gotcha doctor --cdp <url>` prints this capability report for any browser.
+
+**Positioning:** Obscura and other stealth-oriented browsers are listed only as *compatible browsers*. Gotcha docs never promote evading detection; the intended use stays the customer's own people on the customer's own accounts.
 
 ## 5. Public API
 
@@ -252,6 +276,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 | notifiers | Recorded HTTP mocks with golden payloads per channel; manual smoke checks against real services before release |
 | detection | Local fixture site with safe stand-ins reproducing each widget's DOM and iframe structure, plus the official public test sitekeys for reCAPTCHA, hCaptcha and Turnstile. No live third-party sites in CI. |
 | end-to-end | Playwright: an agent browser plus a scripted "human" browser using the viewer. Matrix: TS binary, TS in-process, Python, MCP × embedded, relay-node, relay-cloudflare (local wrangler). |
+| browser compatibility | Tier 2 suite: the capability check, fixture-site detection, and one scripted takeover, run against Obscura (`obscura serve` in Docker) and local stand-ins for hosted browsers. Reports pass, fallback or fail per capability; fallbacks don't fail CI, regressions in a previously passing capability do. |
 | security | Token reuse, expiry, wrong code, cross-origin navigation block, relay sees only ciphertext, rate limits |
 | binaries | Build for linux-x64/arm64, macOS-x64/arm64, windows-x64; `gotcha doctor` plus one end-to-end smoke test per OS |
 
@@ -281,8 +306,9 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 2. **Bun `--compile` cross-target reliability** for 5 targets. Fallback: Node single-executable applications.
 3. **Package-name availability** on npm and PyPI (§12).
 4. **Playwright Python CDP sessions:** confirm `page.context.new_cdp_session(page)` supports the event volume of screencast frames; fallback is connecting the engine directly to the browser's CDP URL when one is exposed.
-5. **License boundaries:** the AGPL viewer is served by the Apache engine and used by the Apache Astro integration. It's shipped as a separate package (`@gotcha/viewer`) and loaded as an unmodified separate work, never compiled into Apache code. Confirm this split with a licensing review before launch, or relicense the viewer as Apache-2.0 if it adds friction.
-6. **Abuse:** the open-source software can't be policed; docs and terms state intended use (your own people, your own accounts). Cloud abuse controls belong to the Cloud v1 spec.
+5. **Obscura compatibility:** Obscura documents screencast, screenshots, mouse/key input and `Runtime.evaluate`, but doesn't mention `Input.insertText`, cross-origin iframes or popup events. Its own renderer may also draw CAPTCHA widgets differently from Chromium, and CAPTCHA providers may challenge it harder. *Spike (early in the plan):* run the capability check, the fixture site and the official reCAPTCHA/hCaptcha/Turnstile test pages against `obscura serve`. The result decides which gaps the docs list and whether Obscura stays Tier 2.
+6. **License boundaries:** the AGPL viewer is served by the Apache engine and used by the Apache Astro integration. It's shipped as a separate package (`@gotcha/viewer`) and loaded as an unmodified separate work, never compiled into Apache code. Confirm this split with a licensing review before launch, or relicense the viewer as Apache-2.0 if it adds friction.
+7. **Abuse:** the open-source software can't be policed; docs and terms state intended use (your own people, your own accounts). Cloud abuse controls belong to the Cloud v1 spec.
 
 ## 15. Out of scope
 
