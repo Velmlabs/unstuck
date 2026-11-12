@@ -98,6 +98,20 @@ describe('local takeover end to end', () => {
     await page.close();
   });
 
+  it('Final I1: the human reloads mid-takeover and carries on (not locked out)', async () => {
+    const { page, unstuck, result, link } = await startTakeover();
+    const { ctx, human } = await openHuman(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    await human.reload();
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    expect(await human.getByRole('heading', { name: /already in use/i }).count()).toBe(0);
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await ctx.close();
+    await unstuck.close();
+    await page.close();
+  });
+
   it("Can't solve with a reason → cancelled with that reason", async () => {
     const { page, unstuck, result, link } = await startTakeover();
     const { ctx, human } = await openHuman(link.url);

@@ -60,6 +60,13 @@ describe('connect', () => {
     expect(h.onPhase).toHaveBeenLastCalledWith('live');
   });
 
+  it('Final I1: a stored resumeKey is sent on the very first hello (reload / reopened link)', () => {
+    const h = handlers();
+    connect('ws://x/ws/abc', 'TOK', h, { WebSocketImpl: FakeWs as never, resumeKey: 'SAVED' });
+    FakeWs.all[0]!.open();
+    expect(FakeWs.all[0]!.hellos()).toEqual([{ t: 'hello', token: 'TOK', resumeKey: 'SAVED' }]);
+  });
+
   it('decodes binary frames', () => {
     const { h } = make();
     const ws = FakeWs.all[0]!;

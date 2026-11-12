@@ -9,8 +9,8 @@ describe('keyEventToMessage', () => {
     expect(keyEventToMessage(ev({ type: 'keydown', key: 'a', code: 'KeyA' }))).toEqual({ t: 'key', action: 'down', key: 'a', code: 'KeyA', text: 'a', modifiers: 0 });
   });
 
-  it('Ctrl+C has no text and modifiers 2', () => {
-    expect(keyEventToMessage(ev({ type: 'keydown', key: 'c', code: 'KeyC', ctrlKey: true }))).toEqual({ t: 'key', action: 'down', key: 'c', code: 'KeyC', modifiers: 2 });
+  it('Ctrl+A has no text and modifiers 2', () => {
+    expect(keyEventToMessage(ev({ type: 'keydown', key: 'a', code: 'KeyA', ctrlKey: true }))).toEqual({ t: 'key', action: 'down', key: 'a', code: 'KeyA', modifiers: 2 });
   });
 
   it('Enter has text \\r', () => {
@@ -27,6 +27,15 @@ describe('keyEventToMessage', () => {
     expect(keyEventToMessage(ev({ type: 'keypress', key: 'a' }))).toBeNull();
     expect(keyEventToMessage(ev({ type: 'keydown', key: 'Process' }))).toBeNull();
     expect(keyEventToMessage(ev({ type: 'keydown', key: 'Unidentified' }))).toBeNull();
+  });
+
+  it('Final I4: clipboard shortcuts stay native so the browser paste event can fire', () => {
+    for (const key of ['v', 'V', 'c', 'x']) {
+      expect(keyEventToMessage(ev({ type: 'keydown', key, code: 'KeyV', ctrlKey: true }))).toBeNull();
+      expect(keyEventToMessage(ev({ type: 'keydown', key, code: 'KeyV', metaKey: true }))).toBeNull();
+      expect(keyEventToMessage(ev({ type: 'keyup', key, code: 'KeyV', metaKey: true }))).toBeNull();
+    }
+    expect(keyEventToMessage(ev({ type: 'keydown', key: 'a', code: 'KeyA', ctrlKey: true }))).not.toBeNull();
   });
 
   it('modifiersOf follows CDP bits: Alt=1 Ctrl=2 Meta=4 Shift=8', () => {

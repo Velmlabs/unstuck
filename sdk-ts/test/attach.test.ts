@@ -1,5 +1,5 @@
 import { describe, it, expect, afterAll, beforeAll, vi } from 'vitest';
-import { attachPage } from '../src/attach';
+import { attachPage, PageClosedError } from '../src/attach';
 import { launch } from './helpers';
 import type { Browser } from './helpers';
 
@@ -42,6 +42,22 @@ describe('attachPage', () => {
     await vi.waitFor(() => expect(closed).toHaveBeenCalledWith('page closed'));
     expect(closed).toHaveBeenCalledTimes(1);
     await expect(a.detach()).resolves.toBeUndefined();
+  });
+
+  it('Final I6: onClose registered after the page closed fires immediately', async () => {
+    const page = await browser.newPage();
+    const a = await attachPage(page);
+    await page.close();
+    const late = vi.fn();
+    a.onClose(late);
+    expect(late).toHaveBeenCalledWith('page closed');
+    await a.detach();
+  });
+
+  it('Final I6: attaching to an already-closed page reports PageClosedError', async () => {
+    const page = await browser.newPage();
+    await page.close();
+    await expect(attachPage(page)).rejects.toBeInstanceOf(PageClosedError);
   });
 
   it('reports a page crash', async () => {

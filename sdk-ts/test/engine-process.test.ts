@@ -62,6 +62,21 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     expect(err.message).toMatch(/exited with code 3 before the handshake/);
   });
 
+  it('Final I7: an engine that never answers the handshake times out, is killed, and names UNSTUCK_ENGINE_PATH', async () => {
+    const silent = fakeEngine('setInterval(() => {}, 1000);');
+    const t0 = Date.now();
+    const err = await spawnEngine(silent, { handshakeTimeoutMs: 300 }).catch((e) => e);
+    expect(err).toBeInstanceOf(UnstuckEngineError);
+    expect(err.message).toMatch(/did not answer the handshake within 0\.3 s/);
+    expect(err.message).toContain('UNSTUCK_ENGINE_PATH');
+    expect(Date.now() - t0).toBeLessThan(2000);
+  });
+
+  it('Final I7: early-exit and refused-handshake errors also name UNSTUCK_ENGINE_PATH', async () => {
+    const early = await spawnEngine(fakeEngine('process.exit(3)'), {}).catch((e) => e);
+    expect(early.message).toContain('UNSTUCK_ENGINE_PATH');
+  });
+
   it('a protocol mismatch rejects with UnstuckEngineError', async () => {
     const err = await spawnEngine(
       fakeEngine(`
@@ -74,5 +89,6 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     ).catch((e) => e);
     expect(err).toBeInstanceOf(UnstuckEngineError);
     expect(err.message).toContain('old engine');
+    expect(err.message).toContain('UNSTUCK_ENGINE_PATH');
   });
 });

@@ -46,6 +46,33 @@ describe('Unstuck', () => {
     await unstuck.close();
   });
 
+  it('Final I6: an already-closed page returns failed/page_closed without throwing or starting the engine', async () => {
+    const page = await browser.newPage();
+    await page.close();
+    const u = new Unstuck({ enginePath: '/nonexistent/unstuck-engine' });
+    await expect(u.takeover(page, { reason: 'x' })).resolves.toMatchObject({ status: 'failed', detail: 'page_closed' });
+  });
+
+  it('Final I6: a page that closes while the engine is starting returns failed/page_closed promptly', async () => {
+    const page = await browser.newPage();
+    const slowHello = fakeEngine(`
+import readline from 'node:readline';
+const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
+readline.createInterface({ input: process.stdin }).on('line', (l) => {
+  const m = JSON.parse(l);
+  if (m.method === 'engine.hello') setTimeout(() => out({ id: m.id, result: { engineVersion: 'slow', protocolVersion: 1 } }), 800);
+  if (m.method === 'shutdown') { out({ id: m.id, result: {} }); process.exit(0); }
+});`);
+    const u = new Unstuck({ enginePath: slowHello, onLink: () => {} });
+    const result = u.takeover(page, { reason: 'x', timeoutS: 60 });
+    await new Promise((r) => setTimeout(r, 200));
+    await page.close();
+    const t0 = Date.now();
+    await expect(result).resolves.toMatchObject({ status: 'failed', detail: 'page_closed' });
+    expect(Date.now() - t0).toBeLessThan(2000);
+    await u.close();
+  });
+
   it('prints the link to stderr by default', async () => {
     const page = await browser.newPage();
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);

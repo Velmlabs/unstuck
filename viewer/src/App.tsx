@@ -3,12 +3,12 @@ import type { Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@uns
 import { connect as defaultConnect, type ConnectionHandlers, type Phase, type ViewerSocket } from './connection';
 import { drawFrameOnCanvas } from './draw';
 import { keyEventToMessage, modifiersOf } from './keys';
-import { toPagePoint } from './mapping';
+import { clampToPage, toPagePoint } from './mapping';
 import { parseFragment, sessionIdFromPath, wsUrlFor } from './url';
 
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string };
-  connectFn?: (url: string, token: string, h: ConnectionHandlers) => ViewerSocket;
+  connectFn?: (url: string, token: string, h: ConnectionHandlers, opts: { resumeKey?: string }) => ViewerSocket;
   drawFrame?: (canvas: HTMLCanvasElement, frame: Frame) => void;
   now?: () => number;
 }
@@ -32,6 +32,27 @@ const FINAL_SCREENS: Partial<Record<SessionStatus, Screen>> = {
 };
 
 const BUTTONS: Record<number, 'left' | 'middle' | 'right'> = { 0: 'left', 1: 'middle', 2: 'right' };
+const SCROLL_FRACTION = 0.6;
+
+/** Resume keys survive a reload or a re-opened link on the same device (localStorage is per origin). */
+const resumeStore = {
+  key: (sessionId: string) => `unstuck:resume:${sessionId}`,
+  get(sessionId: string): string | undefined {
+    try {
+      return localStorage.getItem(this.key(sessionId)) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  },
+  set(sessionId: string, value: string | null): void {
+    try {
+      if (value === null) localStorage.removeItem(this.key(sessionId));
+      else localStorage.setItem(this.key(sessionId), value);
+    } catch {
+      // storage unavailable (private mode): resume still works within this page load
+    }
+  },
+};
 
 function formatRemaining(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -52,6 +73,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const sockRef = useRef<ViewerSocket | null>(null);
   const pageSize = useRef({ width: 0, height: 0 });
   const moveQueued = useRef(false);
+  const pressed = useRef<'left' | 'middle' | 'right' | null>(null);
   const live = screen.kind === 'session' && phase === 'live';
   const liveRef = useRef(live);
   liveRef.current = live && !asking;
@@ -60,8 +82,12 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
 
   useEffect(() => {
     if (!token || !sessionId) return;
+    const saved = resumeStore.get(sessionId);
     const sock = connectFn(wsUrlFor(location.origin, sessionId), token, {
-      onReady: (r) => setInfo({ reason: r.reason, site: r.site, expiresAt: r.expiresAt }),
+      onReady: (r) => {
+        resumeStore.set(sessionId, r.resumeKey);
+        setInfo({ reason: r.reason, site: r.site, expiresAt: r.expiresAt });
+      },
       onFrame: (f) => {
         pageSize.current = { width: f.width, height: f.height };
         if (canvasRef.current) drawFrame(canvasRef.current, f);
@@ -69,6 +95,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       onState: (s) => {
         const final = FINAL_SCREENS[s];
         if (final) {
+          resumeStore.set(sessionId, null);
           setScreen(final);
           sockRef.current?.close();
         }
@@ -79,9 +106,9 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       onPhase: (p) => {
         setPhase(p);
         if (p === 'closed')
-          setScreen({ kind: 'message', title: 'Connection lost', body: 'Reopen the link to try again while the takeover is still open.', tone: 'error' });
+          setScreen({ kind: 'message', title: 'Connection lost', body: 'Reopen the link on this device within a minute to continue where you left off.', tone: 'error' });
       },
-    });
+    }, saved ? { resumeKey: saved } : {});
     sockRef.current = sock;
     return () => sock.close();
   }, []);
@@ -126,11 +153,35 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   };
 
   const onPointer = (action: 'down' | 'up') => (e: PointerEvent) => {
-    const p = point(e);
-    if (!p || !live) return;
+    if (!live) return;
+    if (action === 'down') {
+      const p = point(e);
+      if (!p) return;
+      e.preventDefault();
+      (e.target as Element).setPointerCapture?.(e.pointerId);
+      pressed.current = BUTTONS[e.button] ?? 'left';
+      send({ t: 'mouse', action, ...p, button: pressed.current, clickCount: 1, modifiers: modifiersOf(e) });
+      return;
+    }
+    release(e);
+  };
+
+  /** Always pair a press with a release, even if the pointer ended in the letterbox or was cancelled. */
+  const release = (e: PointerEvent) => {
+    const button = pressed.current;
+    const c = canvasRef.current;
+    if (!button || !c) return;
+    const p = clampToPage({ x: e.clientX, y: e.clientY }, c.getBoundingClientRect(), pageSize.current);
+    if (!p) return;
+    pressed.current = null;
     e.preventDefault();
-    if (action === 'down') (e.target as Element).setPointerCapture?.(e.pointerId);
-    send({ t: 'mouse', action, ...p, button: BUTTONS[e.button] ?? 'left', clickCount: 1, modifiers: modifiersOf(e) });
+    send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers: modifiersOf(e) });
+  };
+
+  const scroll = (direction: 1 | -1) => {
+    const { width, height } = pageSize.current;
+    if (!live || width === 0) return;
+    send({ t: 'wheel', x: width / 2, y: height / 2, dx: 0, dy: Math.round(direction * height * SCROLL_FRACTION) });
   };
 
   const onMove = (e: PointerEvent) => {
@@ -176,12 +227,14 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     c.addEventListener('pointerdown', down);
     c.addEventListener('pointerup', up);
     c.addEventListener('pointermove', onMove);
+    c.addEventListener('pointercancel', release);
     c.addEventListener('wheel', onWheel, { passive: false });
     c.addEventListener('contextmenu', noMenu);
     return () => {
       c.removeEventListener('pointerdown', down);
       c.removeEventListener('pointerup', up);
       c.removeEventListener('pointermove', onMove);
+      c.removeEventListener('pointercancel', release);
       c.removeEventListener('wheel', onWheel);
       c.removeEventListener('contextmenu', noMenu);
     };
@@ -230,6 +283,18 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           class="screen"
           aria-label="Live view of the agent's browser. Tap or click to interact."
         />
+        <div class="scroll-controls">
+          <button type="button" class="btn btn-icon" aria-label="Scroll up" onClick={() => scroll(-1)}>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+          <button type="button" class="btn btn-icon" aria-label="Scroll down" onClick={() => scroll(1)}>
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </button>
+        </div>
         {phase !== 'live' ? (
           <div class="banner" role="status">
             {phase === 'reconnecting' ? 'Connection dropped. Reconnecting…' : 'Connecting…'}

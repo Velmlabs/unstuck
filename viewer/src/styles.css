@@ -101,6 +101,24 @@ body {
   -webkit-user-select: none;
 }
 
+.scroll-controls {
+  position: absolute;
+  right: var(--pad);
+  bottom: var(--pad);
+  display: grid;
+  gap: var(--gap);
+}
+
+.btn-icon {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: var(--touch);
+  background: rgb(27 35 54 / 0.85);
+  color: var(--color-foreground);
+  border-color: var(--color-border);
+}
+
 .banner {
   position: absolute;
   inset: var(--pad) var(--pad) auto var(--pad);

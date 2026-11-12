@@ -37,7 +37,13 @@ export interface EngineProcess {
   kill(): void;
 }
 
-export async function spawnEngine(path: string, opts: { host?: string; port?: number }): Promise<EngineProcess> {
+const HINT = 'Set UNSTUCK_ENGINE_PATH to a working unstuck-engine binary.';
+export const HANDSHAKE_TIMEOUT_MS = 15_000;
+
+export async function spawnEngine(
+  path: string,
+  opts: { host?: string; port?: number; handshakeTimeoutMs?: number },
+): Promise<EngineProcess> {
   const args = ['--stdio'];
   if (opts.host) args.push('--host', opts.host);
   if (opts.port !== undefined) args.push('--port', String(opts.port));
@@ -56,11 +62,19 @@ export async function spawnEngine(path: string, opts: { host?: string; port?: nu
   });
   const spawnError = new Promise<never>((_, reject) =>
     child.once('error', (e) =>
-      reject(new UnstuckEngineError(`could not start the Unstuck engine at ${path}: ${e.message}. Set UNSTUCK_ENGINE_PATH to a working unstuck-engine binary.`, path)),
+      reject(new UnstuckEngineError(`could not start the Unstuck engine at ${path}: ${e.message}. ${HINT}`, path)),
     ),
   );
   const earlyExit = exited.then((code): never => {
-    throw new UnstuckEngineError(`the Unstuck engine at ${path} exited with code ${code} before the handshake`, path);
+    throw new UnstuckEngineError(`the Unstuck engine at ${path} exited with code ${code} before the handshake. ${HINT}`, path);
+  });
+  const timeoutMs = opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+  let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
+  const handshakeTimeout = new Promise<never>((_, reject) => {
+    handshakeTimer = setTimeout(
+      () => reject(new UnstuckEngineError(`the Unstuck engine at ${path} did not answer the handshake within ${timeoutMs / 1000} s. ${HINT}`, path)),
+      timeoutMs,
+    );
   });
   const handles = [child, child.stdin, child.stdout] as unknown as { ref(): void; unref(): void }[];
   const setBusy = (busy: boolean) => handles.forEach((h) => (busy ? h.ref() : h.unref()));
@@ -71,15 +85,18 @@ export async function spawnEngine(path: string, opts: { host?: string; port?: nu
       peer.request<HelloResult>(Methods.hello, { sdk: 'ts', sdkVersion: VERSION, protocolVersion: PROTOCOL_VERSION }),
       spawnError,
       earlyExit,
+      handshakeTimeout,
     ]);
   } catch (e) {
     child.kill();
     if (e instanceof UnstuckEngineError) throw e;
     if (e instanceof RpcCallError && e.code === 'closed') {
-      throw new UnstuckEngineError(`the Unstuck engine at ${path} exited with code ${await exited} before the handshake`, path);
+      throw new UnstuckEngineError(`the Unstuck engine at ${path} exited with code ${await exited} before the handshake. ${HINT}`, path);
     }
-    throw new UnstuckEngineError(`the Unstuck engine at ${path} refused the handshake: ${(e as Error).message}`, path);
+    throw new UnstuckEngineError(`the Unstuck engine at ${path} refused the handshake: ${(e as Error).message}. ${HINT}`, path);
   } finally {
+    clearTimeout(handshakeTimer);
+    handshakeTimeout.catch(() => {});
     earlyExit.catch(() => {});
     spawnError.catch(() => {});
   }

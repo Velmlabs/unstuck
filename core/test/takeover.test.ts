@@ -190,15 +190,15 @@ describe('takeover session', () => {
     expect(t.cdp.methods().filter((m) => m === 'Page.startScreencast')).toHaveLength(2);
   });
 
-  it('resume after 60 s is refused with token_used', async () => {
+  it('resume after the 60 s window finds the takeover already ended', async () => {
     const t = setup();
     await settle();
     const v1 = await t.join();
     const resumeKey = v1.json()[0].resumeKey;
     v1.close();
     await vi.advanceTimersByTimeAsync(61_000);
-    const v2 = await t.join({ resumeKey });
-    expect(v2.json()[0]).toMatchObject({ t: 'error', code: 'token_used' });
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'failed', detail: 'viewer_left' });
   });
 
   it('a reconnect with the right resumeKey replaces a stale connection that never closed', async () => {
@@ -211,6 +211,66 @@ describe('takeover session', () => {
     expect(v1.closed).not.toBeNull();
     t.cdp.emit('Page.screencastFrame', frame);
     expect(v2.binary()).toHaveLength(1);
+  });
+
+  it('Final I2: a replacing viewer immediately gets the last frame even if the page never repaints', async () => {
+    const t = setup();
+    await settle();
+    const v1 = await t.join();
+    t.cdp.emit('Page.screencastFrame', frame);
+    const resumeKey = v1.json()[0].resumeKey;
+    const v2 = await t.join({ resumeKey });
+    expect(v2.binary()).toHaveLength(1);
+    expect(v2.binary()[0]![0]).toBe(0x01);
+  });
+
+  it('Final I2: a viewer resuming after a disconnect also gets the last frame', async () => {
+    const t = setup();
+    await settle();
+    const v1 = await t.join();
+    t.cdp.emit('Page.screencastFrame', frame);
+    const resumeKey = v1.json()[0].resumeKey;
+    v1.close();
+    await settle();
+    const v2 = await t.join({ resumeKey });
+    expect(v2.binary().length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('Final M2: finish() resolves even if Page.stopScreencast never answers', async () => {
+    const t = setup();
+    t.cdp.respond('Page.stopScreencast', () => new Promise(() => {}));
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'done' });
+    await settle();
+    expect(t.result()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(2_000);
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'resolved' });
+  });
+
+  it('Final I1: if the holder leaves and does not come back within 60 s, the takeover ends as failed/viewer_left', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    v.close();
+    await settle();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'failed', detail: 'viewer_left' });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('Final I1: a resume within 60 s cancels the viewer_left deadline', async () => {
+    const t = setup();
+    await settle();
+    const v1 = await t.join();
+    const resumeKey = v1.json()[0].resumeKey;
+    v1.close();
+    await vi.advanceTimersByTimeAsync(59_000);
+    await t.join({ resumeKey });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(t.result()).toBeUndefined();
   });
 
   it('a connection that never says hello is closed after 10 s; the session keeps waiting', async () => {

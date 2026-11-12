@@ -33,3 +33,14 @@ export function toPagePoint(client: { x: number; y: number }, canvasRect: Rect, 
   const s = page.width / fit.width;
   return { x: round1(Math.min(page.width, Math.max(0, lx * s))), y: round1(Math.min(page.height, Math.max(0, ly * s))) };
 }
+
+/** Like toPagePoint, but clamps points outside the page image (letterbox, off-canvas) to the nearest edge. */
+export function clampToPage(client: { x: number; y: number }, canvasRect: Rect, page: Size): { x: number; y: number } | null {
+  if (!Number.isFinite(client.x) || !Number.isFinite(client.y)) return null;
+  const fit = fitContain(canvasRect, page);
+  if (fit.width === 0) return null;
+  const s = page.width / fit.width;
+  const lx = (client.x - canvasRect.left - fit.left) * s;
+  const ly = (client.y - canvasRect.top - fit.top) * s;
+  return { x: round1(Math.min(page.width, Math.max(0, lx))), y: round1(Math.min(page.height, Math.max(0, ly))) };
+}

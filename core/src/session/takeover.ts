@@ -19,6 +19,8 @@ import { newSessionId, signToken, verifyToken } from './tokens';
 export const HELLO_TIMEOUT_MS = 10_000;
 export const RESUME_WINDOW_MS = 60_000;
 export const DRAIN_INTERVAL_MS = 50;
+/** Upper bound on waiting for CDP during cleanup, so a dead browser can never stall the result. */
+export const STOP_TIMEOUT_MS = 2_000;
 
 export interface LinkInfo {
   sessionId: string;
@@ -80,6 +82,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let stopScreencast: (() => Promise<void>) | null = null;
   let sender: ReturnType<typeof createLatestSender> | null = null;
   let drainTimer: ReturnType<typeof setInterval> | null = null;
+  let leftTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastFrame: Uint8Array | null = null;
   let inputChain: Promise<void> = Promise.resolve();
   const helloTimers = new Set<ReturnType<typeof setTimeout>>();
   let resolveResult!: (r: TakeoverResult) => void;
@@ -106,13 +110,17 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     sender = null;
     const stop = stopScreencast;
     stopScreencast = null;
-    if (stop) await stop();
+    if (!stop) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([stop(), new Promise<void>((r) => (timer = setTimeout(r, STOP_TIMEOUT_MS)))]);
+    clearTimeout(timer);
   }
 
   function finish(final: TakeoverStatus, detail?: string): void {
     if (isTerminal(status)) return;
     status = nextStatus(status, FINAL_EVENT[final]);
     clearTimeout(expiryTimer);
+    if (leftTimer) clearTimeout(leftTimer);
     for (const t of helloTimers) clearTimeout(t);
     helloTimers.clear();
     offClose();
@@ -135,15 +143,22 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     const previous = holder;
     holder = conn;
     leftAt = null;
+    if (leftTimer) clearTimeout(leftTimer);
+    leftTimer = null;
     if (previous && previous !== conn) previous.close(1000, 'replaced');
     resumeKey = newSessionId();
     if (status === 'waiting') go('viewer_joined');
     emit('viewer_joined');
     sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey });
     sender = createLatestSender(conn);
+    // Chrome only sends frames when the page repaints; a static CAPTCHA would leave a new viewer black.
+    if (lastFrame) sender.push(lastFrame);
     if (stopScreencast) return;
     try {
-      stopScreencast = await startScreencast(cdp, (f) => sender?.push(encodeFrame(f)));
+      stopScreencast = await startScreencast(cdp, (f) => {
+        lastFrame = encodeFrame(f);
+        sender?.push(lastFrame);
+      });
     } catch (e) {
       finish('failed', `cdp_error: ${(e as Error).message}`);
       return;
@@ -159,6 +174,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     go('viewer_left');
     emit('viewer_left');
     void stopStream();
+    // If nobody resumes in time, nobody can ever rejoin (the token is spent): free the agent now.
+    leftTimer = setTimeout(() => finish('failed', 'viewer_left'), RESUME_WINDOW_MS);
   }
 
   async function onHello(conn: ViewerConnection, token: string, offeredResumeKey?: string): Promise<boolean> {

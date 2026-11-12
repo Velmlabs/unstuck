@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fitContain, toPagePoint } from '../src/mapping';
+import { clampToPage, fitContain, toPagePoint } from '../src/mapping';
 
 const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height });
 const page = { width: 1280, height: 720 };
@@ -61,5 +61,18 @@ describe('toPagePoint (Review Focus 1)', () => {
 
   it('returns null when the page size is unknown', () => {
     expect(toPagePoint({ x: 1, y: 1 }, rect(0, 0, 100, 100), { width: 0, height: 0 })).toBeNull();
+  });
+});
+
+describe('clampToPage (Final I3)', () => {
+  it('clamps points in the letterbox or outside the canvas to the nearest page edge', () => {
+    expect(clampToPage({ x: 195, y: 100 }, rect(0, 0, 390, 844), page)).toEqual({ x: 640, y: 0 });
+    expect(clampToPage({ x: 500, y: 422 }, rect(0, 0, 390, 844), page)).toEqual({ x: 1280, y: 360 });
+    expect(clampToPage({ x: -50, y: 900 }, rect(0, 0, 390, 844), page)).toEqual({ x: 0, y: 720 });
+  });
+
+  it('returns null when the page size is unknown or the coordinates are not finite', () => {
+    expect(clampToPage({ x: 1, y: 1 }, rect(0, 0, 390, 844), { width: 0, height: 0 })).toBeNull();
+    expect(clampToPage({ x: Number.NaN, y: 1 }, rect(0, 0, 390, 844), page)).toBeNull();
   });
 });

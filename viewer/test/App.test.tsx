@@ -7,8 +7,10 @@ const NOW = 1_700_000_000_000;
 let handlers: ConnectionHandlers;
 let sent: unknown[];
 let closed: boolean;
-const connectFn: AppProps['connectFn'] = (_url, _token, h) => {
+let connectOpts: { resumeKey?: string } | undefined;
+const connectFn: AppProps['connectFn'] = (_url, _token, h, opts) => {
   handlers = h;
+  connectOpts = opts;
   return { send: (m) => void sent.push(m), close: () => void (closed = true) };
 };
 const loc = (hash = '#t=TOK') => ({ hash, pathname: '/s/SESSION', origin: 'http://127.0.0.1:5000' });
@@ -35,6 +37,7 @@ function goLive() {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   sent = [];
   closed = false;
   drawFrame.mockClear();
@@ -262,6 +265,84 @@ describe('App', () => {
       { t: 'text', text: '日本' },
     ]);
     expect(bridge.value).toBe('');
+  });
+
+  it('Final I1: remembers the resumeKey for this session and offers it on the next load', () => {
+    const first = setup();
+    goLive();
+    expect(localStorage.getItem('unstuck:resume:SESSION')).toBe('k');
+    first.unmount();
+    setup();
+    expect(connectOpts).toEqual({ resumeKey: 'k' });
+  });
+
+  it('Final I1: forgets the resumeKey when the takeover ends', () => {
+    setup();
+    goLive();
+    act(() => handlers.onState('resolved'));
+    expect(localStorage.getItem('unstuck:resume:SESSION')).toBeNull();
+  });
+
+  it('Final I1: survives storage that throws (private mode)', () => {
+    const get = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('denied');
+    });
+    setup();
+    goLive();
+    expect(connectOpts).toEqual({});
+    get.mockRestore();
+    set.mockRestore();
+  });
+
+  it('Final I1: the connection-lost screen tells the human how to resume', () => {
+    setup();
+    act(() => handlers.onPhase('closed'));
+    expect(screen.getByText(/reopen the link on this device within a minute/i)).toBeTruthy();
+  });
+
+  it('Final I3: releasing a drag in the letterbox still releases the button, clamped to the page edge', () => {
+    setup();
+    const canvas = goLive();
+    pointer(canvas, 'pointerdown', { clientX: 320, clientY: 180, button: 0 });
+    pointer(canvas, 'pointerup', { clientX: 700, clientY: 180, button: 0 });
+    expect(sent.at(-1)).toEqual({ t: 'mouse', action: 'up', x: 1280, y: 360, button: 'left', clickCount: 1, modifiers: 0 });
+  });
+
+  it('Final I3: a cancelled pointer releases the pressed button', () => {
+    setup();
+    const canvas = goLive();
+    pointer(canvas, 'pointerdown', { clientX: 320, clientY: 180, button: 0 });
+    act(() => void canvas.dispatchEvent(new MouseEvent('pointercancel', { clientX: 320, clientY: 180 })));
+    expect(sent.at(-1)).toMatchObject({ t: 'mouse', action: 'up', x: 640, y: 360, button: 'left' });
+  });
+
+  it('Final I3: an up with no matching down sends nothing', () => {
+    setup();
+    const canvas = goLive();
+    pointer(canvas, 'pointerup', { clientX: 700, clientY: 180, button: 0 });
+    act(() => void canvas.dispatchEvent(new MouseEvent('pointercancel', { clientX: 1, clientY: 1 })));
+    expect(sent).toEqual([]);
+  });
+
+  it('Final I5: scroll buttons scroll the agent page from a phone', () => {
+    setup();
+    goLive();
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll down' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll up' }));
+    expect(sent).toEqual([
+      { t: 'wheel', x: 640, y: 360, dx: 0, dy: 432 },
+      { t: 'wheel', x: 640, y: 360, dx: 0, dy: -432 },
+    ]);
+  });
+
+  it('Final I5: scroll buttons do nothing before the first frame', () => {
+    setup();
+    act(() => handlers.onPhase('live'));
+    fireEvent.click(screen.getByRole('button', { name: 'Scroll down' }));
+    expect(sent).toEqual([]);
   });
 
   it('closes the socket on unmount', () => {

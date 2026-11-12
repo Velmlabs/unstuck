@@ -12,6 +12,8 @@ export function keyEventToMessage(
 ): Extract<ViewerToEngine, { t: 'key' }> | null {
   if (e.isComposing || e.key === 'Process' || e.key === 'Unidentified') return null;
   if (e.type !== 'keydown' && e.type !== 'keyup') return null;
+  // Clipboard shortcuts stay native: cancelling Ctrl/Cmd+V would also cancel the browser's paste event.
+  if ((e.ctrlKey || e.metaKey) && ['v', 'c', 'x'].includes(e.key.toLowerCase())) return null;
   const modifiers = modifiersOf(e);
   const base = { t: 'key' as const, action: e.type === 'keydown' ? ('down' as const) : ('up' as const), key: e.key, code: e.code, modifiers };
   if (base.action === 'up') return base;

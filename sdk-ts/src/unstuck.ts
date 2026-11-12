@@ -7,7 +7,7 @@ import {
   type TakeoverParams,
   type TakeoverResult,
 } from '@unstuck/protocol';
-import { attachPage, type AttachedPage } from './attach';
+import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
 import { UnstuckEngineError } from './errors';
 
@@ -50,12 +50,33 @@ export class Unstuck {
    * Resolves with the outcome; rejects only with UnstuckEngineError if the engine can't run.
    */
   async takeover(page: unknown, opts: { reason: string; timeoutS?: number }): Promise<TakeoverResult> {
-    const attached = await attachPage(page);
-    let engine: EngineProcess | undefined;
+    const pageClosed: TakeoverResult = { status: 'failed', sessionId: '', url: '', durationS: 0, detail: 'page_closed' };
+    let attached: AttachedPage;
     try {
-      engine = await this.ensureEngine();
+      attached = await attachPage(page);
+    } catch (e) {
+      if (e instanceof PageClosedError) return pageClosed;
+      throw e;
+    }
+    let engine: EngineProcess | undefined;
+    // Watch for close from the start: the page can go away while the engine is still starting.
+    let closedEarly = false;
+    let notifyClose: ((reason: string) => void) | null = null;
+    let wakeOnClose!: () => void;
+    const closedWhileStarting = new Promise<null>((r) => (wakeOnClose = () => r(null)));
+    attached.onClose((reason) => {
+      if (notifyClose) notifyClose(reason);
+      else {
+        closedEarly = true;
+        wakeOnClose();
+      }
+    });
+    try {
+      engine = (await Promise.race([this.ensureEngine(), closedWhileStarting])) ?? undefined;
+      if (closedEarly || !engine) return pageClosed;
+      const live = engine;
       this.pages.set(attached.pageId, attached);
-      attached.onClose((reason) => engine!.peer.notify(Methods.cdpClosed, { pageId: attached.pageId, reason }));
+      notifyClose = (reason) => live.peer.notify(Methods.cdpClosed, { pageId: attached.pageId, reason });
       engine.setBusy(++this.inFlight > 0);
       const params: TakeoverParams = { pageId: attached.pageId, reason: opts.reason, timeoutS: opts.timeoutS ?? this.opts.timeoutS, site: siteOf(attached.url()) };
       const died = engine.exited.then((code): never => {
@@ -72,7 +93,7 @@ export class Unstuck {
     } finally {
       this.pages.delete(attached.pageId);
       await attached.detach();
-      if (engine) engine.setBusy(--this.inFlight > 0);
+      if (engine && notifyClose) engine.setBusy(--this.inFlight > 0);
     }
   }
 

@@ -26,11 +26,11 @@ export function connect(
   url: string,
   token: string,
   h: ConnectionHandlers,
-  opts: { WebSocketImpl?: typeof WebSocket } = {},
+  opts: { WebSocketImpl?: typeof WebSocket; resumeKey?: string } = {},
 ): ViewerSocket {
   const WS = opts.WebSocketImpl ?? globalThis.WebSocket;
   let ws: WebSocket;
-  let resumeKey: string | undefined;
+  let resumeKey: string | undefined = opts.resumeKey;
   let stopped = false;
   let attempt = 0;
   let downSince: number | null = null;
