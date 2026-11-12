@@ -1,0 +1,9 @@
+# Throwaway spike (Plan 1, Task 2): deployed once, measured, then deleted.
+name = "unstuck-spike-browser"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[browser]
+binding = "BROWSER"
