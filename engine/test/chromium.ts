@@ -18,6 +18,7 @@ export async function startChromium(): Promise<DebugChromium> {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-chrome-'));
   const proc = spawn(chromium.executablePath(), ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${dir}`, '--no-first-run', '--no-sandbox', 'about:blank'], {
     stdio: ['ignore', 'ignore', 'pipe'],
+    detached: true, // own process group, so stop() can kill renderer/GPU children too
   });
   const wsUrl = await new Promise<string>((resolve, reject) => {
     let err = '';
@@ -37,9 +38,19 @@ export async function startChromium(): Promise<DebugChromium> {
     wsUrl,
     proc,
     async stop() {
-      proc.kill();
-      await new Promise((r) => proc.once('exit', r));
-      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+      const exited = proc.exitCode !== null ? Promise.resolve() : new Promise((r) => proc.once('exit', r));
+      try {
+        process.kill(-proc.pid!, 'SIGKILL');
+      } catch {
+        proc.kill('SIGKILL');
+      }
+      await exited;
+      // Best effort: a temp profile left behind must never fail a test.
+      try {
+        fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+      } catch {
+        /* ignore */
+      }
     },
   };
 }
