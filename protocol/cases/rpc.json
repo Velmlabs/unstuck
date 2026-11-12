@@ -1,0 +1,44 @@
+{
+  "description": "RPC conformance cases. Two peers are wired back to back: 'handle' steps register on peer B, 'request' steps run from peer A, 'receive' feeds a raw line to peer A, 'close' closes peer A. Both the TypeScript and Python peers must pass every case.",
+  "cases": [
+    { "name": "request returns the handler result", "steps": [
+      { "handle": "x", "returns": 2 },
+      { "request": "x", "params": { "n": 1 }, "expect": { "result": 2 } }
+    ] },
+    { "name": "handler returning nothing yields null", "steps": [
+      { "handle": "x", "returns": null },
+      { "request": "x", "expect": { "result": null } }
+    ] },
+    { "name": "async handler result", "steps": [
+      { "handle": "x", "returns": "later", "async": true },
+      { "request": "x", "expect": { "result": "later" } }
+    ] },
+    { "name": "unknown method", "steps": [
+      { "request": "nope", "expect": { "error": { "code": "unknown_method" } } }
+    ] },
+    { "name": "handler throws", "steps": [
+      { "handle": "x", "throws": { "message": "boom" } },
+      { "request": "x", "expect": { "error": { "code": "handler_error", "message": "boom" } } }
+    ] },
+    { "name": "handler error keeps its own code", "steps": [
+      { "handle": "x", "throws": { "code": "protocol_mismatch", "message": "old" } },
+      { "request": "x", "expect": { "error": { "code": "protocol_mismatch", "message": "old" } } }
+    ] },
+    { "name": "unicode survives the wire", "steps": [
+      { "handle": "echo", "echo": true },
+      { "request": "echo", "params": { "text": "héllo 日本 🙂" }, "expect": { "result": { "text": "héllo 日本 🙂" } } }
+    ] },
+    { "name": "malformed and unrelated lines are ignored", "steps": [
+      { "receive": "not json" },
+      { "receive": "42" },
+      { "receive": "null" },
+      { "receive": "{\"id\":999,\"result\":1}" },
+      { "handle": "x", "returns": 1 },
+      { "request": "x", "expect": { "result": 1 } }
+    ] },
+    { "name": "requests after close fail with closed", "steps": [
+      { "close": "gone" },
+      { "request": "x", "expect": { "error": { "code": "closed", "message": "gone" } } }
+    ] }
+  ]
+}
