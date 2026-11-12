@@ -12,9 +12,11 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "@unstuck/core": "workspace:*",
     "@unstuck/protocol": "workspace:*",
-    "ws": "^8.22.2"
+    "ws": "^8.22.2",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/ws": "^8.18.2"

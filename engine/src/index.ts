@@ -5,3 +5,4 @@ export { createEmbeddedTransport, EXPIRED_HTML_MARKER, type AssetMap, type Embed
 export { main, USAGE, type CliIO } from './cli';
 export { connectCdp, normalizeCdpUrl, pickTarget, type DirectCdp, type BrowserCdp, type TargetInfo } from './direct-cdp';
 export { VERSION } from './version';
+export { createMcpServer, openInBrowser, TOOL_NAME, type McpServerOptions } from './mcp';

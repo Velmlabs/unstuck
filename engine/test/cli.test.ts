@@ -59,6 +59,28 @@ describe('main', () => {
     expect(x.err()).toContain('reachable from your network');
   });
 
+  it('--mcp serves MCP over stdio: initialize and tools/list, then exits 0 when stdin closes', async () => {
+    const x = io();
+    const lines: any[] = [];
+    readline.createInterface({ input: x.stdout }).on('line', (l) => lines.push(JSON.parse(l)));
+    const run = main(['--mcp'], x);
+    const send = (m: object) => x.stdin.write(JSON.stringify(m) + '\n');
+    send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } });
+    send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+    await new Promise((r) => setTimeout(r, 300));
+    x.stdin.end();
+    await expect(run).resolves.toBe(0);
+    expect(lines.find((l) => l.id === 1).result.serverInfo).toMatchObject({ name: 'unstuck', version: VERSION });
+    expect(lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name)).toEqual(['request_human_takeover']);
+    expect(x.err()).toMatch(/MCP server ready/);
+  });
+
+  it('--open without --mcp is a usage error', async () => {
+    const x = io();
+    await expect(main(['--stdio', '--open'], x)).resolves.toBe(2);
+  });
+
   it('--stdio reports a port that is already taken and exits 1', async () => {
     const x = io();
     const blocker = await new Promise<import('node:net').Server>((r) => {
