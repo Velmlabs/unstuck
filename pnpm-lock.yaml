@@ -52,6 +52,12 @@ importers:
         specifier: ~0.34.52
         version: 0.34.52
 
+  sdk-ts:
+    dependencies:
+      '@unstuck/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   viewer:
     dependencies:
       '@unstuck/protocol':
