@@ -6,3 +6,8 @@ protocol/schemas/
 docs/spikes/*-raw.json
 .superpowers/
 *.tsbuildinfo
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
+*.egg-info/
