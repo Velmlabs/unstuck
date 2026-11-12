@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fake CAPTCHA fixture</title>
+    <style>
+      body { margin: 0; font: 18px sans-serif; display: grid; place-items: center; height: 100vh; background: #fafafa; }
+      .box { display: grid; gap: 16px; padding: 24px; border: 1px solid #ccc; background: #fff; width: 360px; }
+      #robot { height: 64px; font-size: 18px; }
+      #answer { height: 40px; font-size: 18px; }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <button id="robot">I'm not a robot</button>
+      <input id="answer" placeholder="answer" />
+    </div>
+    <script>
+      window.clicks = 0;
+      document.getElementById('robot').addEventListener('click', (e) => {
+        window.clicks++;
+        e.target.textContent = '✓ verified';
+      });
+    </script>
+  </body>
+</html>

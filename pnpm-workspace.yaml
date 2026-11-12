@@ -5,3 +5,4 @@ packages:
   - viewer
   - sdk-ts
   - e2e
+  - examples/*

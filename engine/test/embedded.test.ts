@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import net from 'node:net';
+import http from 'node:http';
 import { WebSocket } from 'ws';
 import type { ViewerConnection } from '@unstuck/core';
 import { createEmbeddedTransport, EXPIRED_HTML_MARKER, type AssetMap } from '../src/embedded';
@@ -152,6 +153,17 @@ describe('createEmbeddedTransport', () => {
     const again = await createEmbeddedTransport({ assets: ASSETS, port: t.port });
     expect(again.port).toBe(t.port);
     await again.close();
+  });
+
+  it('close() does not wait for idle keep-alive HTTP connections (a human tab left open)', async () => {
+    const t = await createEmbeddedTransport({ assets: ASSETS });
+    await t.publish('abc');
+    const agent = new http.Agent({ keepAlive: true });
+    await new Promise<void>((r) => http.get({ host: '127.0.0.1', port: t.port, path: '/s/abc', agent }, (res) => res.resume().on('end', () => r())));
+    const t0 = Date.now();
+    await t.close();
+    expect(Date.now() - t0).toBeLessThan(500);
+    agent.destroy();
   });
 
   it('rejects when the port is taken', async () => {

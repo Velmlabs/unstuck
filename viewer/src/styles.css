@@ -125,7 +125,7 @@ body {
 .bottombar {
   display: flex;
   gap: var(--gap);
-  padding: var(--pad) 16px;
+  padding: var(--pad) 12px;
   background: var(--color-card);
   border-top: 1px solid var(--color-muted);
 }
@@ -133,10 +133,11 @@ body {
 .btn {
   min-height: var(--touch);
   min-width: var(--touch);
-  padding: 0 16px;
+  padding: 0 14px;
   border-radius: var(--radius);
   border: 1px solid transparent;
   font: 600 16px/1 var(--font);
+  white-space: nowrap;
   cursor: pointer;
   transition: background-color 150ms ease-out, transform 100ms ease-out;
 }
