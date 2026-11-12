@@ -24,6 +24,12 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.5)(tsx@4.23.15)
 
+  core:
+    dependencies:
+      '@unstuck/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   protocol:
     dependencies:
       '@sinclair/typebox':
