@@ -195,6 +195,39 @@ The engine CLI gains `--relay <url>` and `--agent-key <key>`, which beat the env
 - A **resume** `hello` (valid `resumeKey`) doesn't need the code again: the resume key already proves it's the same device that entered it.
 - After 5 wrong codes, the session refuses every new *token* `hello` with `session_closed`. A resume by the device already holding the session still works. `takeover()` keeps waiting until it times out, so a guessing human can't end the agent's takeover early.
 
+### 5.9 Housekeeping
+
+Rule: **nothing outlives its takeover.** The longest any relay state can live is the capped expiry (1 hour) plus the 60 s grace. Every piece of state has an owner that deletes it, and a backstop in case the owner never runs.
+
+**Cloudflare (one Durable Object per takeover)**
+- The object stores only the session record: account, SHA-256 of the agent secret, `expiresAt`, byte counters and the `takeover_opened` flag. It's in Durable Object storage so it survives hibernation. Screen data is never stored.
+- On registration the object sets an **alarm** for `expiresAt`. When the agent drops, the alarm moves to the end of the 60 s grace; when it reconnects, back to `expiresAt`.
+- **End of session** (`end`, alarm, or grace over): close every socket, fire `session_closed` once, then `storage.deleteAll()` and `deleteAlarm()`. An object with empty storage costs nothing and is gone for good.
+- **Backstop:** any request or alarm that finds a record past `expiresAt + 60 s` runs the same cleanup first.
+
+**Node**
+- Sessions live in a `Map`, with one timer each for expiry and grace. End of session closes the sockets, fires `session_closed` and deletes the entry and its timers.
+- **Backstop sweep every 60 s:**
+  - removes any entry past `expiresAt + 60 s`;
+  - removes sockets past the 120 s idle timeout;
+  - prunes rate-limit buckets older than their window.
+- Clean shutdown (SIGTERM/SIGINT) closes every socket with 1001 and exits within 5 s.
+
+**Engine and SDKs**
+- `unpublish` sends `end` and closes the agent socket. Engine shutdown runs `unpublish` for every live session.
+- The E2E key and agent secret exist only in memory and in the link, and die with the session.
+
+**Logs.** The relay writes nothing to disk: event lines go to stdout or `console.log`. Retention of anything `onEvent` stores is the host's job (Cloud: §8 below).
+
+**Tests**
+- After `end`, expiry and grace-out, a Durable Object's storage is empty with no alarm set.
+- The Node map, timers and buckets are empty after the sweep.
+- A forced crash mid-session (no `end`) is still fully cleaned up by the backstop.
+
+**Carried into the Cloud design (C2, private repo)**, so it isn't lost:
+- A daily scheduled Worker (cron trigger) deletes expired `sessions` rows, used or expired `login_tokens`, and `login_attempts` older than a day. C1 purges tokens and attempts only on new sign-ins and never deletes expired sessions; this closes that gap.
+- Per-takeover usage rows are kept for the current and previous billing month, then rolled into one monthly total per account and deleted.
+
 ## 6. Testing
 
 - **Unit:** `relay-core` with fake sockets covers pairing, multiplexing, limits, grace, the hooks and the `takeover_opened` threshold. `core` covers e2e seal/open with wrong key, wrong session, wrong direction and tampered bytes, plus the relay transport against an in-memory relay-core.
@@ -233,6 +266,7 @@ The engine CLI gains `--relay <url>` and `--agent-key <key>`, which beat the env
 - **Relay outages pause the viewer-left timer** (new `Transport.onStatus`), so blips don't fail takeovers.
 - **A per-session agent secret** guards reconnects, so a shared or open key can't hijack a session.
 - **Cloudflare rate limits** use the Workers Rate Limiting binding.
+- **Housekeeping (§5.9):** Durable Object alarms plus `deleteAll()`, a Node sweep every 60 s, and a daily Cloud cron for D1. Usage detail is kept 2 months, then rolled up.
 
 ## 9. Left to the builder
 
