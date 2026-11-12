@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.gen.ts
+protocol/schemas/
+docs/spikes/*-raw.json
+.superpowers/
+*.tsbuildinfo

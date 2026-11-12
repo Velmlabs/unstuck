@@ -1,0 +1,7 @@
+packages:
+  - protocol
+  - core
+  - engine
+  - viewer
+  - sdk-ts
+  - e2e
