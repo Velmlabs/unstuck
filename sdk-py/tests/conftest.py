@@ -36,3 +36,20 @@ for line in sys.stdin:
 
 def scripted_engine(tmp_path, on_takeover: str) -> str:
     return write_engine(tmp_path, SCRIPTED.replace("ON_TAKEOVER", on_takeover))
+
+import pytest_asyncio
+from playwright.async_api import async_playwright
+
+
+@pytest_asyncio.fixture
+async def browser():
+    async with async_playwright() as p:
+        b = await p.chromium.launch()
+        yield b
+        await b.close()
+
+
+@pytest_asyncio.fixture
+async def pw():
+    async with async_playwright() as p:
+        yield p
