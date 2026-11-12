@@ -1,2 +1,2 @@
 import { packageConfig } from '../vitest.shared';
-export default packageConfig({ exclude: ['src/index.ts'] });
+export default packageConfig({ exclude: ['src/index.ts', 'src/version.ts'] });

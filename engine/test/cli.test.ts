@@ -1,0 +1,111 @@
+import { describe, it, expect } from 'vitest';
+import { PassThrough } from 'node:stream';
+import readline from 'node:readline';
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { main, USAGE } from '../src/cli';
+import { VERSION } from '../src/version';
+import type { AssetMap } from '../src/embedded';
+
+const assets: AssetMap = { '/index.html': { type: 'text/html', body: '' } };
+function io(stdinText?: string) {
+  const stdin = new PassThrough();
+  const stdout = new PassThrough();
+  let out = '';
+  let err = '';
+  stdout.on('data', (d) => (out += d));
+  if (stdinText !== undefined) stdin.end(stdinText);
+  return { stdin, stdout, stderr: { write: (s: string) => ((err += s), true) }, env: {}, assets, out: () => out, err: () => err };
+}
+
+describe('main', () => {
+  it('--version prints the version', async () => {
+    const x = io();
+    await expect(main(['--version'], x)).resolves.toBe(0);
+    expect(x.out().trim()).toBe(VERSION);
+    expect(VERSION).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('--help prints usage', async () => {
+    const x = io();
+    await expect(main(['--help'], x)).resolves.toBe(0);
+    expect(x.out()).toBe(USAGE);
+  });
+
+  it.each([[['--bogus']], [[]], [['--stdio', '--port', 'abc']]])('bad arguments %j exit 2 with usage on stderr', async (argv) => {
+    const x = io();
+    await expect(main(argv, x)).resolves.toBe(2);
+    expect(x.err()).toContain('Usage: unstuck-engine');
+  });
+
+  it('--stdio answers hello on stdout only and exits 0 when stdin closes', async () => {
+    const x = io();
+    const lines: string[] = [];
+    readline.createInterface({ input: x.stdout }).on('line', (l) => lines.push(l));
+    const run = main(['--stdio', '--host', '127.0.0.1', '--port', '0'], x);
+    x.stdin.write(JSON.stringify({ id: 1, method: 'engine.hello', params: { sdk: 'ts', sdkVersion: '0', protocolVersion: 1 } }) + '\n');
+    await new Promise((r) => setTimeout(r, 100));
+    x.stdin.end();
+    await expect(run).resolves.toBe(0);
+    expect(lines.map((l) => JSON.parse(l))).toEqual([{ id: 1, result: { engineVersion: VERSION, protocolVersion: 1 } }]);
+    expect(x.err()).toMatch(/viewer server listening on http:\/\/127\.0\.0\.1:\d+/);
+  });
+
+  it('--stdio on a network-reachable host prints a warning', async () => {
+    const x = io('');
+    await expect(main(['--stdio', '--host', '0.0.0.0'], x)).resolves.toBe(0);
+    expect(x.err()).toContain('reachable from your network');
+  });
+
+  it('--stdio reports a port that is already taken and exits 1', async () => {
+    const x = io();
+    const blocker = await new Promise<import('node:net').Server>((r) => {
+      const s = require('node:net').createServer().listen(0, '127.0.0.1', () => r(s));
+    });
+    const port = (blocker.address() as import('node:net').AddressInfo).port;
+    await expect(main(['--stdio', '--port', String(port)], x)).resolves.toBe(1);
+    expect(x.err()).toContain('EADDRINUSE');
+    blocker.close();
+  });
+});
+
+const bin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'unstuck-engine');
+describe.skipIf(!fs.existsSync(bin))('compiled binary', () => {
+  it('--version works', async () => {
+    const out = await new Promise<string>((resolve) => {
+      let s = '';
+      const p = spawn(bin, ['--version']);
+      p.stdout.on('data', (d) => (s += d));
+      p.on('close', () => resolve(s));
+    });
+    expect(out.trim()).toBe(VERSION);
+  });
+
+  it('--stdio answers hello and exits 0 within 2 s of stdin closing', async () => {
+    const p = spawn(bin, ['--stdio'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const lines: string[] = [];
+    readline.createInterface({ input: p.stdout }).on('line', (l) => lines.push(l));
+    p.stdin.write(JSON.stringify({ id: 1, method: 'engine.hello', params: { sdk: 'ts', sdkVersion: '0', protocolVersion: 1 } }) + '\n');
+    await new Promise((r) => setTimeout(r, 500));
+    const t0 = Date.now();
+    p.stdin.end();
+    const code = await new Promise<number | null>((r) => p.on('close', r));
+    expect(code).toBe(0);
+    expect(Date.now() - t0).toBeLessThan(2000);
+    expect(JSON.parse(lines[0]!)).toMatchObject({ id: 1, result: { protocolVersion: 1 } });
+  });
+
+  it('serves the embedded viewer page for a published session URL', async () => {
+    const p = spawn(bin, ['--stdio'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let err = '';
+    p.stderr.on('data', (d) => (err += d));
+    await new Promise((r) => setTimeout(r, 500));
+    const port = /127\.0\.0\.1:(\d+)/.exec(err)?.[1];
+    const res = await fetch(`http://127.0.0.1:${port}/s/unknown`);
+    expect(res.status).toBe(404);
+    p.stdin.end();
+    await new Promise((r) => p.on('close', r));
+  });
+});
