@@ -1,4 +1,4 @@
-# Gotcha MVP: design spec
+# Unstuck MVP: design spec
 
 - **Date:** 2026-11-12
 - **Status:** Draft for review
@@ -6,7 +6,7 @@
 
 ## 1. Summary
 
-Gotcha is the human-in-the-loop layer for browser agents. When an agent gets stuck on a CAPTCHA, login wall, 2FA prompt or any page that needs a person, Gotcha pauses the agent and sends a link to the right human. That person takes over the live browser from any device, then hands control back.
+Unstuck is the human-in-the-loop layer for browser agents. When an agent gets stuck on a CAPTCHA, login wall, 2FA prompt or any page that needs a person, Unstuck pauses the agent and sends a link to the right human. That person takes over the live browser from any device, then hands control back.
 
 This spec covers the **open-source core**: agent SDKs (TypeScript and Python), an MCP server, a runtime-agnostic engine, a web viewer, a self-hostable relay (Node and Cloudflare Workers), local detection rules and 11 notification channels.
 
@@ -22,7 +22,7 @@ This spec covers the **open-source core**: agent SDKs (TypeScript and Python), a
 ### Positioning and guardrails
 
 - Sold as **human takeover for agents**, with CAPTCHA as the entry point.
-- The human is always **the customer's own person**. Gotcha never offers a crowd workforce or solving service.
+- The human is always **the customer's own person**. Unstuck never offers a crowd workforce or solving service.
 
 ## 2. Goals and success criteria
 
@@ -45,7 +45,7 @@ Success criteria:
 | SDKs | TypeScript and Python on day one, plus an MCP server |
 | Architecture | One engine, thin SDKs (Approach 1) |
 | Engine runtime | Runtime-agnostic core on web-standard APIs, with a Node host (compiled binary) and an in-process host |
-| Connectivity | Embedded local server by default; relay optional (Node or Cloudflare Workers); Gotcha Cloud later |
+| Connectivity | Embedded local server by default; relay optional (Node or Cloudflare Workers); Unstuck Cloud later |
 | Trigger | Explicit `takeover()` / MCP tool, plus opt-in `watch()` auto-detection |
 | Detection | Rules run locally in open source; AI watch is a paid, opt-in Cloud feature (interface, redaction and mock only in the MVP) |
 | Agent during takeover | Paused |
@@ -60,7 +60,7 @@ Python / TS agent ── SDK (thin) ── CDP session on the developer's page
                         │  stdio JSON lines: CDP tunnel + commands
                         │  (or in-process calls on Workers/Bun/Deno)
                         ▼
-                 gotcha core/engine ── embedded HTTP/WS server ── viewer (human)
+                 unstuck core/engine ── embedded HTTP/WS server ── viewer (human)
                         │           └─ or outbound WS ─► relay (Node | Cloudflare DO) ◄─ viewer
                         └─ notifiers · detection rules · event log
 ```
@@ -70,7 +70,7 @@ The engine **never launches or owns a browser**. It sees the browser only throug
 ### 4.1 Repo layout
 
 ```
-gotcha/                      (pnpm workspace + uv workspace)
+unstuck/                      (pnpm workspace + uv workspace)
 ├─ protocol/             Apache   JSON Schemas for every message; shared test cases (cases/*.json)
 ├─ core/                 Apache   runtime-agnostic engine (no Node built-ins)
 │   ├─ session/            lifecycle state machine, event log
@@ -83,10 +83,10 @@ gotcha/                      (pnpm workspace + uv workspace)
 ├─ relay-core/           AGPL     session pairing and routing, host-agnostic
 ├─ relay-node/           AGPL     Node host + Docker image
 ├─ relay-cloudflare/     AGPL     Worker + Durable Object host, wrangler template
-├─ viewer/               AGPL     <gotcha-viewer> web component (Preact) + standalone page
-├─ integrations/astro/   Apache   @gotcha/astro: /takeover/[id] route + component
-├─ sdk-ts/               Apache   npm "gotcha": binary mode | in-process mode
-├─ sdk-py/               Apache   PyPI "gotcha" + platform wheels bundling the engine
+├─ viewer/               AGPL     <unstuck-viewer> web component (Preact) + standalone page
+├─ integrations/astro/   Apache   @unstuck/astro: /takeover/[id] route + component
+├─ sdk-ts/               Apache   npm "unstuck": binary mode | in-process mode
+├─ sdk-py/               Apache   PyPI "unstuck" + platform wheels bundling the engine
 ├─ examples/             playwright-ts, puppeteer, browser-use, stagehand, mcp-claude,
 │                        cloudflare-browser-rendering, astro-dashboard
 └─ docs/
@@ -98,12 +98,12 @@ gotcha/                      (pnpm workspace + uv workspace)
 |---|---|---|
 | protocol | Defines all messages: SDK↔engine, engine↔relay, engine/relay↔viewer | nothing |
 | core | Sessions, streaming, detection, notifiers, crypto, transport interface | protocol, web APIs only |
-| engine | Hosts core in Node: stdio bridge, embedded server, Node-only notifiers, MCP server, CLI (`gotcha doctor`, `gotcha rules test`) | core |
+| engine | Hosts core in Node: stdio bridge, embedded server, Node-only notifiers, MCP server, CLI (`unstuck doctor`, `unstuck rules test`) | core |
 | relay-core | Pairs agent and viewer sockets by session ID; forwards opaque encrypted frames; rate limits | protocol |
 | relay-node / relay-cloudflare | Host relay-core on Node or as one Durable Object per session (WebSocket hibernation) | relay-core |
 | viewer | Canvas rendering, input capture and scaling, Done / Can't-solve, Web Push subscription | protocol |
 | sdk-ts / sdk-py | Start the engine (or core in-process), attach a CDP session, tunnel CDP, pause agent calls during takeover, expose the public API. About 300–500 lines each, no business logic. | protocol, engine binary |
-| integrations/astro | Adds a takeover route that renders `<gotcha-viewer>` | viewer |
+| integrations/astro | Adds a takeover route that renders `<unstuck-viewer>` | viewer |
 
 ### 4.3 Runtime rules
 
@@ -114,7 +114,7 @@ gotcha/                      (pnpm workspace + uv workspace)
 
 ### 4.4 Browser compatibility
 
-Gotcha attaches to any browser that speaks CDP; it never launches or bundles one.
+Unstuck attaches to any browser that speaks CDP; it never launches or bundles one.
 
 | Tier | Browsers | Guarantee |
 |---|---|---|
@@ -131,18 +131,18 @@ Gotcha attaches to any browser that speaks CDP; it never launches or bundles one
 | Popup tracking | `Target.targetCreated` fires for `window.open` | Warn; stream stays on the original page |
 | Input | `Input.dispatchMouseEvent` / `dispatchKeyEvent` succeed | None. Takeover fails with `failed: browser does not support input` |
 
-`gotcha doctor --cdp <url>` prints this capability report for any browser.
+`unstuck doctor --cdp <url>` prints this capability report for any browser.
 
-**Positioning:** Obscura and other stealth-oriented browsers are listed only as *compatible browsers*. Gotcha docs never promote evading detection; the intended use stays the customer's own people on the customer's own accounts.
+**Positioning:** Obscura and other stealth-oriented browsers are listed only as *compatible browsers*. Unstuck docs never promote evading detection; the intended use stays the customer's own people on the customer's own accounts.
 
 ## 5. Public API
 
 Python shown; TypeScript is the same in camelCase.
 
 ```python
-from gotcha import Gotcha, Slack, Discord, Email
+from unstuck import Unstuck, Slack, Discord, Email
 
-gotcha = Gotcha(
+unstuck = Unstuck(
     notify=[Slack(url=...), Discord(url=...), Email(to="me@example.com")],
     relay="wss://relay.example.com",   # optional; omit for embedded mode
     agent_key=...,                     # required when using a relay
@@ -151,11 +151,11 @@ gotcha = Gotcha(
     escalate_to=[...],                 # notifiers for the escalation round
 )
 
-result = await gotcha.takeover(page, reason="Solve CAPTCHA", timeout=600)
+result = await unstuck.takeover(page, reason="Solve CAPTCHA", timeout=600)
 # result.status: "resolved" | "timed_out" | "cancelled" | "failed"
 # result.url, result.session_id, result.duration_s, result.detail
 
-watcher = gotcha.watch(page, rules=["captcha", "login", "2fa"])
+watcher = unstuck.watch(page, rules=["captcha", "login", "2fa"])
 watcher.on("takeover", handler)   # optional observer
 watcher.stop()
 ```
@@ -209,14 +209,14 @@ JSON files shared by every runtime:
 - **Done primitives:** `inputFilled`, `elementGone`, `frameGone`, `urlChanged`, `urlMatches`, plus the human Done button.
 - **Launch packs:** reCAPTCHA v2 and invisible, hCaptcha, Cloudflare Turnstile and its full-page challenge, Arkose/FunCaptcha, generic login form, 2FA/OTP input.
 - Checks run read-only through tunneled `Runtime.evaluate` and `DOM` calls.
-- CLI: `gotcha rules test <url> [--pack path]`.
+- CLI: `unstuck rules test <url> [--pack path]`.
 
 ### 7.2 Detector interface and AI watch hook
 
 `Detector.check(pageContext) → Detection | null`. Implementations:
 - `RuleDetector`: the MVP default.
-- `CloudDetector`: a stub that posts a **redacted**, downscaled screenshot plus page context to Gotcha Cloud. It's tested against a mock server only; the real model belongs in the Cloud v1 spec.
-- **Redaction** ships in the MVP: blurs `input[type=password]`, inputs with `autocomplete` values for credentials or payment cards, and any element marked `data-gotcha-redact`, before an image leaves the machine. The same redaction applies to notification thumbnails.
+- `CloudDetector`: a stub that posts a **redacted**, downscaled screenshot plus page context to Unstuck Cloud. It's tested against a mock server only; the real model belongs in the Cloud v1 spec.
+- **Redaction** ships in the MVP: blurs `input[type=password]`, inputs with `autocomplete` values for credentials or payment cards, and any element marked `data-unstuck-redact`, before an image leaves the machine. The same redaction applies to notification thumbnails.
 
 ## 8. Notifications
 
@@ -224,7 +224,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 
 | # | Channel | Runtime | Config |
 |---|---|---|---|
-| 1 | Webhook | all | URL, HMAC secret (`X-Gotcha-Signature`) |
+| 1 | Webhook | all | URL, HMAC secret (`X-Unstuck-Signature`) |
 | 2 | Slack | all | incoming-webhook URL; Block Kit with an Open button |
 | 3 | Mattermost / Rocket.Chat | all | Slack-compatible webhook URL (reuses the Slack adapter) |
 | 4 | Discord | all | channel webhook URL; embed titled with the reason and linking to the viewer, `<t:…:R>` expiry, image thumbnail, optional role mention |
@@ -236,7 +236,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 | 10 | Push | all | Web Push (VAPID keys; viewer-registered subscriptions), ntfy topic, Pushover app token and user key |
 | 11 | Desktop | Node local only | none |
 
-- Secrets come from environment variables (`GOTCHA_SLACK_URL`, `GOTCHA_DISCORD_URL`, `GOTCHA_TELEGRAM_TOKEN` …) or explicit configuration.
+- Secrets come from environment variables (`UNSTUCK_SLACK_URL`, `UNSTUCK_DISCORD_URL`, `UNSTUCK_TELEGRAM_TOKEN` …) or explicit configuration.
 - Each send has a 10 s timeout and 2 retries with exponential backoff; sends run in parallel. Failures are logged and never block the takeover.
 - **Escalation:** if `escalate_after` is set and nobody has joined in time, a second round goes to `escalate_to`.
 - **Web Push enrollment:** the viewer offers "Notify me on this device"; the subscription is stored by the engine (local file) or the relay (Durable Object storage on Cloudflare, a file or SQLite on Node).
@@ -246,7 +246,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 ## 9. Security
 
 - **Tokens:** 128-bit session ID; HMAC-signed token in the URL fragment; single viewer, single use; default expiry 600 s; optional 6-digit code (`require_code`).
-- **End-to-end encryption:** per-session AES-GCM key in the URL fragment; frames and input are encrypted between engine and viewer. Relays, including Gotcha Cloud, only forward ciphertext.
+- **End-to-end encryption:** per-session AES-GCM key in the URL fragment; frames and input are encrypted between engine and viewer. Relays, including Unstuck Cloud, only forward ciphertext.
 - **Limiting the human:** during a takeover, navigation is allowed only to the page's current site plus the matching rule's `allowOrigins`. Downloads are blocked; file choosers are auto-cancelled. The viewer exposes only mouse, keyboard and paste.
 - **Embedded mode** binds to `127.0.0.1`; `host: "0.0.0.0"` is opt-in and prints a warning.
 - **Viewer:** strict CSP, no third-party scripts, `Referrer-Policy: no-referrer`.
@@ -260,7 +260,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 | Viewer disconnects | Session goes back to `waiting`; the same device can resume within 60 s with the session's resume key |
 | Relay connection drops | Engine reconnects with exponential backoff (max 30 s); the session survives; viewer shows "reconnecting…" |
 | Page closes or CDP error | `failed` with detail; `takeover()` returns, it doesn't throw |
-| Engine process crashes | SDK detects the closed pipe, raises `GotchaEngineError`, restarts the engine on the next call |
+| Engine process crashes | SDK detects the closed pipe, raises `UnstuckEngineError`, restarts the engine on the next call |
 | CAPTCHA opens a popup or new tab | Engine follows new targets the page opens and switches the stream to the active one |
 | CAPTCHA in a cross-origin iframe | Works as-is (composited screencast; top-level input coordinates) |
 | Nobody joins | Optional escalation round, then `timed_out` |
@@ -278,16 +278,16 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 | end-to-end | Playwright: an agent browser plus a scripted "human" browser using the viewer. Matrix: TS binary, TS in-process, Python, MCP × embedded, relay-node, relay-cloudflare (local wrangler). |
 | browser compatibility | Tier 2 suite: the capability check, fixture-site detection, and one scripted takeover, run against Obscura (`obscura serve` in Docker) and local stand-ins for hosted browsers. Reports pass, fallback or fail per capability; fallbacks don't fail CI, regressions in a previously passing capability do. |
 | security | Token reuse, expiry, wrong code, cross-origin navigation block, relay sees only ciphertext, rate limits |
-| binaries | Build for linux-x64/arm64, macOS-x64/arm64, windows-x64; `gotcha doctor` plus one end-to-end smoke test per OS |
+| binaries | Build for linux-x64/arm64, macOS-x64/arm64, windows-x64; `unstuck doctor` plus one end-to-end smoke test per OS |
 
 ## 12. Release
 
-- **npm:** `gotcha`, `@gotcha/engine-<os>-<arch>`, `@gotcha/viewer`, `@gotcha/astro`, `@gotcha/relay`
-- **PyPI:** `gotcha` with platform wheels
-- **Docker:** `ghcr.io/velmlabs/gotcha-relay`
+- **npm:** `unstuck`, `@unstuck/engine-<os>-<arch>`, `@unstuck/viewer`, `@unstuck/astro`, `@unstuck/relay`
+- **PyPI:** `unstuck` with platform wheels
+- **Docker:** `ghcr.io/velmlabs/unstuck-relay`
 - **Cloudflare:** wrangler template plus a Deploy-to-Workers button
 - **Versioning:** Changesets, one version across packages
-- **Package names:** check that `gotcha` is free on npm and PyPI first; fallback `gotcha-hitl` / `@gotcha-dev/*`.
+- **Name (decided 2026-11-12):** the product is **Unstuck**, renamed from the working name "Gotcha" because `gotcha` was taken on npm and PyPI. `unstuck` was free on both on 2026-11-12, and `unstuck.sh` had no DNS records (likely unregistered). **First release task:** register `unstuck.sh`, publish placeholder `unstuck` packages on npm and PyPI, and create the `@unstuck` npm org (fallback scope `@unstuck-sh/*`). Repo rename to `unstuck` is optional and up to the owner; the Docker image path follows the repo name.
 
 ## 13. Milestones (about 8 weeks solo)
 
@@ -297,7 +297,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 | 3 | Python SDK, MCP server, rule packs, watch mode, fixture site, end-to-end harness |
 | 4 | relay-core, relay-node, relay-cloudflare, end-to-end encryption, 6-digit code |
 | 5–6 | 11 notification channels, escalation, Web Push enrollment |
-| 7 | `<gotcha-viewer>` component, Astro integration, Cloudflare Browser Rendering example |
+| 7 | `<unstuck-viewer>` component, Astro integration, Cloudflare Browser Rendering example |
 | 8 | Docs, examples, demo video, release pipeline, launch |
 
 ## 14. Risks and open items
@@ -307,9 +307,9 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 3. **Package-name availability** on npm and PyPI (§12).
 4. **Playwright Python CDP sessions:** confirm `page.context.new_cdp_session(page)` supports the event volume of screencast frames; fallback is connecting the engine directly to the browser's CDP URL when one is exposed.
 5. **Obscura compatibility:** Obscura documents screencast, screenshots, mouse/key input and `Runtime.evaluate`, but doesn't mention `Input.insertText`, cross-origin iframes or popup events. Its own renderer may also draw CAPTCHA widgets differently from Chromium, and CAPTCHA providers may challenge it harder. *Spike (early in the plan):* run the capability check, the fixture site and the official reCAPTCHA/hCaptcha/Turnstile test pages against `obscura serve`. The result decides which gaps the docs list and whether Obscura stays Tier 2.
-6. **License boundaries:** the AGPL viewer is served by the Apache engine and used by the Apache Astro integration. It's shipped as a separate package (`@gotcha/viewer`) and loaded as an unmodified separate work, never compiled into Apache code. Confirm this split with a licensing review before launch, or relicense the viewer as Apache-2.0 if it adds friction.
+6. **License boundaries:** the AGPL viewer is served by the Apache engine and used by the Apache Astro integration. It's shipped as a separate package (`@unstuck/viewer`) and loaded as an unmodified separate work, never compiled into Apache code. Confirm this split with a licensing review before launch, or relicense the viewer as Apache-2.0 if it adds friction.
 7. **Abuse:** the open-source software can't be policed; docs and terms state intended use (your own people, your own accounts). Cloud abuse controls belong to the Cloud v1 spec.
 
 ## 15. Out of scope
 
-VNC/desktop streaming; Go/Rust SDKs; the real AI watch model; hosted Gotcha Cloud (accounts, billing, dashboard); team queues and on-call; session recording; SSO; WhatsApp, PagerDuty/Opsgenie, LINE, Matrix; native mobile apps; letting the agent run during a takeover.
+VNC/desktop streaming; Go/Rust SDKs; the real AI watch model; hosted Unstuck Cloud (accounts, billing, dashboard); team queues and on-call; session recording; SSO; WhatsApp, PagerDuty/Opsgenie, LINE, Matrix; native mobile apps; letting the agent run during a takeover.
