@@ -119,7 +119,8 @@ Unstuck attaches to any browser that speaks CDP; it never launches or bundles on
 | Tier | Browsers | Guarantee |
 |---|---|---|
 | **Tier 1** (recommended) | Chrome / Chromium via Playwright or Puppeteer | Full end-to-end test matrix in CI (§11) |
-| **Tier 2** (experimental) | [Obscura](https://github.com/h4ckf0r0day/obscura) (`obscura serve`, own Rust engine, not Chromium); CDP-based hosted browsers: Browserbase, Steel, Cloudflare Browser Rendering | CDP compatibility suite in CI (§11); documented known gaps |
+| **Tier 2** (experimental) | CDP-based hosted browsers: Browserbase, Steel, Cloudflare Browser Rendering | CDP compatibility suite in CI (§11); documented known gaps |
+| **Limited** | [Obscura](https://github.com/h4ckf0r0day/obscura) 0.2.6 (`obscura serve`, own Rust engine, not Chromium) | First-party pages only (login, 2FA, confirmations). **Not for CAPTCHAs:** it doesn't paint cross-origin iframes, so CAPTCHA widgets are blank (`docs/spikes/obscura.md`). Re-probed on each release. |
 
 **Capability check:** when it attaches, the engine checks which CDP features the browser supports and records them on the session (event log + `result.detail`):
 
@@ -129,6 +130,7 @@ Unstuck attaches to any browser that speaks CDP; it never launches or bundles on
 | Text paste | `Input.insertText` succeeds | Per-character `Input.dispatchKeyEvent` |
 | Cross-origin iframes | `Target.setAutoAttach` reports iframe targets on a fixture page | Warn: "CAPTCHA iframes may not be detectable or done-checkable; human Done button required" |
 | Popup tracking | `Target.targetCreated` fires for `window.open` | Warn; stream stays on the original page |
+| Cross-origin iframe paint | Screenshot of a solid-colour cross-origin iframe shows that colour | `captcha.*` rules return `failed: browser_cannot_render_captcha` with a hint to use Chromium; first-party takeovers still allowed |
 | Input | `Input.dispatchMouseEvent` / `dispatchKeyEvent` succeed | None. Takeover fails with `failed: browser does not support input` |
 
 `unstuck doctor --cdp <url>` prints this capability report for any browser.
@@ -306,7 +308,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 2. **Bun `--compile` cross-target reliability** for 5 targets. Fallback: Node single-executable applications.
 3. **Package-name availability** on npm and PyPI (§12).
 4. **Playwright Python CDP sessions:** confirm `page.context.new_cdp_session(page)` supports the event volume of screencast frames; fallback is connecting the engine directly to the browser's CDP URL when one is exposed.
-5. **Obscura compatibility:** Obscura documents screencast, screenshots, mouse/key input and `Runtime.evaluate`, but doesn't mention `Input.insertText`, cross-origin iframes or popup events. Its own renderer may also draw CAPTCHA widgets differently from Chromium, and CAPTCHA providers may challenge it harder. *Spike (early in the plan):* run the capability check, the fixture site and the official reCAPTCHA/hCaptcha/Turnstile test pages against `obscura serve`. The result decides which gaps the docs list and whether Obscura stays Tier 2.
+5. **Obscura compatibility (spiked 2026-11-12, see `docs/spikes/obscura.md`):** result: core CDP works, but cross-origin iframes aren't painted and popups aren't reported, so Obscura is "Limited" (first-party pages only). Original note: Obscura documents screencast, screenshots, mouse/key input and `Runtime.evaluate`, but doesn't mention `Input.insertText`, cross-origin iframes or popup events. Its own renderer may also draw CAPTCHA widgets differently from Chromium, and CAPTCHA providers may challenge it harder. *Spike (early in the plan):* run the capability check, the fixture site and the official reCAPTCHA/hCaptcha/Turnstile test pages against `obscura serve`. The result decides which gaps the docs list and whether Obscura stays Tier 2.
 6. **License boundaries:** the AGPL viewer is served by the Apache engine and used by the Apache Astro integration. It's shipped as a separate package (`@unstuck/viewer`) and loaded as an unmodified separate work, never compiled into Apache code. Confirm this split with a licensing review before launch, or relicense the viewer as Apache-2.0 if it adds friction.
 7. **Abuse:** the open-source software can't be policed; docs and terms state intended use (your own people, your own accounts). Cloud abuse controls belong to the Cloud v1 spec.
 
