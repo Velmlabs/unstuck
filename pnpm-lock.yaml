@@ -30,6 +30,15 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  engine:
+    dependencies:
+      '@unstuck/core':
+        specifier: workspace:*
+        version: link:../core
+      '@unstuck/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
   protocol:
     dependencies:
       '@sinclair/typebox':

@@ -1,0 +1,11 @@
+{
+  "name": "@unstuck/engine",
+  "version": "0.1.0",
+  "description": "Unstuck engine: Node host for @unstuck/core (stdio bridge, embedded server, CLI, binary)",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": { "build": "tsc -p tsconfig.json --noEmit", "test": "vitest run --coverage" },
+  "dependencies": { "@unstuck/core": "workspace:*", "@unstuck/protocol": "workspace:*" }
+}
