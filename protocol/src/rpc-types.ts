@@ -31,6 +31,8 @@ export const Methods = {
   // SDK -> engine notifications
   cdpEvent: 'cdp.event',
   cdpClosed: 'cdp.closed',
+  /** The SDK attached a popup the page opened; the engine may now use popupPageId. */
+  pagePopup: 'page.popup',
   // engine -> SDK notifications
   takeoverLink: 'takeover.link',
 } as const;
@@ -67,6 +69,10 @@ export interface CdpEventParams {
 export interface CdpClosedParams {
   pageId: string;
   reason: string;
+}
+export interface PagePopupParams {
+  pageId: string;
+  popupPageId: string;
 }
 export interface TakeoverLinkParams {
   sessionId: string;

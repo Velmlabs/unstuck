@@ -63,6 +63,30 @@ describe('runStdioHost', () => {
     await h.done;
   });
 
+  it('page.popup moves the stream to the popup the SDK attached (Review Focus 4)', async () => {
+    const h = start();
+    const page = new FakeCdp();
+    const popup = new FakeCdp();
+    const byId: Record<string, FakeCdp> = { p1: page, pop1: popup };
+    h.sdk.handle(Methods.cdpSend, (p) => byId[(p as { pageId: string }).pageId]!.send((p as { method: string }).method, (p as { params?: object }).params));
+    h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'x' });
+    await new Promise((r) => setTimeout(r, 50));
+    const viewer = h.transport.connect(links[0].sessionId);
+    viewer.push({ t: 'hello', token: new URL(links[0].url).hash.slice(3) });
+    await new Promise((r) => setTimeout(r, 50));
+    h.sdk.notify(Methods.pagePopup, { pageId: 'p1', popupPageId: 'pop1' });
+    h.sdk.notify(Methods.pagePopup, { pageId: 'unknown', popupPageId: 'pop2' });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(popup.methods().filter((m) => m === 'Page.startScreencast').length).toBe(2); // probe + stream
+    viewer.push({ t: 'done' });
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    h.input.end();
+    await h.done;
+  });
+
   it('cdp.closed from the SDK fails the takeover with page_closed', async () => {
     const h = start();
     h.sdk.handle(Methods.cdpSend, () => ({}));

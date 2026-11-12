@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import type { CdpClient } from '@unstuck/core';
+import type { CdpClient, PopupSource } from '@unstuck/core';
 
 /** Browser-level CDP access (no session), e.g. for Target.* discovery. */
 export interface BrowserCdp {
@@ -10,6 +10,8 @@ export interface BrowserCdp {
 export interface DirectCdp extends CdpClient {
   targetId: string;
   browser: BrowserCdp;
+  /** Popups this target opens, already attached over the same connection. */
+  popups: PopupSource;
   /** Detaches and closes the browser connection (never closes the browser or the tab). */
   close(): Promise<void>;
 }
@@ -57,6 +59,22 @@ async function resolveWsUrl(url: string, fetchImpl: typeof fetch): Promise<strin
   return v.webSocketDebuggerUrl;
 }
 
+type Handlers = Map<string, Set<(p: any) => void>>;
+
+interface Session {
+  targetId: string;
+  handlers: Handlers;
+  closeHandlers: Set<(reason: string) => void>;
+  closedReason: string | null;
+}
+
+const addHandler = (map: Handlers, event: string, h: (p: any) => void) => {
+  const set = map.get(event) ?? new Set();
+  set.add(h);
+  map.set(event, set);
+  return () => void set.delete(h);
+};
+
 /** Connects straight to a browser's DevTools endpoint and attaches to one page target. */
 export async function connectCdp(url: string, opts: { targetId?: string; fetchImpl?: typeof fetch } = {}): Promise<DirectCdp> {
   const ws = new WebSocket(await resolveWsUrl(normalizeCdpUrl(url), opts.fetchImpl ?? fetch), { perMessageDeflate: false, maxPayload: 256 * 1024 * 1024 });
@@ -67,19 +85,15 @@ export async function connectCdp(url: string, opts: { targetId?: string; fetchIm
 
   let nextId = 1;
   let disconnected: string | null = null;
-  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
-  const browserHandlers = new Map<string, Set<(p: any) => void>>();
-  const pageHandlers = new Map<string, Set<(p: any) => void>>();
-  const closeHandlers = new Set<(reason: string) => void>();
-  let sessionId: string | undefined;
-  let targetId = '';
-  let closedReason: string | null = null;
   let closingOurselves = false;
+  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  const browserHandlers: Handlers = new Map();
+  const sessions = new Map<string, Session>();
 
-  const fireClose = (reason: string) => {
-    if (closedReason !== null) return;
-    closedReason = reason;
-    for (const h of [...closeHandlers]) h(reason);
+  const fireClose = (s: Session, reason: string) => {
+    if (s.closedReason !== null) return;
+    s.closedReason = reason;
+    for (const h of [...s.closeHandlers]) h(reason);
   };
 
   const raw = <T>(method: string, params: object | undefined, sid?: string): Promise<T> => {
@@ -89,13 +103,6 @@ export async function connectCdp(url: string, opts: { targetId?: string; fetchIm
       pending.set(id, { resolve, reject });
       ws.send(JSON.stringify({ id, method, params: params ?? {}, ...(sid ? { sessionId: sid } : {}) }));
     });
-  };
-
-  const add = (map: Map<string, Set<(p: any) => void>>, event: string, h: (p: any) => void) => {
-    const set = map.get(event) ?? new Set();
-    set.add(h);
-    map.set(event, set);
-    return () => void set.delete(h);
   };
 
   ws.on('message', (data) => {
@@ -109,47 +116,79 @@ export async function connectCdp(url: string, opts: { targetId?: string; fetchIm
     }
     if (!msg.method) return;
     if (msg.sessionId) {
-      if (msg.sessionId === sessionId) for (const h of [...(pageHandlers.get(msg.method) ?? [])]) h(msg.params);
+      const s = sessions.get(msg.sessionId);
+      if (s) for (const h of [...(s.handlers.get(msg.method) ?? [])]) h(msg.params);
       return;
     }
-    if (msg.method === 'Target.detachedFromTarget' && msg.params?.sessionId === sessionId && !closingOurselves) fireClose('target closed');
-    if (msg.method === 'Target.targetDestroyed' && msg.params?.targetId === targetId) fireClose('target closed');
+    if (msg.method === 'Target.detachedFromTarget' && !closingOurselves) {
+      const s = sessions.get(msg.params?.sessionId);
+      if (s) fireClose(s, 'target closed');
+    }
+    if (msg.method === 'Target.targetDestroyed') {
+      for (const s of sessions.values()) if (s.targetId === msg.params?.targetId) fireClose(s, 'target closed');
+    }
     for (const h of [...(browserHandlers.get(msg.method) ?? [])]) h(msg.params);
   });
   ws.on('close', () => {
     disconnected = 'browser disconnected';
     for (const p of pending.values()) p.reject(new Error(disconnected));
     pending.clear();
-    fireClose('browser disconnected');
+    for (const s of sessions.values()) fireClose(s, 'browser disconnected');
   });
 
-  const browser: BrowserCdp = { send: (m, p) => raw(m, p), on: (e, h) => add(browserHandlers, e, h) };
+  const browser: BrowserCdp = { send: (m, p) => raw(m, p), on: (e, h) => addHandler(browserHandlers, e, h) };
+
+  /** Attaches a flat session to a target over this connection. */
+  const attach = async (targetId: string): Promise<{ client: CdpClient; sessionId: string }> => {
+    const { sessionId } = await browser.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
+    const s: Session = { targetId, handlers: new Map(), closeHandlers: new Set(), closedReason: null };
+    sessions.set(sessionId, s);
+    const client: CdpClient = {
+      send: <T>(method: string, params?: object) => raw<T>(method, params, sessionId),
+      on: (event, h) => addHandler(s.handlers, event, h),
+      onClose(h) {
+        if (s.closedReason !== null) {
+          h(s.closedReason);
+          return () => {};
+        }
+        s.closeHandlers.add(h);
+        return () => void s.closeHandlers.delete(h);
+      },
+    };
+    return { client, sessionId };
+  };
+
+  let main: { client: CdpClient; sessionId: string };
+  let targetId: string;
   try {
     const { targetInfos } = await browser.send<{ targetInfos: TargetInfo[] }>('Target.getTargets');
     targetId = pickTarget(targetInfos, opts.targetId).targetId;
     await browser.send('Target.setDiscoverTargets', { discover: true });
-    ({ sessionId } = await browser.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true }));
+    main = await attach(targetId);
   } catch (e) {
     ws.close();
     throw e;
   }
 
+  const popups: PopupSource = {
+    onPopup(cb) {
+      return browser.on('Target.targetCreated', (e: { targetInfo: TargetInfo }) => {
+        if (e.targetInfo.type !== 'page' || e.targetInfo.openerId !== targetId) return;
+        attach(e.targetInfo.targetId).then(({ client }) => cb(client), () => {});
+      });
+    },
+  };
+
   return {
+    ...main.client,
     targetId,
     browser,
-    send: <T>(method: string, params?: object) => raw<T>(method, params, sessionId),
-    on: (event, h) => add(pageHandlers, event, h),
-    onClose(h) {
-      if (closedReason !== null) {
-        h(closedReason);
-        return () => {};
-      }
-      closeHandlers.add(h);
-      return () => void closeHandlers.delete(h);
-    },
+    popups,
     async close() {
       closingOurselves = true;
-      if (disconnected === null && closedReason === null) await browser.send('Target.detachFromTarget', { sessionId }).catch(() => {});
+      if (disconnected === null && sessions.get(main.sessionId)?.closedReason === null) {
+        await browser.send('Target.detachFromTarget', { sessionId: main.sessionId }).catch(() => {});
+      }
       if (ws.readyState === WebSocket.OPEN) {
         const closed = new Promise((r) => ws.once('close', r));
         ws.close();

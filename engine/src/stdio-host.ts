@@ -4,10 +4,11 @@ import {
   Methods,
   PROTOCOL_VERSION,
   type HelloParams,
+  type PagePopupParams,
   type HelloResult,
   type TakeoverParams,
 } from '@unstuck/protocol';
-import { createEngine, type EventLog, type Transport } from '@unstuck/core';
+import { createEngine, type CdpClient, type EventLog, type Transport } from '@unstuck/core';
 import { createTunneledCdp } from './tunnel';
 
 export interface StdioHostOptions {
@@ -50,14 +51,33 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
     return { engineVersion: opts.version, protocolVersion: PROTOCOL_VERSION };
   });
 
+  // Popups the SDK attached, routed to the takeover running on their opener page.
+  const popupListeners = new Map<string, Set<(popup: CdpClient) => void>>();
+  peer.onNotification(Methods.pagePopup, (raw) => {
+    const p = raw as PagePopupParams;
+    for (const cb of [...(popupListeners.get(p.pageId) ?? [])]) cb(createTunneledCdp(peer, p.popupPageId));
+  });
+
   peer.handle(Methods.takeover, (raw) => {
     const p = raw as TakeoverParams;
-    return engine.takeover(createTunneledCdp(peer, p.pageId), {
-      reason: p.reason,
-      timeoutS: p.timeoutS,
-      site: p.site,
-      onLink: (info) => peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId }),
-    });
+    const listeners = new Set<(popup: CdpClient) => void>();
+    popupListeners.set(p.pageId, listeners);
+    return engine
+      .takeover(createTunneledCdp(peer, p.pageId), {
+        reason: p.reason,
+        timeoutS: p.timeoutS,
+        site: p.site,
+        onLink: (info) => peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId }),
+        popups: {
+          onPopup(cb) {
+            listeners.add(cb);
+            return () => void listeners.delete(cb);
+          },
+        },
+      })
+      .finally(() => {
+        if (popupListeners.get(p.pageId) === listeners) popupListeners.delete(p.pageId);
+      });
   });
 
   peer.handle(Methods.shutdown, () => {

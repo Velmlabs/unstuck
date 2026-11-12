@@ -3,9 +3,9 @@ import type { CdpClient } from './cdp';
 import type { EventLog } from './events';
 import type { Transport } from './transport';
 import { importSecret, newSecret } from './session/tokens';
-import { runTakeover, type LinkInfo, type RunningTakeover } from './session/takeover';
+import { runTakeover, type LinkInfo, type PopupSource, type RunningTakeover } from './session/takeover';
 
-export type { LinkInfo } from './session/takeover';
+export type { LinkInfo, PopupSource } from './session/takeover';
 export type LinkHandler = (info: LinkInfo) => void;
 
 export interface EngineOptions {
@@ -19,6 +19,8 @@ export interface EngineOptions {
 
 export interface TakeoverCallOptions {
   reason: string;
+  /** Follow popups the page opens (spec §10). */
+  popups?: PopupSource;
   timeoutS?: number;
   site?: string;
   onLink?: LinkHandler;
@@ -51,6 +53,7 @@ export function createEngine(opts: EngineOptions): Engine {
         timeoutS: call.timeoutS ?? opts.defaultTimeoutS ?? DEFAULT_TIMEOUT_S,
         site: call.site,
         onLink: call.onLink ?? opts.onLink,
+        popups: call.popups,
       });
       running.add(session);
       try {

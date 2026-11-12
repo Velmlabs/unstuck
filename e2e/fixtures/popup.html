@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Popup fixture</title>
+    <style>
+      body { margin: 0; font: 18px sans-serif; display: grid; place-items: center; height: 100vh; background: #e8f5e9; }
+      #verify { height: 64px; width: 240px; font-size: 18px; }
+    </style>
+  </head>
+  <body>
+    <button id="verify">Verify</button>
+    <script>
+      document.getElementById('verify').addEventListener('click', () => {
+        window.opener.verified = true;
+        window.close();
+      });
+    </script>
+  </body>
+</html>

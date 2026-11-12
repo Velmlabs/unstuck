@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Popup opener fixture</title>
+    <style>
+      body { margin: 0; font: 18px sans-serif; display: grid; place-items: center; height: 100vh; }
+      #open { height: 64px; width: 320px; font-size: 18px; }
+    </style>
+  </head>
+  <body>
+    <button id="open">Verify in a popup</button>
+    <script>
+      window.verified = false;
+      document.getElementById('open').addEventListener('click', () => window.open('/popup', 'verify', 'width=500,height=400'));
+    </script>
+  </body>
+</html>

@@ -128,6 +128,29 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     await page.close();
   });
 
+  it('forwards popups the page opens during a takeover (Review Focus 4)', async () => {
+    const page = await browser.newPage();
+    const engine = fakeEngine(`
+import readline from 'node:readline';
+const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
+let takeoverId = null;
+readline.createInterface({ input: process.stdin }).on('line', (l) => {
+  const m = JSON.parse(l);
+  if (m.method === 'engine.hello') out({ id: m.id, result: { engineVersion: 'x', protocolVersion: 1 } });
+  else if (m.method === 'takeover') takeoverId = m.id;
+  else if (m.method === 'page.popup') out({ id: 500, method: 'cdp.send', params: { pageId: m.params.popupPageId, method: 'Runtime.evaluate', params: { expression: 'location.href', returnByValue: true } } });
+  else if (m.id === 500) out({ id: takeoverId, result: { status: 'resolved', sessionId: 's', url: 'u', durationS: 0, detail: m.result.result.value } });
+  else if (m.method === 'shutdown') { out({ id: m.id, result: {} }); process.exit(0); }
+});`);
+    const u = new Unstuck({ enginePath: engine, onLink: () => {} });
+    const result = u.takeover(page, { reason: 'x' });
+    await new Promise((r) => setTimeout(r, 300));
+    await page.evaluate("window.open('about:blank#popup')");
+    await expect(result).resolves.toMatchObject({ status: 'resolved', detail: 'about:blank#popup' });
+    await u.close();
+    await page.close();
+  });
+
   it('close() before any takeover is a no-op', async () => {
     await expect(new Unstuck({ enginePath: ENGINE }).close()).resolves.toBeUndefined();
   });

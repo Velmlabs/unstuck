@@ -11,7 +11,11 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 // Pre-installed Playwright (see sdk-ts/test/helpers.ts for why it is not a workspace dependency).
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
 const ENGINE = path.resolve(here, '../engine/dist/unstuck-engine');
-const FIXTURE = fs.readFileSync(path.join(here, 'fixtures/fake-captcha.html'));
+const FIXTURES: Record<string, Buffer> = {
+  '/': fs.readFileSync(path.join(here, 'fixtures/fake-captcha.html')),
+  '/popup-opener': fs.readFileSync(path.join(here, 'fixtures/popup-opener.html')),
+  '/popup': fs.readFileSync(path.join(here, 'fixtures/popup.html')),
+};
 
 let server: http.Server;
 let site: string;
@@ -19,7 +23,10 @@ let agentBrowser: any;
 let humanBrowser: any;
 
 beforeAll(async () => {
-  server = http.createServer((_req, res) => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(FIXTURE));
+  server = http.createServer((req, res) => {
+    const body = FIXTURES[new URL(req.url ?? '/', 'http://x').pathname];
+    res.writeHead(body ? 200 : 404, { 'content-type': 'text/html; charset=utf-8' }).end(body ?? 'not found');
+  });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   site = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
   agentBrowser = await chromium.launch();
@@ -31,9 +38,9 @@ afterAll(async () => {
   server?.close();
 });
 
-async function startTakeover(opts: { timeoutS?: number } = {}) {
+async function startTakeover(opts: { timeoutS?: number; path?: string } = {}) {
   const page = await agentBrowser.newPage({ viewport: { width: 1280, height: 720 } });
-  await page.goto(site);
+  await page.goto(site + (opts.path ?? '').replace(/^\//, ''));
   let link!: TakeoverLink;
   let linkArrived!: () => void;
   const gotLink = new Promise<void>((r) => (linkArrived = r));
@@ -105,6 +112,35 @@ describe('local takeover end to end', () => {
     await human.reload();
     await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
     expect(await human.getByRole('heading', { name: /already in use/i }).count()).toBe(0);
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await ctx.close();
+    await unstuck.close();
+    await page.close();
+  });
+
+  it('Review Focus 4: the human follows a popup, verifies in it, and lands back on the page', async () => {
+    const { page, unstuck, result, link } = await startTakeover({ path: '/popup-opener' });
+    const { ctx, human } = await openHuman(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    const opener = await canvasPointFor(human, await centerOf(page, '#open'));
+    await human.touchscreen.tap(opener.x, opener.y);
+
+    // The stream switches to the popup (its window is 500×400, not 1280×720).
+    const popup = await page.waitForEvent('popup', { timeout: 10_000 });
+    await popup.waitForLoadState();
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement).width < 1000, null, { timeout: 10_000 });
+    const vp = popup.viewportSize() ?? (await popup.evaluate(() => ({ width: innerWidth, height: innerHeight })));
+    const b = await popup.locator('#verify').boundingBox();
+    const box = await human.locator('canvas').boundingBox();
+    const scale = Math.min(box.width / vp.width, box.height / vp.height);
+    const x = box.x + (box.width - vp.width * scale) / 2 + (b.x + b.width / 2) * scale;
+    const y = box.y + (box.height - vp.height * scale) / 2 + (b.y + b.height / 2) * scale;
+    await human.touchscreen.tap(x, y);
+
+    await expect.poll(() => page.evaluate('window.verified'), { timeout: 10_000 }).toBe(true);
+    // Back on the original 1280-wide page.
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement).width > 1000, null, { timeout: 10_000 });
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved' });
     await ctx.close();

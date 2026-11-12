@@ -136,6 +136,38 @@ async def test_unknown_page_ids_get_errors_not_hangs(browser, tmp_path):
     await page.close()
 
 
+async def test_forwards_popups_during_a_takeover(browser, tmp_path):
+    page = await browser.new_page()
+    engine = write_engine(
+        tmp_path,
+        """
+        import json, sys
+        def out(m):
+            sys.stdout.write(json.dumps(m) + "\\n"); sys.stdout.flush()
+        takeover_id = None
+        for line in sys.stdin:
+            m = json.loads(line)
+            if m.get("method") == "engine.hello":
+                out({"id": m["id"], "result": {"engineVersion": "x", "protocolVersion": 1}})
+            elif m.get("method") == "takeover":
+                takeover_id = m["id"]
+            elif m.get("method") == "page.popup":
+                out({"id": 500, "method": "cdp.send", "params": {"pageId": m["params"]["popupPageId"], "method": "Runtime.evaluate", "params": {"expression": "location.href", "returnByValue": True}}})
+            elif m.get("id") == 500:
+                out({"id": takeover_id, "result": {"status": "resolved", "sessionId": "s", "url": "u", "durationS": 0, "detail": m["result"]["result"]["value"]}})
+            elif m.get("method") == "shutdown":
+                out({"id": m["id"], "result": {}}); sys.exit(0)
+        """,
+    )
+    async with Unstuck(engine_path=engine, on_link=lambda l: None) as u:
+        task = asyncio.ensure_future(u.takeover(page, reason="x"))
+        await asyncio.sleep(0.3)
+        await page.evaluate("window.open('about:blank#popup')")
+        result = await asyncio.wait_for(task, 10)
+    assert (result.status, result.detail) == ("resolved", "about:blank#popup")
+    await page.close()
+
+
 async def test_close_without_takeover_is_a_no_op():
     await Unstuck(engine_path=str(ENGINE)).close()
 

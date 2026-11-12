@@ -38,6 +38,17 @@ export interface TakeoverDeps {
   now: () => number;
 }
 
+/** Pages the agent's page opens (e.g. a CAPTCHA provider's popup). */
+export interface PopupSource {
+  onPopup(cb: (popup: CdpClient) => void): () => void;
+}
+
+interface Target {
+  cdp: CdpClient;
+  caps: Capabilities;
+  off: () => void;
+}
+
 export interface TakeoverOptions {
   reason: string;
   timeoutS: number;
@@ -45,6 +56,8 @@ export interface TakeoverOptions {
   onLink?: (info: LinkInfo) => void;
   /** Set when the page closed before the session started (caller subscribed earlier). */
   closedBefore?: string;
+  /** Popups to follow: the newest open popup is what the human sees and controls. */
+  popups?: PopupSource;
 }
 
 export interface RunningTakeover {
@@ -87,6 +100,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let leftTimer: ReturnType<typeof setTimeout> | null = null;
   let lastFrame: Uint8Array | null = null;
   let caps: Capabilities = { screencast: true, insertText: true, input: true };
+  /** Stack of controllable targets: [page, ...open popups]; the last one is shown to the human. */
+  const targets: Target[] = [];
+  const active = (): Target => targets[targets.length - 1] ?? { cdp, caps, off: () => {} };
+  let offPopups: () => void = () => {};
   let inputChain: Promise<void> = Promise.resolve();
   const helloTimers = new Set<ReturnType<typeof setTimeout>>();
   let resolveResult!: (r: TakeoverResult) => void;
@@ -127,6 +144,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     for (const t of helloTimers) clearTimeout(t);
     helloTimers.clear();
     offClose();
+    offPopups();
+    for (const t of targets) t.off();
     const viewer = holder;
     holder = null;
     if (viewer) {
@@ -158,10 +177,15 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     sender = createLatestSender(conn);
     // Chrome only sends frames when the page repaints; a static CAPTCHA would leave a new viewer black.
     if (lastFrame) sender.push(lastFrame);
-    if (stopScreencast) return;
+    if (!stopScreencast) await startStream();
+  }
+
+  /** Streams the active target to the current holder. */
+  async function startStream(): Promise<void> {
+    const target = active();
     try {
-      const startFrames = caps.screencast ? startScreencast : startScreenshotPolling;
-      stopScreencast = await startFrames(cdp, (f) => {
+      const startFrames = target.caps.screencast ? startScreencast : startScreenshotPolling;
+      stopScreencast = await startFrames(target.cdp, (f) => {
         lastFrame = encodeFrame(f);
         sender?.push(lastFrame);
       });
@@ -171,6 +195,40 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     }
     if (holder === null || isTerminal(status)) return void stopStream();
     drainTimer = setInterval(() => sender?.drain(), DRAIN_INTERVAL_MS);
+  }
+
+  /** The active target changed: move the stream to it. */
+  async function switchStream(): Promise<void> {
+    if (!holder || isTerminal(status)) return;
+    await stopStream();
+    lastFrame = null;
+    if (!holder || isTerminal(status)) return;
+    sender = createLatestSender(holder);
+    await startStream();
+  }
+
+  async function addPopup(popup: CdpClient): Promise<void> {
+    if (isTerminal(status)) return;
+    let entry: Target | null = null;
+    let gone = false;
+    const off = popup.onClose(() => {
+      gone = true;
+      if (entry) removeTarget(entry);
+    });
+    const popupCaps = await probeCapabilities(popup);
+    if (gone || !popupCaps.input || isTerminal(status)) return void off();
+    entry = { cdp: popup, caps: popupCaps, off };
+    targets.push(entry);
+    await switchStream();
+  }
+
+  function removeTarget(entry: Target): void {
+    const i = targets.indexOf(entry);
+    if (i <= 0) return; // the page itself never leaves the stack
+    const wasActive = i === targets.length - 1;
+    targets.splice(i, 1);
+    entry.off();
+    if (wasActive) void switchStream();
   }
 
   function detachViewer(conn: ViewerConnection): void {
@@ -222,7 +280,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       default:
         inputCount++;
         inputChain = inputChain
-          .then(() => applyInput(cdp, msg, caps))
+          .then(() => applyInput(active().cdp, msg, active().caps))
           .catch((e: Error) => finish('failed', `cdp_error: ${e.message}`));
     }
   }
@@ -265,6 +323,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     emit('created', { screencast: caps.screencast, insertText: caps.insertText, input: caps.input });
     if (isTerminal(status)) return; // the page closed while probing
     if (!caps.input) return finish('failed', 'browser does not support input');
+    targets.push({ cdp, caps, off: () => {} });
+    if (opts.popups) offPopups = opts.popups.onPopup((popup) => void addPopup(popup));
     try {
       const { baseUrl } = await transport.publish(sessionId);
       published = true;

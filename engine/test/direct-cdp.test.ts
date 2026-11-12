@@ -83,6 +83,28 @@ describe('connectCdp against real Chromium (Review Focus 3)', () => {
     await b.close();
   });
 
+  it('reports popups the tab opens as attached CDP clients (Review Focus 4)', async () => {
+    const b = await connectCdp(`127.0.0.1:${chrome.port}`);
+    const { targetId } = await b.browser.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
+    await b.close();
+    const cdp = await connectCdp(`127.0.0.1:${chrome.port}`, { targetId });
+    const seen: import('@unstuck/core').CdpClient[] = [];
+    const off = cdp.popups.onPopup((p) => seen.push(p));
+    await cdp.send('Runtime.evaluate', { expression: "window.open('about:blank#popup', '_blank')", userGesture: true });
+    await vi.waitFor(() => expect(seen).toHaveLength(1), { timeout: 5000 });
+    const href = await seen[0]!.send<{ result: { value: string } }>('Runtime.evaluate', { expression: 'location.href', returnByValue: true });
+    expect(href.result.value).toBe('about:blank#popup');
+    const closed = vi.fn();
+    seen[0]!.onClose(closed);
+    await seen[0]!.send('Runtime.evaluate', { expression: 'window.close()' });
+    await vi.waitFor(() => expect(closed).toHaveBeenCalledWith('target closed'), { timeout: 5000 });
+    off();
+    await cdp.send('Runtime.evaluate', { expression: "window.open('about:blank#second', '_blank')", userGesture: true });
+    await new Promise((r) => setTimeout(r, 500));
+    expect(seen).toHaveLength(1);
+    await cdp.close();
+  });
+
   it('unknown targetId rejects with "target … not found"', async () => {
     await expect(connectCdp(`127.0.0.1:${chrome.port}`, { targetId: 'nope' })).rejects.toThrow('target nope not found');
   });

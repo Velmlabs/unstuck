@@ -30,6 +30,12 @@ export interface UnstuckOptions {
 
 const defaultOnLink = (l: TakeoverLink) => process.stderr.write(`Unstuck: a human is needed (${l.reason}) → ${l.url}\n`);
 
+/** Playwright and Puppeteer pages are event emitters that emit 'popup' with the new page. */
+function pageEvents(page: unknown): { on(e: string, cb: (p: unknown) => void): unknown; off?(e: string, cb: (p: unknown) => void): unknown } | null {
+  const p = page as { on?: unknown };
+  return typeof p?.on === 'function' ? (page as never) : null;
+}
+
 function siteOf(url: string): string | undefined {
   try {
     return new URL(url).hostname || undefined;
@@ -59,6 +65,8 @@ export class Unstuck {
       throw e;
     }
     let engine: EngineProcess | undefined;
+    const popups: AttachedPage[] = [];
+    let onPopup: ((p: unknown) => void) | null = null;
     // Watch for close from the start: the page can go away while the engine is still starting.
     let closedEarly = false;
     let notifyClose: ((reason: string) => void) | null = null;
@@ -77,6 +85,19 @@ export class Unstuck {
       const live = engine;
       this.pages.set(attached.pageId, attached);
       notifyClose = (reason) => live.peer.notify(Methods.cdpClosed, { pageId: attached.pageId, reason });
+      // Follow popups (e.g. a CAPTCHA provider's window) while the human is in control.
+      onPopup = async (popupPage: unknown) => {
+        try {
+          const popup = await attachPage(popupPage);
+          popups.push(popup);
+          this.pages.set(popup.pageId, popup);
+          popup.onClose((reason) => live.peer.notify(Methods.cdpClosed, { pageId: popup.pageId, reason }));
+          live.peer.notify(Methods.pagePopup, { pageId: attached.pageId, popupPageId: popup.pageId });
+        } catch {
+          // a popup that closes before we can attach is simply not followed
+        }
+      };
+      pageEvents(page)?.on('popup', onPopup);
       engine.setBusy(++this.inFlight > 0);
       const params: TakeoverParams = { pageId: attached.pageId, reason: opts.reason, timeoutS: opts.timeoutS ?? this.opts.timeoutS, site: siteOf(attached.url()) };
       const died = engine.exited.then((code): never => {
@@ -91,6 +112,11 @@ export class Unstuck {
         throw e;
       }
     } finally {
+      if (onPopup) pageEvents(page)?.off?.('popup', onPopup);
+      for (const popup of popups) {
+        this.pages.delete(popup.pageId);
+        await popup.detach();
+      }
       this.pages.delete(attached.pageId);
       await attached.detach();
       if (engine && notifyClose) engine.setBusy(--this.inFlight > 0);

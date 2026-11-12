@@ -63,6 +63,9 @@ class Unstuck:
         loop = asyncio.get_running_loop()
         closed_early = loop.create_future()
         notify_close: list[Callable[[str], None]] = []
+        popups: list[AttachedPage] = []
+        popup_tasks: set[asyncio.Future[None]] = set()
+        popup_listener: list[Callable[[Any], None]] = []
 
         def on_close(reason_: str) -> None:
             if notify_close:
@@ -79,6 +82,22 @@ class Unstuck:
             engine = starting.result()
             self._pages[attached.page_id] = attached
             notify_close.append(lambda r: engine.peer.notify("cdp.closed", {"pageId": attached.page_id, "reason": r}))
+
+            async def follow(popup_page: Any) -> None:
+                try:
+                    popup = await attach_page(popup_page)
+                except Exception:  # noqa: BLE001 - a popup that closes before we attach is not followed
+                    return
+                popups.append(popup)
+                self._pages[popup.page_id] = popup
+                popup.on_close(lambda r: engine.peer.notify("cdp.closed", {"pageId": popup.page_id, "reason": r}))
+                engine.peer.notify("page.popup", {"pageId": attached.page_id, "popupPageId": popup.page_id})
+
+            def on_popup(popup_page: Any) -> None:
+                popup_tasks.add(asyncio.ensure_future(follow(popup_page)))
+
+            page.on("popup", on_popup)
+            popup_listener.append(on_popup)
             params = {"pageId": attached.page_id, "reason": reason, "timeoutS": timeout_s or self._timeout_s, "site": _site_of(attached.url())}
             try:
                 return TakeoverResult.from_wire(await engine.peer.request("takeover", params))
@@ -87,6 +106,12 @@ class Unstuck:
                     raise UnstuckEngineError(f"engine exited with code {await engine.wait()}") from None
                 raise
         finally:
+            for listener in popup_listener:
+                page.remove_listener("popup", listener)
+            await asyncio.gather(*popup_tasks, return_exceptions=True)
+            for popup in popups:
+                self._pages.pop(popup.page_id, None)
+                await popup.detach()
             self._pages.pop(attached.page_id, None)
             if not closed_early.done():
                 closed_early.cancel()
