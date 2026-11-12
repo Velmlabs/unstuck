@@ -22,6 +22,7 @@
 - Event log: never contains screenshots, key/text content or secrets, only counts.
 - Engine stdout is reserved for the JSON-lines protocol; all engine logging goes to stderr.
 - Protocol version: **1** (exchanged in `engine.hello`).
+- **Test coverage > 90%** (owner's rule, 2026-11-12): every package's Vitest config uses `@vitest/coverage-v8` with thresholds `lines`, `statements`, `functions` and `branches` all set to **90**. `pnpm -r test` runs with `--coverage` and fails below the threshold. Only generated files (`*.gen.ts`), type-only files, and thin process entry points (`bin.ts`: an argv/stdio hand-off to an exported, tested function) are excluded. Spikes and `e2e/` are not unit-coverage targets.
 
 ## Review Focus
 
