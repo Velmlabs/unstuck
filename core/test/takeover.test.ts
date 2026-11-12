@@ -12,8 +12,13 @@ async function settle() {
 }
 
 function setup(opts: { timeoutS?: number } = {}) {
+  return setupWith(() => {}, opts);
+}
+
+function setupWith(prepare: (cdp: FakeCdp) => void, opts: { timeoutS?: number } = {}) {
   const transport = new FakeTransport();
   const cdp = new FakeCdp();
+  prepare(cdp);
   const log = new MemoryEventLog();
   const links: LinkInfo[] = [];
   const engine = createEngine({ transport, log, onLink: (l) => links.push(l) });
@@ -57,7 +62,8 @@ describe('takeover session', () => {
     v.push({ t: 'mouse', action: 'down', x: 5, y: 6, button: 'left', clickCount: 1, modifiers: 0 });
     v.push({ t: 'mouse', action: 'up', x: 5, y: 6, button: 'left', clickCount: 1, modifiers: 0 });
     await settle();
-    expect(t.cdp.calls.filter((c) => c.method === 'Input.dispatchMouseEvent')).toHaveLength(2);
+    // (the capability probe adds one harmless mouseMoved at 0,0)
+    expect(t.cdp.calls.filter((c) => c.method === 'Input.dispatchMouseEvent' && (c.params as { type: string }).type !== 'mouseMoved')).toHaveLength(2);
 
     v.push({ t: 'done' });
     await settle();
@@ -181,13 +187,14 @@ describe('takeover session', () => {
     await settle();
     const v1 = await t.join();
     const resumeKey = v1.json()[0].resumeKey;
+    const before = t.cdp.calls.length;
     v1.close();
     await settle();
-    expect(t.cdp.methods().filter((m) => m === 'Page.stopScreencast')).toHaveLength(1);
+    expect(t.cdp.methods().slice(before).filter((m) => m === 'Page.stopScreencast')).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(30_000);
     const v2 = await t.join({ resumeKey });
     expect(v2.json()[0]).toMatchObject({ t: 'ready' });
-    expect(t.cdp.methods().filter((m) => m === 'Page.startScreencast')).toHaveLength(2);
+    expect(t.cdp.methods().slice(before).filter((m) => m === 'Page.startScreencast')).toHaveLength(1);
   });
 
   it('resume after the 60 s window finds the takeover already ended', async () => {
@@ -211,6 +218,46 @@ describe('takeover session', () => {
     expect(v1.closed).not.toBeNull();
     t.cdp.emit('Page.screencastFrame', frame);
     expect(v2.binary()).toHaveLength(1);
+  });
+
+  it('Review Focus 5 (2a): no screencast and no insertText → takeover still works via fallbacks and says so', async () => {
+    const t = setupWith((cdp) => {
+      cdp.respond('Page.startScreencast', () => Promise.reject(new Error('not supported')));
+      cdp.respond('Input.insertText', () => Promise.reject(new Error('not supported')));
+      cdp.respond('Page.getLayoutMetrics', () => ({ cssVisualViewport: { clientWidth: 800, clientHeight: 600 } }));
+      cdp.respond('Page.captureScreenshot', () => ({ data: 'AQID' }));
+    });
+    await settle();
+    const v = await t.join();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(v.binary().length).toBeGreaterThan(0);
+    expect(Array.from(v.binary()[0]!.slice(1, 5))).toEqual([0x03, 0x20, 0x02, 0x58]); // 800, 600
+    v.push({ t: 'text', text: 'ok' });
+    await settle();
+    expect(t.cdp.calls.filter((c) => c.method === 'Input.dispatchKeyEvent')).toHaveLength(4);
+    v.push({ t: 'done' });
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'resolved', detail: 'fallback: screenshots, per-key typing' });
+    expect(t.log.events[0]).toMatchObject({ type: 'created', data: { screencast: false, insertText: false, input: true } });
+  });
+
+  it('a browser without input support fails before any link is published', async () => {
+    const t = setupWith((cdp) => cdp.respond('Input.dispatchMouseEvent', () => Promise.reject(new Error('no input'))));
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'failed', detail: 'browser does not support input' });
+    expect(t.links).toHaveLength(0);
+    expect(t.transport.published.size).toBe(0);
+  });
+
+  it('a page closing during the probe reports page_closed, not missing input', async () => {
+    const t = setupWith((cdp) =>
+      cdp.respond('Input.dispatchMouseEvent', () => {
+        cdp.close('detached');
+        return Promise.reject(new Error('detached'));
+      }),
+    );
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'failed', detail: 'page_closed' });
   });
 
   it('Final I2: a replacing viewer immediately gets the last frame even if the page never repaints', async () => {
@@ -238,7 +285,8 @@ describe('takeover session', () => {
 
   it('Final M2: finish() resolves even if Page.stopScreencast never answers', async () => {
     const t = setup();
-    t.cdp.respond('Page.stopScreencast', () => new Promise(() => {}));
+    let stops = 0;
+    t.cdp.respond('Page.stopScreencast', () => (stops++ === 0 ? {} : new Promise(() => {}))); // the probe's stop answers
     await settle();
     const v = await t.join();
     v.push({ t: 'done' });
@@ -329,7 +377,9 @@ describe('takeover session', () => {
 
   it('a screencast that cannot start fails the session with cdp_error', async () => {
     const t = setup();
-    t.cdp.respond('Page.startScreencast', () => Promise.reject(new Error('not supported')));
+    let starts = 0;
+    // Passes the capability probe, then fails when the viewer joins.
+    t.cdp.respond('Page.startScreencast', () => (starts++ === 0 ? {} : Promise.reject(new Error('not supported'))));
     await settle();
     await t.join();
     expect(t.result()).toMatchObject({ status: 'failed', detail: 'cdp_error: not supported' });

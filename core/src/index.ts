@@ -3,6 +3,8 @@ export * from './transport';
 export * from './events';
 export * from './engine';
 export { startScreencast, type ScreencastOptions } from './stream/screencast';
+export { startScreenshotPolling } from './stream/poll';
+export { probeCapabilities, type Capabilities } from './capabilities';
 export { applyInput } from './stream/input';
 export { createLatestSender, type FrameSink } from './stream/latest';
 export { nextStatus, isTerminal, InvalidTransitionError, type SessionEvent } from './session/status';

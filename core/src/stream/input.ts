@@ -1,5 +1,6 @@
 import type { ViewerInput } from '@unstuck/protocol';
 import type { CdpClient } from '../cdp';
+import type { Capabilities } from '../capabilities';
 
 const VIRTUAL_KEYS: Record<string, number> = {
   Backspace: 8,
@@ -16,7 +17,7 @@ const VIRTUAL_KEYS: Record<string, number> = {
 const MOUSE_TYPES = { down: 'mousePressed', up: 'mouseReleased', move: 'mouseMoved' } as const;
 
 /** Replays one viewer input message into the page via CDP Input.* */
-export async function applyInput(cdp: CdpClient, msg: ViewerInput): Promise<void> {
+export async function applyInput(cdp: CdpClient, msg: ViewerInput, caps?: Capabilities): Promise<void> {
   switch (msg.t) {
     case 'mouse':
       await cdp.send('Input.dispatchMouseEvent', {
@@ -42,6 +43,14 @@ export async function applyInput(cdp: CdpClient, msg: ViewerInput): Promise<void
       return;
     }
     case 'text':
+      if (caps?.insertText === false) {
+        // Fallback: type each Unicode code point as a key press.
+        for (const ch of msg.text) {
+          await cdp.send('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch });
+          await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: ch });
+        }
+        return;
+      }
       await cdp.send('Input.insertText', { text: msg.text });
       return;
   }

@@ -11,6 +11,8 @@ import type { CdpClient } from '../cdp';
 import type { EventLog } from '../events';
 import type { Transport, ViewerConnection } from '../transport';
 import { startScreencast } from '../stream/screencast';
+import { startScreenshotPolling } from '../stream/poll';
+import { probeCapabilities, type Capabilities } from '../capabilities';
 import { applyInput } from '../stream/input';
 import { createLatestSender } from '../stream/latest';
 import { nextStatus, isTerminal, type SessionEvent } from './status';
@@ -84,6 +86,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let drainTimer: ReturnType<typeof setInterval> | null = null;
   let leftTimer: ReturnType<typeof setTimeout> | null = null;
   let lastFrame: Uint8Array | null = null;
+  let caps: Capabilities = { screencast: true, insertText: true, input: true };
   let inputChain: Promise<void> = Promise.resolve();
   const helloTimers = new Set<ReturnType<typeof setTimeout>>();
   let resolveResult!: (r: TakeoverResult) => void;
@@ -135,7 +138,9 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       await stopStream();
       if (published) await transport.unpublish(sessionId).catch(() => {});
       emit('finished', { status: final, durationS, inputCount, ...(detail ? { detail } : {}) });
-      resolveResult({ status: final, sessionId, url, durationS, ...(detail ? { detail } : {}) });
+      const fallbacks = [!caps.screencast && 'screenshots', !caps.insertText && 'per-key typing'].filter(Boolean).join(', ');
+      const shown = detail ?? (fallbacks ? `fallback: ${fallbacks}` : undefined);
+      resolveResult({ status: final, sessionId, url, durationS, ...(shown ? { detail: shown } : {}) });
     })();
   }
 
@@ -155,7 +160,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (lastFrame) sender.push(lastFrame);
     if (stopScreencast) return;
     try {
-      stopScreencast = await startScreencast(cdp, (f) => {
+      const startFrames = caps.screencast ? startScreencast : startScreenshotPolling;
+      stopScreencast = await startFrames(cdp, (f) => {
         lastFrame = encodeFrame(f);
         sender?.push(lastFrame);
       });
@@ -216,7 +222,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       default:
         inputCount++;
         inputChain = inputChain
-          .then(() => applyInput(cdp, msg))
+          .then(() => applyInput(cdp, msg, caps))
           .catch((e: Error) => finish('failed', `cdp_error: ${e.message}`));
     }
   }
@@ -251,8 +257,14 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   }
 
   void (async () => {
-    emit('created');
-    if (opts.closedBefore !== undefined) return finish('failed', 'page_closed');
+    if (opts.closedBefore !== undefined) {
+      emit('created');
+      return finish('failed', 'page_closed');
+    }
+    caps = await probeCapabilities(cdp);
+    emit('created', { screencast: caps.screencast, insertText: caps.insertText, input: caps.input });
+    if (isTerminal(status)) return; // the page closed while probing
+    if (!caps.input) return finish('failed', 'browser does not support input');
     try {
       const { baseUrl } = await transport.publish(sessionId);
       published = true;

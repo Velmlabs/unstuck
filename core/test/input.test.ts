@@ -65,3 +65,22 @@ describe('applyInput', () => {
     expect(await run({ t: 'text', text: 'héllo 日本' })).toEqual([{ method: 'Input.insertText', params: { text: 'héllo 日本' } }]);
   });
 });
+
+describe('applyInput per-key fallback (no Input.insertText)', () => {
+  it('types text as one keyDown + keyUp per Unicode code point', async () => {
+    const cdp = new FakeCdp();
+    await applyInput(cdp, { t: 'text', text: 'héllo 日本' }, { screencast: true, insertText: false, input: true });
+    expect(cdp.calls).toHaveLength(16);
+    expect(cdp.calls.slice(0, 2)).toEqual([
+      { method: 'Input.dispatchKeyEvent', params: { type: 'keyDown', key: 'h', text: 'h', unmodifiedText: 'h' } },
+      { method: 'Input.dispatchKeyEvent', params: { type: 'keyUp', key: 'h' } },
+    ]);
+    expect(cdp.calls[14]!.params).toMatchObject({ type: 'keyDown', key: '本', text: '本' });
+  });
+
+  it('keeps using insertText when it is supported', async () => {
+    const cdp = new FakeCdp();
+    await applyInput(cdp, { t: 'text', text: 'ab' }, { screencast: true, insertText: true, input: true });
+    expect(cdp.calls).toEqual([{ method: 'Input.insertText', params: { text: 'ab' } }]);
+  });
+});
