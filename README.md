@@ -47,6 +47,24 @@ The human sees the live page, taps and types into it (a **Keyboard** button open
 
 By default the viewer is only reachable on `127.0.0.1`. To open the link from a phone, set `UNSTUCK_HOST=0.0.0.0` and `UNSTUCK_PUBLIC_URL=http://<your-lan-ip>:<port>` (the engine warns when it is reachable from your network), or wait for the relay in Plan 3.
 
+### Python
+
+The Python SDK has the same API, async with Playwright:
+
+```python
+from unstuck import Unstuck
+
+async with Unstuck(on_link=lambda link: print(link.reason, link.url)) as unstuck:
+    result = await unstuck.takeover(page, reason="Please solve the CAPTCHA", timeout_s=300)
+print(result.status)
+```
+
+Run the bundled Python example (uses the engine built above):
+
+```bash
+cd examples/playwright-py && UNSTUCK_ENGINE_PATH=../../engine/dist/unstuck-engine uv run --project ../../sdk-py python main.py
+```
+
 ### Security model (Plan 1)
 
 - Each link carries a signed, single-use token in the URL fragment, so it never reaches server logs. It expires with the takeover (default 10 minutes).
