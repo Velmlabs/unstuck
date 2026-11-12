@@ -25,7 +25,8 @@ function setup() {
     await settle();
     return v;
   };
-  return { page, popups, join, result: () => result };
+  const token = () => new URL(links[0]!.url).hash.slice(3);
+  return { page, popups, join, result: () => result, transport, links, token };
 }
 
 beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] }));
@@ -98,6 +99,47 @@ describe('popup following (Review Focus 4)', () => {
     expect(popup.calls.filter((c) => c.method === 'Page.startScreencast')).toHaveLength(1); // the probe only
   });
 
+  it('Final C1: input to a popup that has just closed drops the popup, not the takeover', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    const popup = new FakeCdp();
+    t.popups.open(popup);
+    await settle();
+    // The popup closed itself (window.close) but the close notice has not arrived yet.
+    popup.respond('Input.dispatchMouseEvent', () => Promise.reject(new Error('Target closed')));
+    v.push({ ...mouse, action: 'move' });
+    await settle();
+    expect(t.result()).toBeUndefined();
+    v.push(mouse);
+    await settle();
+    expect(realClicks(t.page)).toBe(1); // input went back to the page
+    expect(t.page.methods().filter((m) => m === 'Page.startScreencast').length).toBeGreaterThanOrEqual(2); // stream returned
+  });
+
+  it('Final C1: a popup whose screencast cannot start is dropped; the takeover continues on the page', async () => {
+    const t = setup();
+    await settle();
+    await t.join();
+    const popup = new FakeCdp();
+    let starts = 0;
+    popup.respond('Page.startScreencast', () => (starts++ === 0 ? {} : Promise.reject(new Error('Target closed'))));
+    t.popups.open(popup);
+    await settle();
+    expect(t.result()).toBeUndefined();
+    expect(t.page.methods().filter((m) => m === 'Page.startScreencast').length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('Final C1: input errors on the page itself still fail the takeover', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    t.page.respond('Input.insertText', () => Promise.reject(new Error('boom')));
+    v.push({ t: 'text', text: 'x' });
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'failed', detail: 'cdp_error: boom' });
+  });
+
   it('closing the original page still fails the takeover, even with a popup open', async () => {
     const t = setup();
     await settle();
@@ -117,5 +159,46 @@ describe('popup following (Review Focus 4)', () => {
     v.push({ t: 'done' });
     await settle();
     expect(t.popups.listenerCount).toBe(0);
+  });
+});
+
+describe('stream start is single-flight (Final I2)', () => {
+  it('a viewer replaced while its stream is still starting leaves exactly one screencast and no stray timers', async () => {
+    const t = setup();
+    await settle();
+    // (the capability probe already ran in setup) — hold every stream start until release()
+    const held: (() => void)[] = [];
+    const release = () => held.splice(0).forEach((r) => r());
+    t.page.respond('Page.startScreencast', () => new Promise<object>((r) => held.push(() => r({}))));
+    const v1 = await t.join(); // stream start now pending
+    const resumeKey = v1.json()[0].resumeKey;
+    const v2 = t.transport.connect(t.links[0]!.sessionId);
+    v2.push({ t: 'hello', token: t.token(), resumeKey });
+    await settle();
+    release();
+    await settle();
+    const live = t.page.listenerCount('Page.screencastFrame');
+    expect(live).toBe(1);
+    v2.push({ t: 'done' });
+    await settle();
+    expect(t.page.listenerCount('Page.screencastFrame')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('a popup opening while the stream is starting ends with only the popup streaming', async () => {
+    const t = setup();
+    await settle();
+    // (the capability probe already ran in setup) — hold every stream start until release()
+    const held: (() => void)[] = [];
+    const release = () => held.splice(0).forEach((r) => r());
+    t.page.respond('Page.startScreencast', () => new Promise<object>((r) => held.push(() => r({}))));
+    await t.join();
+    const popup = new FakeCdp();
+    t.popups.open(popup);
+    await settle();
+    release();
+    await settle();
+    expect(t.page.listenerCount('Page.screencastFrame')).toBe(0);
+    expect(popup.listenerCount('Page.screencastFrame')).toBe(1);
   });
 });

@@ -95,6 +95,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let leftAt: number | null = null;
   let inputCount = 0;
   let stopScreencast: (() => Promise<void>) | null = null;
+  /** Bumped by every start and stop: a start that resolves with a stale generation shuts itself down. */
+  let streamGen = 0;
   let sender: ReturnType<typeof createLatestSender> | null = null;
   let drainTimer: ReturnType<typeof setInterval> | null = null;
   let leftTimer: ReturnType<typeof setTimeout> | null = null;
@@ -125,6 +127,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   const offClose = cdp.onClose(() => finish('failed', 'page_closed'));
 
   async function stopStream(): Promise<void> {
+    streamGen++; // invalidates any start still in flight
     if (drainTimer) clearInterval(drainTimer);
     drainTimer = null;
     sender = null;
@@ -182,19 +185,30 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   /** Streams the active target to the current holder. */
   async function startStream(): Promise<void> {
+    const gen = ++streamGen;
     const target = active();
+    let stop: () => Promise<void>;
     try {
       const startFrames = target.caps.screencast ? startScreencast : startScreenshotPolling;
-      stopScreencast = await startFrames(target.cdp, (f) => {
+      stop = await startFrames(target.cdp, (f) => {
+        if (gen !== streamGen) return;
         lastFrame = encodeFrame(f);
         sender?.push(lastFrame);
       });
     } catch (e) {
-      finish('failed', `cdp_error: ${(e as Error).message}`);
+      if (gen === streamGen) onTargetError(target, e as Error);
       return;
     }
-    if (holder === null || isTerminal(status)) return void stopStream();
+    // Superseded while starting (viewer replaced, popup switch, finish): stop this one.
+    if (gen !== streamGen || holder === null || isTerminal(status)) return void stop().catch(() => {});
+    stopScreencast = stop;
     drainTimer = setInterval(() => sender?.drain(), DRAIN_INTERVAL_MS);
+  }
+
+  /** A CDP error fails the takeover only when it comes from the page; a popup that errors is gone. */
+  function onTargetError(target: Target, e: Error): void {
+    if (target.cdp === cdp) return finish('failed', `cdp_error: ${e.message}`);
+    removeTarget(target);
   }
 
   /** The active target changed: move the stream to it. */
@@ -279,9 +293,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
         return finish('cancelled', msg.reason || 'cant_solve');
       default:
         inputCount++;
-        inputChain = inputChain
-          .then(() => applyInput(active().cdp, msg, active().caps))
-          .catch((e: Error) => finish('failed', `cdp_error: ${e.message}`));
+        inputChain = inputChain.then(() => {
+          const target = active();
+          return applyInput(target.cdp, msg, target.caps).catch((e: Error) => onTargetError(target, e));
+        });
     }
   }
 

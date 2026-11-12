@@ -108,8 +108,11 @@ export async function runDoctor(cdpUrl: string, opts: { connect?: typeof connect
     if (!capabilities.screencast) notes.push('no screencast: Unstuck will poll screenshots (about 5 fps)');
     if (!capabilities.insertText) notes.push('no insertText: Unstuck will type text key by key');
     if (crossOriginIframePaint === false) notes.push(LIMITED_NOTE);
+    if (crossOriginIframePaint === 'unknown')
+      notes.push('could not load the test page from the browser (it may not reach this machine): CAPTCHA support was not checked');
     if (!popups.seen) notes.push('popups are not reported: a CAPTCHA that opens a window cannot be followed');
-    const verdict = !capabilities.input ? 'unsupported' : crossOriginIframePaint === false ? 'limited' : 'full';
+    // FULL only when CAPTCHA rendering was actually verified.
+    const verdict = !capabilities.input ? 'unsupported' : crossOriginIframePaint === true ? 'full' : 'limited';
     return { browser, capabilities, crossOriginIframePaint, popupTracking: popups.seen, verdict, notes };
   } finally {
     if (tab) {

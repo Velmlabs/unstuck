@@ -168,6 +168,31 @@ async def test_forwards_popups_during_a_takeover(browser, tmp_path):
     await page.close()
 
 
+async def test_caller_cancelling_takeover_ends_the_session_and_revokes_the_link(browser):
+    import urllib.error
+    import urllib.request
+
+    page = await browser.new_page()
+    links = []
+    async with Unstuck(engine_path=str(ENGINE), on_link=links.append) as u:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(u.takeover(page, reason="x", timeout_s=600), 2)
+        page_url = links[0].url.split("#")[0]
+
+        def status():
+            try:
+                return urllib.request.urlopen(page_url, timeout=2).status
+            except urllib.error.HTTPError as e:
+                return e.code
+
+        for _ in range(40):
+            if await asyncio.to_thread(status) == 404:
+                break
+            await asyncio.sleep(0.1)
+        assert await asyncio.to_thread(status) == 404
+    await page.close()
+
+
 async def test_close_without_takeover_is_a_no_op():
     await Unstuck(engine_path=str(ENGINE)).close()
 

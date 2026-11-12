@@ -61,6 +61,25 @@ describe('runDoctor', () => {
     expect(r.notes).toContain('CAPTCHA widgets in cross-origin iframes will not be visible; use Chromium for CAPTCHAs');
   }, 30_000);
 
+  it('Final I5: when the browser cannot load the test page the verdict is limited, not full', async () => {
+    const blind: typeof connectCdp = async (url, opts) => {
+      const real = await connectCdp(url, opts);
+      return {
+        ...real,
+        send: <T>(method: string, params?: object) =>
+          method === 'Runtime.evaluate' && JSON.stringify(params).includes('__childLoaded')
+            ? (Promise.resolve({ result: { value: false } }) as Promise<T>)
+            : real.send<T>(method, params),
+      } as DirectCdp;
+    };
+    const r = await runDoctor(`127.0.0.1:${chrome.port}`, { connect: blind });
+    expect(r.crossOriginIframePaint).toBe('unknown');
+    expect(r.verdict).toBe('limited');
+    expect(r.notes).toContain(
+      'could not load the test page from the browser (it may not reach this machine): CAPTCHA support was not checked',
+    );
+  }, 40_000);
+
   it('a browser without input is unsupported', async () => {
     const r = await runDoctor(`127.0.0.1:${chrome.port}`, {
       connect: wrapped({ 'Input.dispatchMouseEvent': () => Promise.reject(new Error('no input')) }),

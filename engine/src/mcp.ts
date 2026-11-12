@@ -52,7 +52,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
         timeout_s: z.number().int().min(10).max(3600).optional().describe('Seconds before the takeover gives up (default 600).'),
       },
     },
-    async ({ reason, cdp_url, target_id, timeout_s }) => {
+    async ({ reason, cdp_url, target_id, timeout_s }, extra) => {
       const url = cdp_url ?? opts.env.UNSTUCK_CDP_URL;
       if (!url) return text('No browser to take over: pass cdp_url or set UNSTUCK_CDP_URL', true);
       let cdp;
@@ -61,6 +61,9 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
       } catch (e) {
         return text((e as Error).message, true);
       }
+      // The client gave up (notifications/cancelled): end the takeover so the link stops working.
+      const onAbort = () => void cdp!.close();
+      extra.signal.addEventListener('abort', onAbort, { once: true });
       try {
         const site = await cdp
           .send<{ result: { value?: string } }>('Runtime.evaluate', { expression: 'location.hostname', returnByValue: true })
@@ -81,6 +84,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
         const out = { status: r.status, session_id: r.sessionId, url: r.url, duration_s: r.durationS, ...(r.detail ? { detail: r.detail } : {}) };
         return text(JSON.stringify(out), r.status === 'failed');
       } finally {
+        extra.signal.removeEventListener('abort', onAbort);
         await cdp.close();
       }
     },

@@ -113,6 +113,7 @@ export async function connectBrowser(url: string, opts: { fetchImpl?: typeof fet
 }
 
 interface Session {
+  id: string;
   targetId: string;
   handlers: Handlers;
   closeHandlers: Set<(reason: string) => void>;
@@ -134,21 +135,29 @@ export async function connectCdp(
   let nextId = 1;
   let disconnected: string | null = null;
   let closingOurselves = false;
-  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void }>();
+  const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; sid?: string }>();
   const browserHandlers: Handlers = new Map();
   const sessions = new Map<string, Session>();
 
   const fireClose = (s: Session, reason: string) => {
     if (s.closedReason !== null) return;
     s.closedReason = reason;
+    // Chrome may never answer commands sent to a target that is gone: fail them now.
+    for (const [id, p] of pending) {
+      if (p.sid !== s.id) continue;
+      pending.delete(id);
+      p.reject(new Error(reason));
+    }
     for (const h of [...s.closeHandlers]) h(reason);
   };
 
   const raw = <T>(method: string, params: object | undefined, sid?: string): Promise<T> => {
     if (disconnected !== null) return Promise.reject(new Error(disconnected));
+    const closed = sid ? sessions.get(sid)?.closedReason : null;
+    if (closed) return Promise.reject(new Error(closed));
     const id = nextId++;
     return new Promise<T>((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      pending.set(id, { resolve, reject, sid });
       ws.send(JSON.stringify({ id, method, params: params ?? {}, ...(sid ? { sessionId: sid } : {}) }));
     });
   };
@@ -189,7 +198,7 @@ export async function connectCdp(
   /** Attaches a flat session to a target over this connection. */
   const attach = async (targetId: string): Promise<{ client: CdpClient; sessionId: string }> => {
     const { sessionId } = await browser.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
-    const s: Session = { targetId, handlers: new Map(), closeHandlers: new Set(), closedReason: null };
+    const s: Session = { id: sessionId, targetId, handlers: new Map(), closeHandlers: new Set(), closedReason: null };
     sessions.set(sessionId, s);
     const client: CdpClient = {
       send: <T>(method: string, params?: object) => raw<T>(method, params, sessionId),

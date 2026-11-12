@@ -110,6 +110,19 @@ describe('MCP server', () => {
     await server.close();
   }, 30_000);
 
+  it('Final I4: a client cancelling the call ends the takeover and revokes the link', async () => {
+    const { client, server, logs } = await connect();
+    const ac = new AbortController();
+    const call = client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 600 } }, undefined, { signal: ac.signal });
+    call.catch(() => {});
+    await vi.waitFor(() => expect(logs.join('')).toMatch(/http:\/\/127\.0\.0\.1:\d+\/s\//), { timeout: 15_000 });
+    const url = /http:\/\/127\.0\.0\.1:\d+\/s\/\S+/.exec(logs.join(''))![0].split('#')[0]!;
+    expect((await fetch(url)).status).toBe(200);
+    ac.abort();
+    await vi.waitFor(async () => expect((await fetch(url)).status).toBe(404), { timeout: 5000 });
+    await server.close();
+  }, 30_000);
+
   it('rejects timeout_s outside 10..3600', async () => {
     const { client, server } = await connect({ transport: new FakeTransport() });
     const res = (await client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', timeout_s: 5 } })) as { isError: boolean };

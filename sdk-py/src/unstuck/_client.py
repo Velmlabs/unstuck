@@ -66,6 +66,7 @@ class Unstuck:
         popups: list[AttachedPage] = []
         popup_tasks: set[asyncio.Future[None]] = set()
         popup_listener: list[Callable[[Any], None]] = []
+        answered: list[bool] = []
 
         def on_close(reason_: str) -> None:
             if notify_close:
@@ -100,12 +101,17 @@ class Unstuck:
             popup_listener.append(on_popup)
             params = {"pageId": attached.page_id, "reason": reason, "timeoutS": timeout_s or self._timeout_s, "site": _site_of(attached.url())}
             try:
-                return TakeoverResult.from_wire(await engine.peer.request("takeover", params))
+                result = TakeoverResult.from_wire(await engine.peer.request("takeover", params))
+                answered.append(True)
+                return result
             except RpcCallError as e:
                 if e.code == "closed":
                     raise UnstuckEngineError(f"engine exited with code {await engine.wait()}") from None
                 raise
         finally:
+            if notify_close and not answered:
+                # Cancelled by the caller (e.g. asyncio.wait_for): end the engine session so the link stops working.
+                notify_close[0]("cancelled by caller")
             for listener in popup_listener:
                 page.remove_listener("popup", listener)
             await asyncio.gather(*popup_tasks, return_exceptions=True)

@@ -138,3 +138,39 @@ describe('connectCdp against real Chromium (Review Focus 3)', () => {
     await expect(cdp.send('Runtime.evaluate', { expression: '1' })).rejects.toThrow(/browser disconnected/);
   });
 });
+
+describe('connectCdp against a scripted DevTools server', () => {
+  it('Final M6: commands pending on a tab that detaches are rejected, so later input never stalls', async () => {
+    const { WebSocketServer } = await import('ws');
+    const http = await import('node:http');
+    const server = http.createServer((req, res) => {
+      const port = (server.address() as import('node:net').AddressInfo).port;
+      res.end(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/x` }));
+    });
+    const wss = new WebSocketServer({ server });
+    let sock!: import('ws').WebSocket;
+    wss.on('connection', (ws) => {
+      sock = ws;
+      ws.on('message', (raw) => {
+        const m = JSON.parse(String(raw));
+        const reply = (result: object) => ws.send(JSON.stringify({ id: m.id, result }));
+        if (m.method === 'Target.getTargets') reply({ targetInfos: [{ targetId: 'T', type: 'page', url: 'https://x/', title: '', attached: false }] });
+        else if (m.method === 'Target.attachToTarget') reply({ sessionId: 'S' });
+        else if (m.method === 'Runtime.evaluate') {
+          /* never answered */
+        } else reply({});
+      });
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const port = (server.address() as import('node:net').AddressInfo).port;
+    const cdp = await connectCdp(`127.0.0.1:${port}`);
+    const pending = cdp.send('Runtime.evaluate', { expression: '1' });
+    await new Promise((r) => setTimeout(r, 50));
+    sock.send(JSON.stringify({ method: 'Target.detachedFromTarget', params: { sessionId: 'S' } }));
+    await expect(pending).rejects.toThrow('target closed');
+    await expect(cdp.send('Runtime.evaluate', { expression: '2' })).rejects.toThrow('target closed');
+    await cdp.close();
+    wss.close();
+    server.close();
+  });
+});
