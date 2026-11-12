@@ -1,0 +1,21 @@
+{
+  "name": "@unstuck/viewer",
+  "version": "0.1.0",
+  "description": "Unstuck takeover viewer: the page a human uses to control the agent's browser",
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@unstuck/protocol": "workspace:*",
+    "preact": "^10.29.8"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.6",
+    "@testing-library/preact": "^3.2.6",
+    "jsdom": "^25.0.1",
+    "vite": "^6.4.6"
+  }
+}

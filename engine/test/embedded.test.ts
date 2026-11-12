@@ -92,6 +92,8 @@ describe('createEmbeddedTransport', () => {
     expect(res.status).toBe(404);
     expect(await res.text()).toContain(EXPIRED_HTML_MARKER);
     expect(EXPIRED_HTML_MARKER).toBe('expired or is invalid');
+    // The page styles itself inline, so its CSP must allow inline styles (and nothing else).
+    expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'");
     await t.publish('abc');
     await t.unpublish('abc');
     expect((await fetch(`http://127.0.0.1:${t.port}/s/abc`)).status).toBe(404);

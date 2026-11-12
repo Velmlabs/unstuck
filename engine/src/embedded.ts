@@ -18,6 +18,7 @@ export interface EmbeddedOptions {
 
 export const EXPIRED_HTML_MARKER = 'expired or is invalid';
 const CSP = "default-src 'self'; img-src 'self' blob: data:; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'";
+const EXPIRED_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'";
 const EXPIRED_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unstuck</title></head><body style="font:16px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#0f172a;color:#e2e8f0"><main style="text-align:center;padding:16px"><h1 style="font-size:20px">This link has ${EXPIRED_HTML_MARKER}</h1><p>The takeover already finished or timed out. You can close this tab.</p></main></body></html>`;
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
 const MAX_VIEWER_MESSAGE = 64 * 1024;
@@ -51,10 +52,10 @@ export async function createEmbeddedTransport(opts: EmbeddedOptions): Promise<Tr
   const sessions = new Map<string, ((c: ViewerConnection) => void) | null>();
   const sockets = new Set<WebSocket>();
 
-  const sendHtml = (res: http.ServerResponse, status: number, body: string | Buffer, type = 'text/html; charset=utf-8') => {
+  const sendHtml = (res: http.ServerResponse, status: number, body: string | Buffer, csp = CSP) => {
     res.writeHead(status, {
-      'content-type': type,
-      'content-security-policy': CSP,
+      'content-type': 'text/html; charset=utf-8',
+      'content-security-policy': csp,
       'referrer-policy': 'no-referrer',
       'cache-control': 'no-store',
       'x-content-type-options': 'nosniff',
@@ -68,7 +69,7 @@ export async function createEmbeddedTransport(opts: EmbeddedOptions): Promise<Tr
     if (session) {
       const index = opts.assets['/index.html'];
       if (sessions.has(session[1]!) && index) return sendHtml(res, 200, Buffer.from(index.body, 'base64'));
-      return sendHtml(res, 404, EXPIRED_HTML);
+      return sendHtml(res, 404, EXPIRED_HTML, EXPIRED_CSP);
     }
     const asset = opts.assets[path];
     if (asset && path !== '/index.html') {
