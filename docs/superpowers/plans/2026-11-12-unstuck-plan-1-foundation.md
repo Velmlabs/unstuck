@@ -338,7 +338,7 @@ Each later plan is written when the previous one is merged, using that plan's re
 
 | Plan | Scope (spec sections) | Ends with |
 |---|---|---|
-| 2 | Python SDK (`pip install unstuck`, platform wheels bundling the engine), MCP server mode (`request_human_takeover`), rule packs + `watch()` with agent pause, fixture widgets + official test sitekeys, browser capability check + `unstuck doctor`, following popups/new tabs during a takeover (§4.4, §5, §6 watch, §7, §10) | Python and MCP takeovers; auto-detection on the fixture site |
+| 2 | **Split into 2a and 2b.** 2a (done 2026-11-12): Python SDK, MCP server, direct CDP, capability probe + fallbacks, doctor, popups (`2026-11-12-unstuck-plan-2a-python-mcp.md`). 2b: rule packs + `watch()` with agent pause (§6 watch, §7) | Python and MCP takeovers; auto-detection on the fixture site |
 | 3 | relay-core, relay-node (Docker), relay-cloudflare (Durable Objects), AES-GCM end-to-end encryption, 6-digit code, agent keys, rate limits, core tests under `workerd` (§4, §9) | Takeover through both relays with ciphertext-only relays |
 | 4 | Notifier interface + the 11 channels, escalation, Web Push enrollment, redacted thumbnails (§8, §7.2 redaction) | Golden-payload tests for every channel; real-service smoke script |
 | 5 | `<unstuck-viewer>` web component, `@unstuck/astro`, in-process SDK mode (Workers/Bun/Deno), Cloudflare Browser Rendering example (uses Task 2 findings), Tier 2 compatibility suite incl. Obscura (uses Task 1 findings), `CloudDetector` stub (§4.3, §4.4, §7.2) | Takeover from a Cloudflare Worker agent; Astro dashboard example |

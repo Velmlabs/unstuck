@@ -65,6 +65,40 @@ Run the bundled Python example (uses the engine built above):
 cd examples/playwright-py && UNSTUCK_ENGINE_PATH=../../engine/dist/unstuck-engine uv run --project ../../sdk-py python main.py
 ```
 
+### MCP (Claude Desktop, Claude Code, any MCP client)
+
+The engine is also an MCP server with one tool, `request_human_takeover(reason, cdp_url?, target_id?, timeout_s?)`. It blocks until the human taps **Done** or **Can't solve** (or the takeover times out) and returns the outcome as JSON. The link reaches the human straight away: it's printed to stderr, sent as an MCP log message, and with `--open` it opens in this machine's browser.
+
+Start the browser your agent drives with a DevTools port, for example:
+
+```bash
+google-chrome --remote-debugging-port=9222
+```
+
+Then add the server to your MCP client's config:
+
+```json
+{
+  "mcpServers": {
+    "unstuck": {
+      "command": "/path/to/unstuck-engine",
+      "args": ["--mcp", "--open"],
+      "env": { "UNSTUCK_CDP_URL": "http://127.0.0.1:9222" }
+    }
+  }
+}
+```
+
+### Is my browser supported?
+
+`doctor` checks a browser in a tab of its own (live view, input, paste, cross-origin iframes, popups):
+
+```bash
+engine/dist/unstuck-engine doctor --cdp 127.0.0.1:9222
+```
+
+It ends with **FULL**, **LIMITED** (works, but for example CAPTCHA widgets in cross-origin iframes won't be visible) or **UNSUPPORTED**. Chromium is fully supported; Obscura is limited (see `docs/spikes/obscura.md`).
+
 ### Security model (Plan 1)
 
 - Each link carries a signed, single-use token in the URL fragment, so it never reaches server logs. It expires with the takeover (default 10 minutes).
