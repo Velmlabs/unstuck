@@ -1,24 +1,30 @@
-// Minimal Unstuck example: an agent opens a page, asks a human to take over, then continues.
-// Run: UNSTUCK_ENGINE_PATH=../../engine/dist/unstuck-engine pnpm start
+// Unstuck + Playwright: an agent opens a page, asks a human to take over, then carries on.
+//
+//   npm install @velmlabs/unstuck playwright
+//   npx tsx index.ts [url]
+//
+// Add UNSTUCK_API_KEY=uk_live_… to your environment to send the link through Unstuck Cloud,
+// so it opens on any phone, from anywhere.
 import { chromium } from 'playwright';
-import { Unstuck } from 'unstuck';
+import { Unstuck } from '@velmlabs/unstuck';
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.goto(process.argv[2] ?? 'https://www.google.com/recaptcha/api2/demo');
 
+// #region snippet
 const unstuck = new Unstuck({
   onLink: ({ url, reason }) => console.log(`\n${reason}. Open this on any device:\n${url}\n`),
 });
 
-// The agent is paused while this awaits; the human drives the real page.
+// The agent waits here while a person solves the page in the real browser.
 const result = await unstuck.takeover(page, { reason: 'Please solve the CAPTCHA', timeoutS: 300 });
 console.log(`Takeover ${result.status} after ${result.durationS}s`);
 
 if (result.status === 'resolved') {
   // ...carry on with the agent's work here.
-  console.log('Agent continues on', page.url());
 }
+// #endregion snippet
 
 await unstuck.close();
 await browser.close();

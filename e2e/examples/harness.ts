@@ -1,0 +1,90 @@
+// Runs an example as a user would, catches its takeover link, and plays the human on an iPhone-sized browser.
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import http from 'node:http';
+import path from 'node:path';
+import type { AddressInfo } from 'node:net';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+export const REPO = path.resolve(here, '../..');
+export const ENGINE = path.join(REPO, 'engine/dist/unstuck-engine');
+export const example = (name: string) => path.join(REPO, 'examples', name);
+/** Pre-installed Playwright (not a workspace dependency, see sdk-ts/test/helpers.ts). */
+export const { chromium, devices } = createRequire(import.meta.url)('playwright');
+
+/** The repo's engine stands in for the published package; shown files never mention it. */
+export const exampleEnv = (extra: Record<string, string> = {}): Record<string, string> => ({ UNSTUCK_ENGINE_PATH: ENGINE, ...extra });
+
+/** Local pages for the agent to get stuck on: / and /captcha (fake CAPTCHA), /other. */
+export async function startSite(): Promise<{ url: string; close: () => void }> {
+  const captcha = fs.readFileSync(path.join(here, '../fixtures/fake-captcha.html'));
+  const pages: Record<string, Buffer> = { '/': captcha, '/captcha': captcha, '/other': Buffer.from('<!doctype html><title>Other</title><p>Another tab</p>') };
+  const server = http.createServer((req, res) => {
+    const body = pages[new URL(req.url ?? '/', 'http://x').pathname];
+    res.writeHead(body ? 200 : 404, { 'content-type': 'text/html; charset=utf-8' }).end(body ?? 'not found');
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}/`, close: () => server.close() };
+}
+
+export interface RunningExample {
+  link: string;
+  finish: () => Promise<{ status: string; stdout: string; code: number | null }>;
+}
+
+/** Spawns an example; resolves once it printed its link (the line after "Open this on any device:"). */
+export function runExample(cmd: string, args: string[], opts: { cwd: string; env?: Record<string, string>; timeoutMs?: number }): Promise<RunningExample> {
+  const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = '';
+  const exited = new Promise<number | null>((r) => child.on('exit', (code) => r(code)));
+  const finish = async () => {
+    const code = await exited;
+    return { status: /Takeover (\w+)/.exec(out)?.[1] ?? 'none', stdout: out, code };
+  };
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`no takeover link within ${opts.timeoutMs ?? 120_000} ms. Output:\n${out}`));
+    }, opts.timeoutMs ?? 120_000);
+    const onData = (d: Buffer) => {
+      out += d.toString();
+      const m = /Open this on any device:\s*\n\s*(\S+)/.exec(out);
+      if (m) {
+        clearTimeout(timer);
+        resolve({ link: m[1]!, finish });
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
+    void exited.then((code) => {
+      clearTimeout(timer);
+      reject(new Error(`example exited (${code}) before printing a link. Output:\n${out}`));
+    });
+  });
+}
+
+/** Opens the link on an iPhone 13, waits for the live screen, and taps Done or Can't solve. */
+export async function actAsHuman(link: string, action: 'done' | 'cant-solve'): Promise<void> {
+  const browser = await chromium.launch();
+  try {
+    const ctx = await browser.newContext({ ...devices['iPhone 13'] });
+    const human = await ctx.newPage();
+    await human.goto(link);
+    await human.waitForFunction(() => ((document.querySelector('canvas') as HTMLCanvasElement | null)?.width ?? 0) > 300, null, { timeout: 60_000 });
+    await human.getByRole('button', { name: action === 'done' ? 'Done' : "Can't solve" }).click();
+    await human.waitForTimeout(500);
+  } finally {
+    await browser.close();
+  }
+}
+
+/** Fails on anything a user must never see in an example: repo-only wiring, old names, keys. */
+export function assertShownFile(file: string): void {
+  const text = fs.readFileSync(file, 'utf8');
+  for (const bad of ['UNSTUCK_ENGINE_PATH', 'workspace:', "from 'unstuck'", 'from "unstuck"', '@unstuck/', '../../engine', '--project ../../sdk-py']) {
+    if (text.includes(bad)) throw new Error(`${path.relative(REPO, file)} contains "${bad}"`);
+  }
+  if (/uk_live_[A-Za-z0-9]{32}/.test(text)) throw new Error(`${path.relative(REPO, file)} contains an API key`);
+}

@@ -75,12 +75,12 @@ importers:
 
   examples/playwright-ts:
     dependencies:
+      '@velmlabs/unstuck':
+        specifier: workspace:unstuck@*
+        version: link:../../sdk-ts
       playwright:
         specifier: 1.63.0
         version: 1.63.0
-      unstuck:
-        specifier: workspace:*
-        version: link:../../sdk-ts
 
   protocol:
     dependencies:

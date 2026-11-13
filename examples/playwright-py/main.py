@@ -1,7 +1,10 @@
-"""Minimal Unstuck example in Python: an agent opens a page, asks a human to take over, then continues.
+"""Unstuck + Playwright for Python: an agent opens a page, asks a human to take over, then carries on.
 
-Run (from this folder):
-    UNSTUCK_ENGINE_PATH=../../engine/dist/unstuck-engine uv run --project ../../sdk-py python main.py [url]
+    pip install -r requirements.txt
+    python main.py [url]
+
+Add UNSTUCK_API_KEY=uk_live_... to your environment to send the link through Unstuck Cloud,
+so it opens on any phone, from anywhere.
 """
 
 import asyncio
@@ -18,15 +21,17 @@ async def main(url: str) -> None:
         page = await browser.new_page()
         await page.goto(url)
 
+        # region snippet
         def on_link(link):
             print(f"\n{link.reason}. Open this on any device:\n{link.url}\n", flush=True)
 
         async with Unstuck(on_link=on_link) as unstuck:
-            # The agent is paused while this awaits; the human drives the real page.
+            # The agent waits here while a person solves the page in the real browser.
             result = await unstuck.takeover(page, reason="Please solve the CAPTCHA", timeout_s=300)
         print(f"Takeover {result.status} after {result.duration_s}s", flush=True)
         if result.status == "resolved":
-            print("Agent continues on", page.url, flush=True)
+            ...  # carry on with the agent's work here
+        # endregion snippet
         await browser.close()
 
 

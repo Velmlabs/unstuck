@@ -2,6 +2,11 @@
   "name": "example-playwright-ts",
   "private": true,
   "type": "module",
-  "scripts": { "start": "tsx index.ts" },
-  "dependencies": { "playwright": "1.63.0", "unstuck": "workspace:*" }
+  "scripts": {
+    "start": "tsx index.ts"
+  },
+  "dependencies": {
+    "@velmlabs/unstuck": "workspace:unstuck@*",
+    "playwright": "1.63.0"
+  }
 }
