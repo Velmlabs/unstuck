@@ -10,7 +10,10 @@ const Num = Type.Number();
 const Lit = <T extends string>(v: T) => Type.Literal(v);
 
 export const ViewerToEngineSchema = Type.Union([
-  Type.Object({ t: Lit('hello'), token: Type.String(), resumeKey: Type.Optional(Type.String()) }, { additionalProperties: false }),
+  Type.Object(
+    { t: Lit('hello'), token: Type.String(), resumeKey: Type.Optional(Type.String()), code: Type.Optional(Type.String({ pattern: '^[0-9]{6}$' })) },
+    { additionalProperties: false },
+  ),
   Type.Object(
     {
       t: Lit('mouse'),
@@ -43,7 +46,7 @@ export const ViewerToEngineSchema = Type.Union([
 export type ViewerToEngine = Static<typeof ViewerToEngineSchema>;
 export type ViewerInput = Extract<ViewerToEngine, { t: 'mouse' | 'wheel' | 'key' | 'text' }>;
 
-export const ViewerErrorCodes = ['token_invalid', 'token_used', 'expired', 'session_closed', 'bad_message'] as const;
+export const ViewerErrorCodes = ['token_invalid', 'token_used', 'expired', 'session_closed', 'bad_message', 'code_required', 'code_invalid'] as const;
 export type ViewerErrorCode = (typeof ViewerErrorCodes)[number];
 
 export const EngineToViewerSchema = Type.Union([

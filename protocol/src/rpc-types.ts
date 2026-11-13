@@ -51,6 +51,8 @@ export interface TakeoverParams {
   reason: string;
   timeoutS?: number;
   site?: string;
+  /** Ask the human for a 6-digit code delivered with the link (relay spec §5.8). */
+  requireCode?: boolean;
 }
 export interface CdpSendParams {
   pageId: string;
@@ -80,4 +82,6 @@ export interface TakeoverLinkParams {
   url: string;
   reason: string;
   expiresAt: number;
+  /** The 6-digit code, when the takeover requires one. Never part of the URL. */
+  code?: string;
 }

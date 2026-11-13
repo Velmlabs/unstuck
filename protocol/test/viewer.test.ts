@@ -48,3 +48,16 @@ describe('EngineToViewerSchema', () => {
     expect(Value.Check(ViewerToEngineSchema, { t: 'pong' })).toBe(false);
   });
 });
+
+describe('six-digit code', () => {
+  it('hello accepts a 6-digit code only', () => {
+    expect(parseViewerMessage('{"t":"hello","token":"a","code":"123456"}')).not.toBeNull();
+    expect(parseViewerMessage('{"t":"hello","token":"a","code":"12345"}')).toBeNull();
+    expect(parseViewerMessage('{"t":"hello","token":"a","code":"abcdef"}')).toBeNull();
+  });
+  it('error codes include code_required and code_invalid', async () => {
+    const { ViewerErrorCodes } = await import('../src/viewer');
+    expect(ViewerErrorCodes).toContain('code_required');
+    expect(ViewerErrorCodes).toContain('code_invalid');
+  });
+});

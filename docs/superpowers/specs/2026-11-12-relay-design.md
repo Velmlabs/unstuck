@@ -57,8 +57,8 @@ The Node host mirrors approach 1 in memory: a map from session id to a pairing o
 
 | Package | License | Contents |
 |---|---|---|
-| `protocol` | Apache | Adds the relay control messages (§5.3), the `code` field on `hello`, and error codes `code_required` and `code_invalid` |
-| `core` | Apache | `createRelayTransport()` (the engine side, using the global `WebSocket`); `e2e.ts` (AES-GCM seal/open). `takeover.ts` generates a per-session E2E key (separate from the engine-wide HMAC token key), puts `k=` in the fragment and wraps each `ViewerConnection` so the session logic still sees plaintext messages. `Transport.publish(sessionId, { expiresAt })` gains the expiry. Optional `Transport.onStatus(sessionId, h)` reports `'up' | 'down'` (§5.6). The 6-digit code. |
+| `protocol` | Apache | Adds the relay control messages (§5.3), the `code` field on `hello`, error codes `code_required` and `code_invalid`, and `e2e.ts` (AES-GCM seal/open), shared by the engine and the viewer (ruling, Plan 3 Task 1) |
+| `core` | Apache | `createRelayTransport()` (the engine side, using the global `WebSocket`). `takeover.ts` generates a per-session E2E key (separate from the engine-wide HMAC token key), puts `k=` in the fragment and wraps each `ViewerConnection` so the session logic still sees plaintext messages. `Transport.publish(sessionId, { expiresAt })` gains the expiry. Optional `Transport.onStatus(sessionId, h)` reports `'up' | 'down'` (§5.6). The 6-digit code. |
 | `relay-core` (new) | AGPL | `RelaySession`: pairing, envelope routing, limits, heartbeats, hooks. Host-agnostic; talks to sockets through a small interface. |
 | `relay-cloudflare` (new) | AGPL | `createRelayWorker({ authorize, onEvent })` returns `{ fetch, RelaySessionDO }`; WebSocket hibernation; serves the viewer as Worker static assets; a default `src/index.ts` plus `wrangler.toml` template for self-hosting. |
 | `relay-node` (new) | AGPL | `createNodeRelay({ port, authorize, onEvent })` on `ws`; serves the viewer from `@unstuck/viewer`'s build; `unstuck-relay` CLI; `Dockerfile`. |
