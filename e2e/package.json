@@ -2,6 +2,13 @@
   "name": "e2e",
   "private": true,
   "type": "module",
-  "scripts": { "test": "vitest run" },
-  "dependencies": { "unstuck": "workspace:*" }
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "unstuck": "workspace:*",
+    "@unstuck/core": "workspace:*",
+    "@unstuck/relay": "workspace:*",
+    "@unstuck/relay-core": "workspace:*"
+  }
 }

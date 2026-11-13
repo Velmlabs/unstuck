@@ -56,6 +56,16 @@ describe('worker routes', () => {
     ws.close();
   });
 
+  it('viewer upgrades echo no subprotocol (browsers reject one they did not offer)', async () => {
+    const a = await agent();
+    const res = await exports.default.fetch(new Request(`${BASE}/ws/${a.id}`, { headers: { Upgrade: 'websocket' } }));
+    expect(res.status).toBe(101);
+    expect(res.headers.get('sec-websocket-protocol')).toBeNull();
+    res.webSocket!.accept();
+    res.webSocket!.close();
+    await a.engine.close();
+  });
+
   it('a non-upgrade request to a socket path is 426; bad ids are 404', async () => {
     expect((await get('/agent/SESSIONPLAIN_00000000')).status).toBe(426);
     expect((await get('/ws/bad')).status).toBe(404);

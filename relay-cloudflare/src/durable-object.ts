@@ -14,8 +14,9 @@ export interface DoOptions<E> {
   now: () => number;
 }
 
-export const upgradeResponse = (client: WebSocket) =>
-  new Response(null, { status: 101, webSocket: client, headers: { 'Sec-WebSocket-Protocol': RELAY_SUBPROTOCOL } });
+/** Agents offered `unstuck-relay.1` and get it back; viewers offered none, and a client must reject one it didn't offer. */
+export const upgradeResponse = (client: WebSocket, role: 'agent' | 'viewer' = 'agent') =>
+  new Response(null, { status: 101, webSocket: client, headers: role === 'agent' ? { 'Sec-WebSocket-Protocol': RELAY_SUBPROTOCOL } : {} });
 
 /**
  * One Durable Object per takeover (relay spec §4, approach 1). Sockets use the hibernation API; the session
@@ -112,7 +113,7 @@ export function makeRelaySessionDO<E>(opts: DoOptions<E>) {
         if (c === null) server.close(1013, 'try again later');
         else server.serializeAttachment({ role: 'viewer', c } satisfies Attachment);
         await this.settle(s);
-        return upgradeResponse(client);
+        return upgradeResponse(client, 'viewer');
       }
 
       // path === '/agent': the Worker already authorized and rate-limited this agent.
