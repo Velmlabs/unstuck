@@ -233,6 +233,7 @@ describe('takeover session', () => {
     await settle();
     const v = await t.join();
     await vi.advanceTimersByTimeAsync(400);
+    await settle();
     expect(v.binary().length).toBeGreaterThan(0);
     expect(Array.from(v.binary()[0]!.slice(1, 5))).toEqual([0x03, 0x20, 0x02, 0x58]); // 800, 600
     v.push({ t: 'text', text: 'ok' });
