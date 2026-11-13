@@ -73,6 +73,15 @@ importers:
         specifier: ^8.18.2
         version: 8.18.2
 
+  examples/cdp:
+    dependencies:
+      '@velmlabs/unstuck':
+        specifier: workspace:unstuck@*
+        version: link:../../sdk-ts
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
+
   examples/playwright-ts:
     dependencies:
       '@velmlabs/unstuck':
