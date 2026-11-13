@@ -5,7 +5,7 @@ import type { TakeoverResult } from '@unstuck/protocol';
 
 const realSetTimeout = globalThis.setTimeout;
 async function settle() {
-  for (let i = 0; i < 4; i++) await new Promise((r) => realSetTimeout(r, 2));
+  for (let i = 0; i < 10; i++) await new Promise((r) => realSetTimeout(r, 3));
 }
 const frame = (w: number) => ({ data: 'AQID', sessionId: 1, metadata: { deviceWidth: w, deviceHeight: 100 } });
 const mouse = { t: 'mouse', action: 'down', x: 1, y: 1, button: 'left', clickCount: 1, modifiers: 0 } as const;
@@ -20,12 +20,12 @@ function setup() {
   let result: TakeoverResult | undefined;
   void engine.takeover(page, { reason: 'r', popups }).then((r) => (result = r));
   const join = async () => {
-    const v = transport.connect(links[0]!.sessionId);
-    v.push({ t: 'hello', token: new URL(links[0]!.url).hash.slice(3) });
+    const v = transport.connect(links[0]!.url);
+    v.push({ t: 'hello', token: new URLSearchParams(new URL(links[0]!.url).hash.slice(1)).get('t')! });
     await settle();
     return v;
   };
-  const token = () => new URL(links[0]!.url).hash.slice(3);
+  const token = () => new URLSearchParams(new URL(links[0]!.url).hash.slice(1)).get('t')!;
   return { page, popups, join, result: () => result, transport, links, token };
 }
 
@@ -44,6 +44,7 @@ describe('popup following (Review Focus 4)', () => {
     expect(t.page.methods().filter((m) => m === 'Page.stopScreencast').length).toBeGreaterThanOrEqual(2); // probe + switch
 
     popup.emit('Page.screencastFrame', frame(300));
+    await settle();
     expect(v.binary().at(-1)!.slice(1, 3)).toEqual(new Uint8Array([0x01, 0x2c])); // 300 wide
     v.push(mouse);
     await settle();
@@ -172,7 +173,7 @@ describe('stream start is single-flight (Final I2)', () => {
     t.page.respond('Page.startScreencast', () => new Promise<object>((r) => held.push(() => r({}))));
     const v1 = await t.join(); // stream start now pending
     const resumeKey = v1.json()[0].resumeKey;
-    const v2 = t.transport.connect(t.links[0]!.sessionId);
+    const v2 = t.transport.connect(t.links[0]!.url);
     v2.push({ t: 'hello', token: t.token(), resumeKey });
     await settle();
     release();

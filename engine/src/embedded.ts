@@ -111,7 +111,7 @@ export async function createEmbeddedTransport(opts: EmbeddedOptions): Promise<Tr
   return {
     host,
     port: actualPort,
-    async publish(sessionId) {
+    async publish(sessionId, _opts) {
       if (!sessions.has(sessionId)) sessions.set(sessionId, null);
       return { baseUrl: `${base}/s/${sessionId}` };
     },

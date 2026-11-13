@@ -53,8 +53,8 @@ describe('runStdioHost', () => {
     expect(links[0]).toMatchObject({ pageId: 'p1', reason: 'CAPTCHA' });
     expect(links[0].url).toContain('#t=');
 
-    const viewer = h.transport.connect(links[0].sessionId);
-    viewer.push({ t: 'hello', token: new URL(links[0].url).hash.slice(3) });
+    const viewer = h.transport.connect(links[0].url);
+    viewer.push({ t: 'hello', token: new URLSearchParams(new URL(links[0].url).hash.slice(1)).get('t') });
     await new Promise((r) => setTimeout(r, 50));
     expect(cdp.methods()).toContain('Page.startScreencast');
     viewer.push({ t: 'done' });
@@ -74,8 +74,8 @@ describe('runStdioHost', () => {
     h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
     const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'x' });
     await new Promise((r) => setTimeout(r, 50));
-    const viewer = h.transport.connect(links[0].sessionId);
-    viewer.push({ t: 'hello', token: new URL(links[0].url).hash.slice(3) });
+    const viewer = h.transport.connect(links[0].url);
+    viewer.push({ t: 'hello', token: new URLSearchParams(new URL(links[0].url).hash.slice(1)).get('t') });
     await new Promise((r) => setTimeout(r, 50));
     h.sdk.notify(Methods.pagePopup, { pageId: 'p1', popupPageId: 'pop1' });
     h.sdk.notify(Methods.pagePopup, { pageId: 'unknown', popupPageId: 'pop2' });

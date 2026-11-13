@@ -9,8 +9,10 @@ export interface ViewerConnection {
 
 /** How takeover links reach humans: embedded local server, relay, or Cloud. */
 export interface Transport {
-  /** Makes /s/<id> reachable; the session appends `#t=<token>` to baseUrl. */
-  publish(sessionId: string): Promise<{ baseUrl: string }>;
+  /** Makes /s/<id> reachable until `expiresAt`; the session appends `#t=<token>&k=<key>` to baseUrl. */
+  publish(sessionId: string, opts: { expiresAt: number }): Promise<{ baseUrl: string }>;
+  /** Optional: reports when the path to humans goes down or comes back (a relay connection). */
+  onStatus?(sessionId: string, h: (s: 'up' | 'down') => void): void;
   onConnection(sessionId: string, h: (conn: ViewerConnection) => void): void;
   unpublish(sessionId: string): Promise<void>;
   close(): Promise<void>;

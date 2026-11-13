@@ -8,7 +8,7 @@ const frame = { data: 'AQID', sessionId: 1, metadata: { deviceWidth: 1280, devic
 const realSetTimeout = globalThis.setTimeout;
 /** Let crypto.subtle (thread pool) and promise chains finish without advancing fake time. */
 async function settle() {
-  for (let i = 0; i < 4; i++) await new Promise((r) => realSetTimeout(r, 2));
+  for (let i = 0; i < 10; i++) await new Promise((r) => realSetTimeout(r, 3));
 }
 
 function setup(opts: { timeoutS?: number } = {}) {
@@ -24,9 +24,9 @@ function setupWith(prepare: (cdp: FakeCdp) => void, opts: { timeoutS?: number } 
   const engine = createEngine({ transport, log, onLink: (l) => links.push(l) });
   let result: TakeoverResult | undefined;
   const done = engine.takeover(cdp, { reason: 'Solve the CAPTCHA', site: 'shop.example', timeoutS: opts.timeoutS }).then((r) => (result = r));
-  const token = () => new URL(links[0]!.url).hash.replace('#t=', '');
+  const token = () => new URLSearchParams(new URL(links[0]!.url).hash.slice(1)).get('t')!;
   const join = async (extra: object = {}) => {
-    const v = transport.connect(links[0]!.sessionId);
+    const v = transport.connect(links[0]!.url);
     v.push({ t: 'hello', token: token(), ...extra });
     await settle();
     return v;
@@ -56,6 +56,7 @@ describe('takeover session', () => {
     expect(t.cdp.methods()).toContain('Page.startScreencast');
 
     t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
     expect(v.binary()[0]![0]).toBe(0x01);
     expect(Array.from(v.binary()[0]!.slice(1, 5))).toEqual([0x05, 0x00, 0x02, 0xd0]); // 1280, 720
 
@@ -95,6 +96,7 @@ describe('takeover session', () => {
     expect(second.json()).toEqual([{ t: 'error', code: 'token_used', message: expect.any(String) }]);
     expect(second.closed).not.toBeNull();
     t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
     expect(first.binary()).toHaveLength(1);
     first.push({ t: 'done' });
     await settle();
@@ -105,7 +107,7 @@ describe('takeover session', () => {
   it('rejects a bad token with token_invalid', async () => {
     const t = setup();
     await settle();
-    const v = t.transport.connect(t.links[0]!.sessionId);
+    const v = t.transport.connect(t.links[0]!.url);
     v.push({ t: 'hello', token: 'nope.nope' });
     await settle();
     expect(v.json()).toEqual([{ t: 'error', code: 'token_invalid', message: expect.any(String) }]);
@@ -120,7 +122,7 @@ describe('takeover session', () => {
     void engine.takeover(new FakeCdp(), { reason: 'b' });
     await settle();
     const otherToken = new URL(links[1]!.url).hash.replace('#t=', '');
-    const v = transport.connect(links[0]!.sessionId);
+    const v = transport.connect(links[0]!.url);
     v.push({ t: 'hello', token: otherToken });
     await settle();
     expect(v.json()[0]).toMatchObject({ t: 'error', code: 'token_invalid' });
@@ -130,7 +132,7 @@ describe('takeover session', () => {
   it('a message other than hello first closes the connection', async () => {
     const t = setup();
     await settle();
-    const v = t.transport.connect(t.links[0]!.sessionId);
+    const v = t.transport.connect(t.links[0]!.url);
     v.push({ t: 'done' });
     await settle();
     expect(v.json()[0]).toMatchObject({ t: 'error', code: 'bad_message' });
@@ -175,7 +177,7 @@ describe('takeover session', () => {
   it('a viewer joining after expiry gets expired', async () => {
     const t = setup({ timeoutS: 5 });
     await settle();
-    const v = t.transport.connect(t.links[0]!.sessionId);
+    const v = t.transport.connect(t.links[0]!.url);
     vi.setSystemTime(Date.now() + 5_000);
     v.push({ t: 'hello', token: t.token() });
     await settle();
@@ -217,6 +219,7 @@ describe('takeover session', () => {
     expect(v2.json()[0]).toMatchObject({ t: 'ready' });
     expect(v1.closed).not.toBeNull();
     t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
     expect(v2.binary()).toHaveLength(1);
   });
 
@@ -265,6 +268,7 @@ describe('takeover session', () => {
     await settle();
     const v1 = await t.join();
     t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
     const resumeKey = v1.json()[0].resumeKey;
     const v2 = await t.join({ resumeKey });
     expect(v2.binary()).toHaveLength(1);
@@ -276,6 +280,7 @@ describe('takeover session', () => {
     await settle();
     const v1 = await t.join();
     t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
     const resumeKey = v1.json()[0].resumeKey;
     v1.close();
     await settle();
@@ -324,7 +329,7 @@ describe('takeover session', () => {
   it('a connection that never says hello is closed after 10 s; the session keeps waiting', async () => {
     const t = setup();
     await settle();
-    const v = t.transport.connect(t.links[0]!.sessionId);
+    const v = t.transport.connect(t.links[0]!.url);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(v.closed).not.toBeNull();
     expect(t.result()).toBeUndefined();
@@ -389,12 +394,15 @@ describe('takeover session', () => {
     const t = setup();
     await settle();
     const v = await t.join();
-    v.bufferedAmount = 10 * 1024 * 1024;
+    v.raw.bufferedAmount = 10 * 1024 * 1024; // backpressure is on the wire connection
     t.cdp.emit('Page.screencastFrame', { ...frame, data: 'AQ==' });
+    await settle();
     t.cdp.emit('Page.screencastFrame', { ...frame, data: 'Ag==' });
+    await settle();
     expect(v.binary()).toHaveLength(0);
-    v.bufferedAmount = 0;
+    v.raw.bufferedAmount = 0;
     await vi.advanceTimersByTimeAsync(50);
+    await settle();
     expect(v.binary()).toHaveLength(1);
     expect(v.binary()[0]![5]).toBe(2);
   });
@@ -438,3 +446,62 @@ describe('takeover session', () => {
     await expect(p).resolves.toMatchObject({ status: 'timed_out' });
   });
 });
+
+describe('end-to-end encryption', () => {
+  it('the link carries a 32-byte key after the token', async () => {
+    const t = setup();
+    await settle();
+    expect(t.links[0]!.url).toMatch(/#t=[^&]+&k=[A-Za-z0-9_-]{43}$/);
+    t.engine.close();
+  });
+
+  it('a viewer with the wrong key is closed with 1008 and gets nothing', async () => {
+    const t = setup();
+    await settle();
+    const wrong = t.links[0]!.url.replace(/k=[^&]+$/, 'k=' + 'A'.repeat(43));
+    const v = t.transport.connect(wrong);
+    v.push({ t: 'hello', token: t.token() });
+    await settle();
+    expect(v.raw.closed?.code).toBe(1008);
+    expect(v.raw.sent).toEqual([]);
+    t.engine.close();
+  });
+
+  it('everything on the wire is ciphertext', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
+    expect(v.raw.sent.length).toBeGreaterThan(1);
+    for (const m of v.raw.sent) {
+      expect(m).toBeInstanceOf(Uint8Array);
+      expect([0x7b, 0x01]).not.toContain((m as Uint8Array)[0]);
+    }
+    t.engine.close();
+  });
+
+  it('Review Focus 1: a transport outage pauses the viewer-left timer', async () => {
+    const t = setup({ timeoutS: 600 });
+    await settle();
+    const v = await t.join();
+    const resumeKey = v.json()[0].resumeKey;
+    const id = t.links[0]!.sessionId;
+    t.transport.setStatus(id, 'down');
+    v.close();
+    await settle();
+    await vi.advanceTimersByTimeAsync(90_000);
+    t.transport.setStatus(id, 'up');
+    await settle();
+    expect(t.result()).toBeUndefined();
+    const v2 = t.transport.connect(t.links[0]!.url);
+    v2.push({ t: 'hello', token: t.token(), resumeKey });
+    await settle();
+    expect(v2.json()[0]).toMatchObject({ t: 'ready' });
+    v2.push({ t: 'done' });
+    await settle();
+    await t.done;
+    expect(t.result()?.status).toBe('resolved');
+  });
+});
+

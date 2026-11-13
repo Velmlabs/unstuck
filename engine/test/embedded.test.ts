@@ -59,14 +59,14 @@ describe('createEmbeddedTransport', () => {
 
   it('publish returns a /s/<id> base URL; a public URL override is honoured', async () => {
     const t = await make();
-    expect((await t.publish('abc')).baseUrl).toBe(`http://127.0.0.1:${t.port}/s/abc`);
+    expect((await t.publish('abc', { expiresAt: Date.now() + 60_000 })).baseUrl).toBe(`http://127.0.0.1:${t.port}/s/abc`);
     const t2 = await make({ publicUrl: 'https://box.example.com/' });
-    expect((await t2.publish('abc')).baseUrl).toBe('https://box.example.com/s/abc');
+    expect((await t2.publish('abc', { expiresAt: Date.now() + 60_000 })).baseUrl).toBe('https://box.example.com/s/abc');
   });
 
   it('serves the viewer for a published session with security headers', async () => {
     const t = await make();
-    await t.publish('abc');
+    await t.publish('abc', { expiresAt: Date.now() + 60_000 });
     const res = await fetch(`http://127.0.0.1:${t.port}/s/abc`);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain('viewer');
@@ -95,14 +95,14 @@ describe('createEmbeddedTransport', () => {
     expect(EXPIRED_HTML_MARKER).toBe('expired or is invalid');
     // The page styles itself inline, so its CSP must allow inline styles (and nothing else).
     expect(res.headers.get('content-security-policy')).toBe("default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'");
-    await t.publish('abc');
+    await t.publish('abc', { expiresAt: Date.now() + 60_000 });
     await t.unpublish('abc');
     expect((await fetch(`http://127.0.0.1:${t.port}/s/abc`)).status).toBe(404);
   });
 
   it('WebSocket to a published session reaches onConnection; text and binary flow both ways', async () => {
     const t = await make();
-    await t.publish('abc');
+    await t.publish('abc', { expiresAt: Date.now() + 60_000 });
     const conn = new Promise<ViewerConnection>((r) => t.onConnection('abc', r));
     const { ws, ok } = await openWs(`ws://127.0.0.1:${t.port}/ws/abc`);
     expect(ok).toBe(true);
@@ -136,7 +136,7 @@ describe('createEmbeddedTransport', () => {
 
   it('a published session with no connection handler yet still accepts and drops the socket', async () => {
     const t = await make();
-    await t.publish('abc');
+    await t.publish('abc', { expiresAt: Date.now() + 60_000 });
     const { ws, ok } = await openWs(`ws://127.0.0.1:${t.port}/ws/abc`);
     expect(ok).toBe(true);
     await new Promise<void>((r) => ws.once('close', () => r()));
@@ -144,7 +144,7 @@ describe('createEmbeddedTransport', () => {
 
   it('close() frees the port and closes open sockets', async () => {
     const t = await createEmbeddedTransport({ assets: ASSETS });
-    await t.publish('abc');
+    await t.publish('abc', { expiresAt: Date.now() + 60_000 });
     t.onConnection('abc', () => {});
     const { ws } = await openWs(`ws://127.0.0.1:${t.port}/ws/abc`);
     const closed = new Promise<void>((r) => ws.once('close', () => r()));
@@ -157,7 +157,7 @@ describe('createEmbeddedTransport', () => {
 
   it('close() does not wait for idle keep-alive HTTP connections (a human tab left open)', async () => {
     const t = await createEmbeddedTransport({ assets: ASSETS });
-    await t.publish('abc');
+    await t.publish('abc', { expiresAt: Date.now() + 60_000 });
     const agent = new http.Agent({ keepAlive: true });
     await new Promise<void>((r) => http.get({ host: '127.0.0.1', port: t.port, path: '/s/abc', agent }, (res) => res.resume().on('end', () => r())));
     const t0 = Date.now();

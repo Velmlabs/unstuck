@@ -1,4 +1,7 @@
 import {
+  b64urlEncode,
+  importE2eKey,
+  newE2eKey,
   encodeFrame,
   parseViewerMessage,
   type EngineToViewer,
@@ -17,6 +20,7 @@ import { applyInput } from '../stream/input';
 import { createLatestSender } from '../stream/latest';
 import { nextStatus, isTerminal, type SessionEvent } from './status';
 import { newSessionId, signToken, verifyToken } from './tokens';
+import { sealConnection } from './sealed';
 
 export const HELLO_TIMEOUT_MS = 10_000;
 export const RESUME_WINDOW_MS = 60_000;
@@ -78,6 +82,8 @@ const errorText: Record<ViewerErrorCode, string> = {
   expired: 'This link has expired.',
   session_closed: 'This takeover has ended.',
   bad_message: 'Unexpected message.',
+  code_required: 'Enter the 6-digit code from your notification.',
+  code_invalid: 'That code is not right.',
 };
 
 /** Runs one takeover session. The returned promise never rejects. */
@@ -100,6 +106,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let sender: ReturnType<typeof createLatestSender> | null = null;
   let drainTimer: ReturnType<typeof setInterval> | null = null;
   let leftTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The path to humans (e.g. the relay) is down: the viewer-left timer is paused meanwhile. */
+  let transportDown = false;
   let lastFrame: Uint8Array | null = null;
   let caps: Capabilities = { screencast: true, insertText: true, input: true };
   /** Stack of controllable targets: [page, ...open popups]; the last one is shown to the human. */
@@ -252,8 +260,25 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     go('viewer_left');
     emit('viewer_left');
     void stopStream();
+    if (!transportDown) startLeftTimer();
+  }
+
+  function startLeftTimer(): void {
+    if (leftTimer) clearTimeout(leftTimer);
     // If nobody resumes in time, nobody can ever rejoin (the token is spent): free the agent now.
     leftTimer = setTimeout(() => finish('failed', 'viewer_left'), RESUME_WINDOW_MS);
+  }
+
+  function onTransportStatus(s: 'up' | 'down'): void {
+    if (isTerminal(status)) return;
+    transportDown = s === 'down';
+    if (transportDown) {
+      if (leftTimer) clearTimeout(leftTimer);
+      leftTimer = null;
+    } else if (holder === null && leftAt !== null) {
+      leftAt = now(); // the resume window restarts in full once humans can reach us again
+      startLeftTimer();
+    }
   }
 
   async function onHello(conn: ViewerConnection, token: string, offeredResumeKey?: string): Promise<boolean> {
@@ -341,12 +366,15 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     targets.push({ cdp, caps, off: () => {} });
     if (opts.popups) offPopups = opts.popups.onPopup((popup) => void addPopup(popup));
     try {
-      const { baseUrl } = await transport.publish(sessionId);
+      const rawE2e = newE2eKey();
+      const e2eKey = await importE2eKey(rawE2e);
+      const { baseUrl } = await transport.publish(sessionId, { expiresAt });
       published = true;
       if (isTerminal(status)) return void transport.unpublish(sessionId).catch(() => {});
-      transport.onConnection(sessionId, onConnection);
+      transport.onConnection(sessionId, (conn) => onConnection(sealConnection(conn, e2eKey, sessionId)));
+      transport.onStatus?.(sessionId, onTransportStatus);
       const token = await signToken(key, sessionId, expiresAt);
-      url = `${baseUrl}#t=${token}`;
+      url = `${baseUrl}#t=${token}&k=${b64urlEncode(rawE2e)}`;
     } catch (e) {
       return finish('failed', `publish_error: ${(e as Error).message}`);
     }
