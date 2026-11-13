@@ -109,14 +109,29 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
         reject(new RelayError('relay_unreachable'));
       }, timeoutMs);
       ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', expiresAt: s.expiresAt, secret: s.secret }));
+      // Workers' client sockets deliver binary as Blob: read it without letting later messages overtake it.
+      let reading: Promise<void> | null = null;
       ws.onmessage = (e: MessageEvent) => {
-        if (typeof e.data !== 'string') {
-          const env = decodeEnvelope(new Uint8Array(e.data as ArrayBuffer));
+        const data = e.data as string | ArrayBuffer | Blob;
+        if (reading || (typeof Blob !== 'undefined' && data instanceof Blob)) {
+          const prev = reading ?? Promise.resolve();
+          const next: Promise<void> = prev.then(async () => {
+            handle(typeof data === 'string' || data instanceof ArrayBuffer ? data : await data.arrayBuffer());
+            if (reading === next) reading = null;
+          });
+          reading = next;
+          return;
+        }
+        handle(data as string | ArrayBuffer);
+      };
+      const handle = (data: string | ArrayBuffer) => {
+        if (typeof data !== 'string') {
+          const env = decodeEnvelope(new Uint8Array(data));
           const conn = env && s.conns.get(env.c);
           if (conn) for (const h of conn.messages) h(env.payload);
           return;
         }
-        const m = parseRelayToAgent(e.data);
+        const m = parseRelayToAgent(data);
         if (!m) return;
         if (m.t === 'registered') {
           if (registered) return;

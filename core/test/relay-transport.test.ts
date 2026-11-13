@@ -118,6 +118,21 @@ describe('createRelayTransport', () => {
     expect(closed).toBe(1);
   });
 
+  it('binary messages delivered as Blob (Workers client sockets) are handled, in order with text', async () => {
+    const { t, ws } = await published();
+    const got: unknown[] = [];
+    let closed = false;
+    t.onConnection(ID, (c) => {
+      c.onMessage((m) => got.push(m));
+      c.onClose(() => (closed = true));
+    });
+    ws.text({ t: 'open', c: 1 });
+    ws.onmessage?.({ data: new Blob([encodeEnvelope(1, new Uint8Array([5])).slice().buffer]) });
+    ws.text({ t: 'close', c: 1 });
+    await vi.waitFor(() => expect(closed).toBe(true));
+    expect(got).toEqual([new Uint8Array([5])]);
+  });
+
   it('closing a viewer from the engine tells the relay and fires onClose once', async () => {
     const { t, ws } = await published();
     let conn!: ViewerConnection;

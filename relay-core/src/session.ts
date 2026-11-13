@@ -76,6 +76,11 @@ export class RelaySession {
     return this.chain;
   }
 
+  /** True for the socket currently registered as this session's agent (hosts persist this across hibernation). */
+  isAgent(s: RelaySocket): boolean {
+    return s === this.agent;
+  }
+
   attachAgent(s: RelaySocket): void {
     if (this.done) return void s.close(1000, 'session ended');
     this.candidates.add(s);

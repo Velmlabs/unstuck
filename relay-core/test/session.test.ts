@@ -278,3 +278,14 @@ describe('rebind after hibernation', () => {
     expect(revived.attachViewer(new FakeSocket())).toBe(2);
   });
 });
+
+describe('isAgent', () => {
+  it('is true only for the registered agent socket', async () => {
+    const { s, agent } = await registered();
+    const other = new FakeSocket();
+    s.attachAgent(other);
+    expect(s.isAgent(agent)).toBe(true);
+    expect(s.isAgent(other)).toBe(false);
+  });
+});
+

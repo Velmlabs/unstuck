@@ -5,6 +5,7 @@ packages:
   - viewer
   - relay-core
   - relay-node
+  - relay-cloudflare
   - sdk-ts
   - e2e
   - examples/*
