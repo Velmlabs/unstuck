@@ -1,5 +1,6 @@
 // Unstuck + Puppeteer: an agent opens a page, asks a human to take over, then carries on.
 //
+//   npm init -y && npm pkg set type=module
 //   npm install @velmlabs/unstuck puppeteer
 //   npx tsx index.ts [url]
 //
@@ -14,7 +15,7 @@ await page!.goto(process.argv[2] ?? 'https://www.google.com/recaptcha/api2/demo'
 
 // #region snippet
 const unstuck = new Unstuck({
-  onLink: ({ url, reason }) => console.log(`\n${reason}. Open this on any device:\n${url}\n`),
+  onLink: ({ url, reason }) => console.log(`\n${reason}. Open this link:\n${url}\n`),
 });
 
 // Pass Puppeteer's page as is: the agent waits while a person solves it.

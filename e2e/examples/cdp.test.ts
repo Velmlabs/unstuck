@@ -22,6 +22,25 @@ describe('any browser over CDP', () => {
     }
   });
 
+  it('Final #6: agentPage only takes web pages, and throws when a given URL part matches nothing', async () => {
+    const { agentPage } = await import(path.join(REPO, 'examples/cdp/agent-page.ts'));
+    const chrome = await startChrome(['chrome://version/', `${site.url}captcha`]);
+    const browser = await chromium.connectOverCDP(chrome.cdpUrl);
+    try {
+      expect((await agentPage(browser)).url()).toContain('/captcha');
+      await expect(agentPage(browser, '/nowhere')).rejects.toThrow('no open tab matches "/nowhere"');
+    } finally {
+      chrome.stop();
+    }
+    const only = await startChrome(['chrome://version/']);
+    const b2 = await chromium.connectOverCDP(only.cdpUrl);
+    try {
+      await expect(agentPage(b2)).rejects.toThrow('no page to take over');
+    } finally {
+      only.stop();
+    }
+  });
+
   it('agentPage matches by URL, falls back to a real (non-blank) tab, and throws on an empty browser', async () => {
     const { agentPage } = await import(path.join(REPO, 'examples/cdp/agent-page.ts'));
     const chrome = await startChrome(['about:blank', `${site.url}other`, `${site.url}captcha`]);
@@ -29,7 +48,7 @@ describe('any browser over CDP', () => {
     try {
       expect((await agentPage(browser, '/captcha')).url()).toContain('/captcha');
       expect((await agentPage(browser, '/other')).url()).toContain('/other');
-      for (const part of ['/nowhere', undefined]) expect((await agentPage(browser, part)).url()).not.toBe('about:blank');
+      expect((await agentPage(browser)).url()).not.toBe('about:blank');
     } finally {
       chrome.stop();
     }

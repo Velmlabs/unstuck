@@ -1,6 +1,8 @@
 // Unstuck + Playwright: an agent opens a page, asks a human to take over, then carries on.
 //
+//   npm init -y && npm pkg set type=module
 //   npm install @velmlabs/unstuck playwright
+//   npx playwright install chromium
 //   npx tsx index.ts [url]
 //
 // Add UNSTUCK_API_KEY=uk_live_… to your environment to send the link through Unstuck Cloud,
@@ -14,7 +16,7 @@ await page.goto(process.argv[2] ?? 'https://www.google.com/recaptcha/api2/demo')
 
 // #region snippet
 const unstuck = new Unstuck({
-  onLink: ({ url, reason }) => console.log(`\n${reason}. Open this on any device:\n${url}\n`),
+  onLink: ({ url, reason }) => console.log(`\n${reason}. Open this link:\n${url}\n`),
 });
 
 // The agent waits here while a person solves the page in the real browser.

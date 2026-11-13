@@ -1,6 +1,7 @@
 // Unstuck + any Chromium you can reach over CDP: a hosted browser (Browserbase, Steel, …), a Chrome started
 // with --remote-debugging-port, or the browser inside another framework. Unstuck takes over the agent's tab.
 //
+//   npm init -y && npm pkg set type=module
 //   npm install @velmlabs/unstuck playwright
 //   CDP_URL=http://127.0.0.1:9222 AGENT_URL_PART=/checkout npx tsx index.ts
 //
@@ -16,7 +17,7 @@ const page = await agentPage(browser, process.env.AGENT_URL_PART);
 console.log('Taking over', page.url());
 
 const unstuck = new Unstuck({
-  onLink: ({ url, reason }) => console.log(`\n${reason}. Open this on any device:\n${url}\n`),
+  onLink: ({ url, reason }) => console.log(`\n${reason}. Open this link:\n${url}\n`),
 });
 const result = await unstuck.takeover(page, { reason: 'Please solve this step', timeoutS: 300 });
 console.log(`Takeover ${result.status} after ${result.durationS}s`);

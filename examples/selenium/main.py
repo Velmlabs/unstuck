@@ -25,7 +25,7 @@ async def ask_a_human(driver: webdriver.Chrome, reason: str) -> str:
         page = next(pg for ctx in browser.contexts for pg in ctx.pages if pg.url == driver.current_url)
 
         def on_link(link):
-            print(f"\n{link.reason}. Open this on any device:\n{link.url}\n", flush=True)
+            print(f"\n{link.reason}. Open this link:\n{link.url}\n", flush=True)
 
         async with Unstuck(on_link=on_link) as unstuck:
             result = await unstuck.takeover(page, reason=reason, timeout_s=300)

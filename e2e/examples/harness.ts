@@ -50,7 +50,7 @@ export interface RunningExample {
   finish: () => Promise<{ status: string; stdout: string; code: number | null }>;
 }
 
-/** Spawns an example; resolves once it printed its link (the line after "Open this on any device:"). */
+/** Spawns an example; resolves once it printed its link (the line after "Open this link:"). */
 export function runExample(cmd: string, args: string[], opts: { cwd: string; env?: Record<string, string>; timeoutMs?: number }): Promise<RunningExample> {
   const child = spawn(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
@@ -66,7 +66,7 @@ export function runExample(cmd: string, args: string[], opts: { cwd: string; env
     }, opts.timeoutMs ?? 120_000);
     const onData = (d: Buffer) => {
       out += d.toString();
-      const m = /Open this on any device:\s*\n\s*(\S+)/.exec(out);
+      const m = /Open this link:\s*\n\s*(\S+)/.exec(out);
       if (m) {
         clearTimeout(timer);
         resolve({ link: m[1]!, finish });
@@ -110,7 +110,7 @@ export function requirementsWithoutUnstuck(file: string): string {
 /** Fails on anything a user must never see in an example: repo-only wiring, old names, keys. */
 export function assertShownFile(file: string): void {
   const text = fs.readFileSync(file, 'utf8');
-  for (const bad of ['UNSTUCK_ENGINE_PATH', 'workspace:', "from 'unstuck'", 'from "unstuck"', '@unstuck/', '../../engine', '--project ../../sdk-py']) {
+  for (const bad of ['UNSTUCK_ENGINE_PATH', 'workspace:', "from 'unstuck'", 'from "unstuck"', '@unstuck/', '../../engine', '--project ../../sdk-py', 'Open this on any device']) {
     if (text.includes(bad)) throw new Error(`${path.relative(REPO, file)} contains "${bad}"`);
   }
   if (/uk_live_[A-Za-z0-9]{32}/.test(text)) throw new Error(`${path.relative(REPO, file)} contains an API key`);

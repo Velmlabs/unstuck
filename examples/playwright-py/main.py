@@ -1,6 +1,7 @@
 """Unstuck + Playwright for Python: an agent opens a page, asks a human to take over, then carries on.
 
     pip install -r requirements.txt
+    python -m playwright install chromium
     python main.py [url]
 
 Add UNSTUCK_API_KEY=uk_live_... to your environment to send the link through Unstuck Cloud,
@@ -23,7 +24,7 @@ async def main(url: str) -> None:
 
         # region snippet
         def on_link(link):
-            print(f"\n{link.reason}. Open this on any device:\n{link.url}\n", flush=True)
+            print(f"\n{link.reason}. Open this link:\n{link.url}\n", flush=True)
 
         async with Unstuck(on_link=on_link) as unstuck:
             # The agent waits here while a person solves the page in the real browser.
