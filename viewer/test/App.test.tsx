@@ -8,12 +8,16 @@ let handlers: ConnectionHandlers;
 let sent: unknown[];
 let closed: boolean;
 let connectOpts: { resumeKey?: string } | undefined;
-const connectFn: AppProps['connectFn'] = (_url, _token, h, opts) => {
+let connects = 0;
+let hellos: (string | undefined)[];
+const connectFn: AppProps['connectFn'] = (_url, _token, _codec, h, opts) => {
+  connects++;
   handlers = h;
   connectOpts = opts;
-  return { send: (m) => void sent.push(m), close: () => void (closed = true) };
+  return { send: (m) => void sent.push(m), sendHello: (c) => void hellos.push(c), close: () => void (closed = true) };
 };
-const loc = (hash = '#t=TOK') => ({ hash, pathname: '/s/SESSION', origin: 'http://127.0.0.1:5000' });
+const KEY = 'A'.repeat(43);
+const loc = (hash = `#t=TOK&k=${KEY}`) => ({ hash, pathname: '/s/SESSION', origin: 'http://127.0.0.1:5000' });
 const drawFrame = vi.fn();
 /** Dispatch a real (jsdom) MouseEvent under a pointer event name; jsdom has no PointerEvent. */
 function pointer(el: Element, type: 'pointerdown' | 'pointerup' | 'pointermove', init: MouseEventInit) {
@@ -39,6 +43,8 @@ function goLive() {
 beforeEach(() => {
   localStorage.clear();
   sent = [];
+  hellos = [];
+  connects = 0;
   closed = false;
   drawFrame.mockClear();
 });
@@ -351,3 +357,32 @@ describe('App', () => {
     expect(closed).toBe(true);
   });
 });
+
+describe('incomplete links and the six-digit code', () => {
+  it('Review Focus 2: a link without the key says it is incomplete and opens no socket', () => {
+    setup('#t=TOK');
+    expect(screen.getByText('This link is incomplete. Copy the whole link and open it again.')).toBeTruthy();
+    expect(connects).toBe(0);
+  });
+
+  it('asks for the code, sends it with hello, and says when it is wrong', () => {
+    setup();
+    act(() => handlers.onCodeRequest!(false));
+    const input = screen.getByLabelText('Enter the 6-digit code') as HTMLInputElement;
+    expect(input.getAttribute('inputmode')).toBe('numeric');
+    expect(input.getAttribute('autocomplete')).toBe('one-time-code');
+    fireEvent.input(input, { target: { value: '123456' } });
+    fireEvent.submit(input.closest('form')!);
+    expect(hellos).toEqual(['123456']);
+    act(() => handlers.onCodeRequest!(true));
+    expect(screen.getByText('That code is not right.')).toBeTruthy();
+  });
+
+  it('the code prompt goes away once the session is ready', () => {
+    setup();
+    act(() => handlers.onCodeRequest!(false));
+    goLive();
+    expect(screen.queryByLabelText('Enter the 6-digit code')).toBeNull();
+  });
+});
+

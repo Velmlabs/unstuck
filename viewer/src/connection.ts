@@ -1,4 +1,4 @@
-import { decodeFrame, type EngineToViewer, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@unstuck/protocol';
+import { decodeFrame, isJsonPlaintext, open, seal, type EngineToViewer, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@unstuck/protocol';
 
 export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed';
 type Ready = Extract<EngineToViewer, { t: 'ready' }>;
@@ -9,10 +9,25 @@ export interface ConnectionHandlers {
   onState(s: SessionStatus): void;
   onError(code: ViewerErrorCode, message: string): void;
   onPhase(p: Phase): void;
+  /** The engine wants the 6-digit code (`invalid` after a wrong one). */
+  onCodeRequest?(invalid: boolean): void;
 }
+
+/** End-to-end sealing for this session (relay spec §5.4). */
+export interface Codec {
+  seal(plain: Uint8Array): Promise<Uint8Array>;
+  open(sealed: Uint8Array): Promise<Uint8Array | null>;
+}
+
+export const e2eCodec = (key: CryptoKey, sessionId: string): Codec => ({
+  seal: (p) => seal(key, sessionId, 'v2e', p),
+  open: (b) => open(key, sessionId, 'e2v', b),
+});
 
 export interface ViewerSocket {
   send(m: ViewerToEngine): void;
+  /** Send hello again, with the 6-digit code the human typed. */
+  sendHello(code?: string): void;
   close(): void;
 }
 
@@ -25,6 +40,7 @@ const TERMINAL: ReadonlySet<SessionStatus> = new Set(['resolved', 'timed_out', '
 export function connect(
   url: string,
   token: string,
+  codec: Codec,
   h: ConnectionHandlers,
   opts: { WebSocketImpl?: typeof WebSocket; resumeKey?: string } = {},
 ): ViewerSocket {
@@ -36,39 +52,66 @@ export function connect(
   let downSince: number | null = null;
   let ping: ReturnType<typeof setInterval> | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  let outChain: Promise<void> = Promise.resolve();
+  let inChain: Promise<void> = Promise.resolve();
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  /** Seals and sends in order on the socket that was open when the message was queued. */
+  const write = (target: WebSocket, m: ViewerToEngine) => {
+    const plain = enc.encode(JSON.stringify(m));
+    outChain = outChain.then(async () => {
+      const sealed = await codec.seal(plain);
+      if (target.readyState === 1) target.send(sealed);
+    });
+  };
+  const hello = (target: WebSocket, code?: string) =>
+    write(target, { t: 'hello', token, ...(resumeKey ? { resumeKey } : {}), ...(code ? { code } : {}) } as ViewerToEngine);
+
+  const handle = (m: EngineToViewer) => {
+    if (m.t === 'ready') {
+      resumeKey = m.resumeKey;
+      attempt = 0;
+      downSince = null;
+      h.onReady(m);
+      h.onPhase('live');
+    } else if (m.t === 'state') {
+      if (TERMINAL.has(m.status)) stopped = true;
+      h.onState(m.status);
+    } else if (m.t === 'error') {
+      if (m.code === 'code_required' || m.code === 'code_invalid') return h.onCodeRequest?.(m.code === 'code_invalid');
+      if (FATAL.has(m.code)) stopped = true;
+      h.onError(m.code, m.message);
+    }
+  };
 
   const open = () => {
     ws = new WS(url);
     ws.binaryType = 'arraybuffer';
+    const socket = ws;
     ws.onopen = () => {
-      ws.send(JSON.stringify(resumeKey ? { t: 'hello', token, resumeKey } : { t: 'hello', token }));
-      ping = setInterval(() => ws.readyState === 1 && ws.send('{"t":"ping"}'), PING_MS);
+      hello(socket);
+      ping = setInterval(() => socket.readyState === 1 && write(socket, { t: 'ping' }), PING_MS);
     };
     ws.onmessage = (e: MessageEvent) => {
-      if (e.data instanceof ArrayBuffer) {
-        const f = decodeFrame(new Uint8Array(e.data));
-        if (f) h.onFrame(f);
-        return;
-      }
-      let m: EngineToViewer;
-      try {
-        m = JSON.parse(String(e.data));
-      } catch {
-        return;
-      }
-      if (m.t === 'ready') {
-        resumeKey = m.resumeKey;
-        attempt = 0;
-        downSince = null;
-        h.onReady(m);
-        h.onPhase('live');
-      } else if (m.t === 'state') {
-        if (TERMINAL.has(m.status)) stopped = true;
-        h.onState(m.status);
-      } else if (m.t === 'error') {
-        if (FATAL.has(m.code)) stopped = true;
-        h.onError(m.code, m.message);
-      }
+      if (typeof e.data === 'string') return; // everything from the engine is sealed binary (binaryType arraybuffer)
+      const bytes = new Uint8Array(e.data as ArrayBuffer);
+      inChain = inChain.then(async () => {
+        const plain = await codec.open(bytes);
+        if (!plain || socket !== ws) return; // not for us (wrong key) or from a socket we've replaced
+        if (!isJsonPlaintext(plain)) {
+          const f = decodeFrame(plain);
+          if (f) h.onFrame(f);
+          return;
+        }
+        let m: EngineToViewer;
+        try {
+          m = JSON.parse(dec.decode(plain));
+        } catch {
+          return;
+        }
+        handle(m);
+      });
     };
     ws.onclose = () => {
       clearInterval(ping);
@@ -88,7 +131,10 @@ export function connect(
   open();
   return {
     send(m) {
-      if (ws.readyState === 1) ws.send(JSON.stringify(m));
+      if (ws.readyState === 1) write(ws, m);
+    },
+    sendHello(code) {
+      if (ws.readyState === 1) hello(ws, code);
     },
     close() {
       stopped = true;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
 import type { Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@unstuck/protocol';
-import { connect as defaultConnect, type ConnectionHandlers, type Phase, type ViewerSocket } from './connection';
+import { connect as defaultConnect, e2eCodec, type Codec, type ConnectionHandlers, type Phase, type ViewerSocket } from './connection';
+import { importE2eKey } from '@unstuck/protocol';
 import { drawFrameOnCanvas } from './draw';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { clampToPage, toPagePoint } from './mapping';
@@ -8,7 +9,7 @@ import { parseFragment, sessionIdFromPath, wsUrlFor } from './url';
 
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string };
-  connectFn?: (url: string, token: string, h: ConnectionHandlers, opts: { resumeKey?: string }) => ViewerSocket;
+  connectFn?: (url: string, token: string, codec: Codec, h: ConnectionHandlers, opts: { resumeKey?: string }) => ViewerSocket;
   drawFrame?: (canvas: HTMLCanvasElement, frame: Frame) => void;
   now?: () => number;
 }
@@ -17,12 +18,25 @@ type Screen =
   | { kind: 'session' }
   | { kind: 'message'; title: string; body: string; tone: 'ok' | 'warn' | 'error' };
 
-const ERROR_SCREENS: Record<Exclude<ViewerErrorCode, 'bad_message'>, Screen> = {
+const ERROR_SCREENS: Record<Exclude<ViewerErrorCode, 'bad_message' | 'code_required' | 'code_invalid'>, Screen> = {
   token_invalid: { kind: 'message', title: 'This link is not valid', body: 'Ask for a new link from the person or agent that sent it.', tone: 'error' },
   token_used: { kind: 'message', title: 'This link is already in use', body: 'Someone else opened this takeover first. Only one person can control the browser at a time.', tone: 'warn' },
   expired: { kind: 'message', title: 'This link has expired', body: 'The takeover window closed before anyone joined.', tone: 'warn' },
   session_closed: { kind: 'message', title: 'This takeover has ended', body: 'You can close this tab.', tone: 'ok' },
 };
+
+const INCOMPLETE_SCREEN: Screen = {
+  kind: 'message',
+  title: 'Link incomplete',
+  body: 'This link is incomplete. Copy the whole link and open it again.',
+  tone: 'error',
+};
+
+/** Seals with the key from the link; the key is imported once, lazily, so connecting stays synchronous. */
+function lazyCodec(raw: Uint8Array, sessionId: string): Codec {
+  const codec = importE2eKey(raw).then((k) => e2eCodec(k, sessionId));
+  return { seal: async (p) => (await codec).seal(p), open: async (b) => (await codec).open(b) };
+}
 
 const FINAL_SCREENS: Partial<Record<SessionStatus, Screen>> = {
   resolved: { kind: 'message', title: 'All done, thank you', body: 'Control is back with the agent. You can close this tab.', tone: 'ok' },
@@ -60,9 +74,15 @@ function formatRemaining(ms: number): string {
 }
 
 export function App({ location, connectFn = defaultConnect, drawFrame = drawFrameOnCanvas, now = Date.now }: AppProps) {
-  const token = parseFragment(location.hash)?.token;
+  const fragment = parseFragment(location.hash);
+  const link = fragment && 'token' in fragment ? fragment : null;
+  const token = link?.token;
   const sessionId = sessionIdFromPath(location.pathname);
-  const [screen, setScreen] = useState<Screen>(token && sessionId ? { kind: 'session' } : ERROR_SCREENS.token_invalid);
+  const [screen, setScreen] = useState<Screen>(
+    token && sessionId ? { kind: 'session' } : fragment && 'error' in fragment ? INCOMPLETE_SCREEN : ERROR_SCREENS.token_invalid,
+  );
+  const [codeAsk, setCodeAsk] = useState<{ invalid: boolean } | null>(null);
+  const [code, setCode] = useState('');
   const [phase, setPhase] = useState<Phase>('connecting');
   const [info, setInfo] = useState<{ reason: string; site: string; expiresAt: number } | null>(null);
   const [remaining, setRemaining] = useState('');
@@ -81,10 +101,12 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const send = useCallback((m: ViewerToEngine) => sockRef.current?.send(m), []);
 
   useEffect(() => {
-    if (!token || !sessionId) return;
+    if (!link || !token || !sessionId) return;
     const saved = resumeStore.get(sessionId);
-    const sock = connectFn(wsUrlFor(location.origin, sessionId), token, {
+    const sock = connectFn(wsUrlFor(location.origin, sessionId), token, lazyCodec(link.key, sessionId), {
+      onCodeRequest: (invalid) => setCodeAsk({ invalid }),
       onReady: (r) => {
+        setCodeAsk(null);
         resumeStore.set(sessionId, r.resumeKey);
         setInfo({ reason: r.reason, site: r.site, expiresAt: r.expiresAt });
       },
@@ -101,7 +123,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         }
       },
       onError: (code) => {
-        if (code !== 'bad_message') setScreen(ERROR_SCREENS[code]);
+        if (code in ERROR_SCREENS) setScreen(ERROR_SCREENS[code as keyof typeof ERROR_SCREENS]);
       },
       onPhase: (p) => {
         setPhase(p);
@@ -323,6 +345,39 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           Done
         </button>
       </footer>
+
+      {codeAsk ? (
+        <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="code-title">
+          <form
+            class="sheet-card"
+            onSubmit={(e) => {
+              e.preventDefault();
+              sockRef.current?.sendHello(code.trim());
+            }}
+          >
+            <h2 id="code-title">One more step</h2>
+            <label for="code-input">Enter the 6-digit code</label>
+            <input
+              id="code-input"
+              class="code-input"
+              inputMode="numeric"
+              autocomplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              value={code}
+              onInput={(e) => setCode((e.target as HTMLInputElement).value)}
+            />
+            {codeAsk.invalid ? (
+              <p class="code-error" role="alert">
+                That code is not right.
+              </p>
+            ) : null}
+            <button type="submit" class="btn btn-primary">
+              Continue
+            </button>
+          </form>
+        </div>
+      ) : null}
 
       {asking ? (
         <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="cant-title">
