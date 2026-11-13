@@ -25,7 +25,7 @@ The viewer is served on 127.0.0.1 by default (UNSTUCK_HOST, UNSTUCK_PORT,
 UNSTUCK_PUBLIC_URL and UNSTUCK_LOG override defaults).
 
 Relay mode: --relay/--agent-key, else UNSTUCK_RELAY_URL + UNSTUCK_AGENT_KEY, else
-UNSTUCK_API_KEY (Unstuck Cloud, wss://unstuck.sh). UNSTUCK_REQUIRE_CODE=1 asks
+UNSTUCK_API_KEY (Unstuck Cloud, wss://relay.unstuck.sh). UNSTUCK_REQUIRE_CODE=1 asks
 humans for a 6-digit code sent with the link.
 `;
 

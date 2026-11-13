@@ -1,6 +1,6 @@
 import { createRelayTransport, type Transport } from '@unstuck/core';
 
-export const CLOUD_RELAY_URL = 'wss://unstuck.sh';
+export const CLOUD_RELAY_URL = 'wss://relay.unstuck.sh';
 
 export type TransportChoice =
   | { kind: 'relay'; url: string; agentKey?: string; source: 'flag' | 'UNSTUCK_RELAY_URL' | 'UNSTUCK_API_KEY' }

@@ -106,7 +106,7 @@ By default the link points at a small server on the agent's own machine. Agents 
 | Where | Set |
 |---|---|
 | Your own machine | nothing |
-| Unstuck Cloud | `UNSTUCK_API_KEY=uk_live_…` |
+| Unstuck Cloud (`relay.unstuck.sh`) | `UNSTUCK_API_KEY=uk_live_…` |
 | Your own relay | `UNSTUCK_RELAY_URL=wss://relay.example.com` and `UNSTUCK_AGENT_KEY=…` |
 
 The SDKs also take the relay as options (`new Unstuck({ relay, agentKey })`, `Unstuck(relay=..., agent_key=...)`), and on Workers, where there's no engine binary, use the engine in-process: `createEngine({ transport: createRelayTransport({ url, agentKey }) })` from `@unstuck/core`.

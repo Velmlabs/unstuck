@@ -10,7 +10,7 @@ describe('selectTransport', () => {
     const env = { UNSTUCK_RELAY_URL: 'wss://own.example', UNSTUCK_AGENT_KEY: 'AK', UNSTUCK_API_KEY: 'uk_live_x' };
     expect(selectTransport({ relay: 'wss://flag.example', agentKey: 'FK' }, env)).toEqual({ kind: 'relay', url: 'wss://flag.example', agentKey: 'FK', source: 'flag' });
     expect(selectTransport({}, env)).toEqual({ kind: 'relay', url: 'wss://own.example', agentKey: 'AK', source: 'UNSTUCK_RELAY_URL' });
-    expect(selectTransport({}, { UNSTUCK_API_KEY: 'uk_live_x' })).toEqual({ kind: 'relay', url: 'wss://unstuck.sh', agentKey: 'uk_live_x', source: 'UNSTUCK_API_KEY' });
+    expect(selectTransport({}, { UNSTUCK_API_KEY: 'uk_live_x' })).toEqual({ kind: 'relay', url: 'wss://relay.unstuck.sh', agentKey: 'uk_live_x', source: 'UNSTUCK_API_KEY' });
     expect(selectTransport({}, { UNSTUCK_API_KEY: 'uk_live_x', UNSTUCK_CLOUD_URL: 'wss://staging.example' })).toMatchObject({ url: 'wss://staging.example' });
     expect(selectTransport({}, {})).toEqual({ kind: 'embedded' });
     expect(selectTransport({}, { UNSTUCK_RELAY_URL: 'wss://open.example' })).toEqual({ kind: 'relay', url: 'wss://open.example', agentKey: undefined, source: 'UNSTUCK_RELAY_URL' });
