@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "unstuck": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@velmlabs/unstuck-engine",
+        "--mcp",
+        "--open"
+      ],
+      "env": {
+        "UNSTUCK_CDP_URL": "http://127.0.0.1:9222"
+      }
+    }
+  }
+}
