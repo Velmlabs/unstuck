@@ -1,10 +1,10 @@
 // Runs an example as a user would, catches its takeover link, and plays the human on an iPhone-sized browser.
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import type { AddressInfo } from 'node:net';
+import net, { type AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
@@ -100,6 +100,13 @@ export async function actAsHuman(link: string, action: 'done' | 'cant-solve'): P
   }
 }
 
+/** The example's requirements.txt minus `unstuck` (not on PyPI yet: the local sdk-py project provides it). */
+export function requirementsWithoutUnstuck(file: string): string {
+  const out = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'req-')), 'requirements.txt');
+  fs.writeFileSync(out, fs.readFileSync(file, 'utf8').split('\n').filter((l) => l.trim() !== 'unstuck').join('\n'));
+  return out;
+}
+
 /** Fails on anything a user must never see in an example: repo-only wiring, old names, keys. */
 export function assertShownFile(file: string): void {
   const text = fs.readFileSync(file, 'utf8');
@@ -108,3 +115,35 @@ export function assertShownFile(file: string): void {
   }
   if (/uk_live_[A-Za-z0-9]{32}/.test(text)) throw new Error(`${path.relative(REPO, file)} contains an API key`);
 }
+
+export const freePort = () =>
+  new Promise<number>((r) => {
+    const s = net.createServer().listen(0, '127.0.0.1', () => {
+      const port = (s.address() as net.AddressInfo).port;
+      s.close(() => r(port));
+    });
+  });
+
+/** A Chrome someone else started (a hosted browser, a teammate's agent): debugging port open, several tabs. */
+export async function startChrome(urls: string[]): Promise<{ cdpUrl: string; tabs: () => Promise<{ url: string; type: string }[]>; stop: () => void }> {
+  const port = await freePort();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome-'));
+  const proc: ChildProcess = spawn(CHROMIUM, ['--headless=new', '--no-sandbox', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--window-size=1280,720', urls[0]!], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let errors = '';
+  proc.stderr!.on('data', (d: Buffer) => (errors += d.toString()));
+  proc.on('exit', (code) => (errors += `\n[chrome exited ${code}]`));
+  const cdpUrl = `http://127.0.0.1:${port}`;
+  const tabs = async () => ((await (await fetch(`${cdpUrl}/json/list`)).json()) as { url: string; type: string }[]).filter((t) => t.type === 'page');
+  for (let i = 0; i < 100; i++) {
+    try {
+      if ((await tabs()).length >= 1) break;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  // Headless Chrome takes one start URL; open the other tabs through its debugging endpoint, in order.
+  for (const u of urls.slice(1)) await fetch(`${cdpUrl}/json/new?${encodeURIComponent(u)}`, { method: 'PUT' });
+  for (let i = 0; i < 50 && (await tabs()).filter((t) => t.url !== 'about:blank').length < urls.filter((u) => u !== 'about:blank').length; i++) await new Promise((r) => setTimeout(r, 100));
+  if (process.env.DEBUG_CHROME) console.log('CHROME', cdpUrl, errors.split('\n').filter((l) => !/dbus/.test(l)).join('\n').slice(-1500));
+  return { cdpUrl, tabs, stop: () => proc.kill() };
+}
+

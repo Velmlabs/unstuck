@@ -1,41 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
-import fs from 'node:fs';
-import net from 'node:net';
-import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { actAsHuman, assertShownFile, CHROMIUM, chromium, chromiumNoSandbox, example, exampleEnv, REPO, runExample, startSite } from './harness';
-
-const freePort = () =>
-  new Promise<number>((r) => {
-    const s = net.createServer().listen(0, '127.0.0.1', () => {
-      const port = (s.address() as net.AddressInfo).port;
-      s.close(() => r(port));
-    });
-  });
-
-/** A Chrome someone else started (a hosted browser, a teammate's agent): debugging port open, several tabs. */
-async function startChrome(urls: string[]): Promise<{ cdpUrl: string; tabs: () => Promise<{ url: string; type: string }[]>; stop: () => void }> {
-  const port = await freePort();
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chrome-'));
-  const proc: ChildProcess = spawn(CHROMIUM, ['--headless=new', '--no-sandbox', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--window-size=1280,720', urls[0]!], { stdio: ['ignore', 'ignore', 'pipe'] });
-  let errors = '';
-  proc.stderr!.on('data', (d: Buffer) => (errors += d.toString()));
-  proc.on('exit', (code) => (errors += `\n[chrome exited ${code}]`));
-  const cdpUrl = `http://127.0.0.1:${port}`;
-  const tabs = async () => ((await (await fetch(`${cdpUrl}/json/list`)).json()) as { url: string; type: string }[]).filter((t) => t.type === 'page');
-  for (let i = 0; i < 100; i++) {
-    try {
-      if ((await tabs()).length >= 1) break;
-    } catch {}
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  // Headless Chrome takes one start URL; open the other tabs through its debugging endpoint, in order.
-  for (const u of urls.slice(1)) await fetch(`${cdpUrl}/json/new?${encodeURIComponent(u)}`, { method: 'PUT' });
-  for (let i = 0; i < 50 && (await tabs()).filter((t) => t.url !== 'about:blank').length < urls.filter((u) => u !== 'about:blank').length; i++) await new Promise((r) => setTimeout(r, 100));
-  if (process.env.DEBUG_CHROME) console.log('CHROME', cdpUrl, errors.split('\n').filter((l) => !/dbus/.test(l)).join('\n').slice(-1500));
-  return { cdpUrl, tabs, stop: () => proc.kill() };
-}
+import { actAsHuman, assertShownFile, CHROMIUM, chromium, chromiumNoSandbox, example, exampleEnv, REPO, requirementsWithoutUnstuck, runExample, startChrome, startSite } from './harness';
 
 let site: Awaited<ReturnType<typeof startSite>>;
 beforeAll(async () => (site = await startSite()));
@@ -88,7 +54,7 @@ describe('any browser over CDP', () => {
     }
   })();
   it.skipIf(!chromedriver)('selenium: Chrome started by Selenium, Unstuck attaches over CDP (skipped without a chromedriver matching this Chromium; this sandbox cannot download one)', async () => {
-    const run = await runExample('uv', ['run', '--project', path.join(REPO, 'sdk-py'), '--with-requirements', 'requirements.txt', 'python', 'main.py', `${site.url}captcha`], {
+    const run = await runExample('uv', ['run', '--project', path.join(REPO, 'sdk-py'), '--with-requirements', requirementsWithoutUnstuck(example('selenium/requirements.txt')), 'python', 'main.py', `${site.url}captcha`], {
       cwd: example('selenium'),
       env: exampleEnv({ SE_DRIVER_PATH: chromedriver, SE_BROWSER_PATH: chromiumNoSandbox() }),
     });

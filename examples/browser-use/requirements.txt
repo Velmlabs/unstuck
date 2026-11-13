@@ -1,0 +1,3 @@
+unstuck
+playwright==1.63.0
+browser-use==1.0.3
