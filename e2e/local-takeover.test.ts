@@ -50,9 +50,11 @@ async function startTakeover(opts: { timeoutS?: number; path?: string } = {}) {
   return { page, unstuck, result, link };
 }
 
-async function openHuman(url: string) {
+async function openHuman(url: string, wire?: Buffer[]) {
   const ctx = await humanBrowser.newContext({ ...devices['iPhone 13'] });
   const human = await ctx.newPage();
+  // Capture what actually travels on the viewer's socket.
+  if (wire) human.on('websocket', (ws: any) => ws.on('framereceived', (f: any) => wire.push(Buffer.from(f.payload))));
   await human.goto(url);
   return { ctx, human };
 }
@@ -74,10 +76,19 @@ async function centerOf(page: any, selector: string) {
 describe('local takeover end to end', () => {
   it('a phone-sized human solves the fake CAPTCHA, types unicode, taps Done → resolved (Review Focus 1 + 2)', async () => {
     const { page, unstuck, result, link } = await startTakeover();
-    expect(link.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/s\/[A-Za-z0-9_-]{22}#t=/);
+    expect(link.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/s\/[A-Za-z0-9_-]{22}#t=[^&]+&k=[A-Za-z0-9_-]{43}$/);
 
-    const { ctx, human } = await openHuman(link.url);
+    const wire: Buffer[] = [];
+    const { ctx, human } = await openHuman(link.url, wire);
     await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    // End-to-end encrypted even locally: no JPEG (FF D8) or JSON on the wire.
+    await expect.poll(() => wire.filter((b) => b.length > 1000).length, { timeout: 10_000 }).toBeGreaterThan(0);
+    const big = wire.filter((b) => b.length > 1000);
+    expect(big.length).toBeGreaterThan(0);
+    for (const b of wire) {
+      expect(b.subarray(0, 64).includes(Buffer.from([0xff, 0xd8]))).toBe(false);
+      expect(b[0]).not.toBe(0x7b);
+    }
     await expect(human.getByText('Solve the test CAPTCHA').count()).resolves.toBe(1);
 
     // Review Focus 2: someone else opening the same link is turned away; the human keeps control.
