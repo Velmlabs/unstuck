@@ -85,6 +85,28 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  relay-node:
+    dependencies:
+      '@unstuck/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@unstuck/relay-core':
+        specifier: workspace:*
+        version: link:../relay-core
+      '@unstuck/viewer':
+        specifier: workspace:*
+        version: link:../viewer
+      ws:
+        specifier: ^8.22.2
+        version: 8.22.2
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.2
+      '@unstuck/core':
+        specifier: workspace:*
+        version: link:../core
+
   sdk-ts:
     dependencies:
       '@unstuck/protocol':

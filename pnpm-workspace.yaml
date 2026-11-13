@@ -4,6 +4,7 @@ packages:
   - engine
   - viewer
   - relay-core
+  - relay-node
   - sdk-ts
   - e2e
   - examples/*

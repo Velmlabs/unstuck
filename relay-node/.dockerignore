@@ -1,0 +1,12 @@
+node_modules
+**/node_modules
+**/coverage
+**/dist
+.superpowers
+sdk-py
+e2e
+engine
+sdk-ts
+core
+examples
+spikes
