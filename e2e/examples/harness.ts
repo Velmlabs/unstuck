@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
@@ -11,8 +12,23 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, '../..');
 export const ENGINE = path.join(REPO, 'engine/dist/unstuck-engine');
 export const example = (name: string) => path.join(REPO, 'examples', name);
+/** The pre-installed Chromium, for libraries that would otherwise download their own (Puppeteer, Selenium). */
+export const CHROMIUM: string = (() => {
+  const root = '/opt/pw-browsers';
+  const dir = fs.existsSync(root) ? fs.readdirSync(root).find((d) => /^chromium-\d+$/.test(d)) : undefined;
+  const bin = dir && ['chrome-linux64/chrome', 'chrome-linux/chrome'].map((p) => path.join(root, dir, p)).find((p) => fs.existsSync(p));
+  return process.env.CHROMIUM_PATH ?? bin ?? chromium.executablePath();
+})();
 /** Pre-installed Playwright (not a workspace dependency, see sdk-ts/test/helpers.ts). */
 export const { chromium, devices } = createRequire(import.meta.url)('playwright');
+
+/** CHROMIUM plus --no-sandbox (needed when tests run as root), so the examples themselves stay free of container flags. */
+export function chromiumNoSandbox(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'chromium-'));
+  const wrapper = path.join(dir, 'chrome');
+  fs.writeFileSync(wrapper, `#!/bin/sh\nexec "${CHROMIUM}" --no-sandbox "$@"\n`, { mode: 0o755 });
+  return wrapper;
+}
 
 /** The repo's engine stands in for the published package; shown files never mention it. */
 export const exampleEnv = (extra: Record<string, string> = {}): Record<string, string> => ({ UNSTUCK_ENGINE_PATH: ENGINE, ...extra });
@@ -56,6 +72,10 @@ export function runExample(cmd: string, args: string[], opts: { cwd: string; env
         resolve({ link: m[1]!, finish });
       }
     };
+    child.on('error', (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     void exited.then((code) => {
