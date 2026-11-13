@@ -111,3 +111,20 @@ async def test_engine_exit_closes_the_rpc_channel(tmp_path):
         await e.peer.request("takeover", {})
     assert info.value.code == "closed" and "exited with code 7" in str(info.value)
     assert await e.wait() == 7
+
+
+async def test_relay_settings_reach_the_engine_environment(tmp_path):
+    echo = write_engine(
+        tmp_path,
+        """
+        import json, os, sys
+        for line in sys.stdin:
+            m = json.loads(line)
+            v = "|".join([os.environ.get("UNSTUCK_RELAY_URL", ""), os.environ.get("UNSTUCK_AGENT_KEY", ""), "path" if os.environ.get("PATH") else "nopath"])
+            sys.stdout.write(json.dumps({"id": m["id"], "result": {"engineVersion": v, "protocolVersion": 1}}) + "\\n"); sys.stdout.flush()
+        """,
+    )
+    e = await spawn_engine(echo, relay="wss://relay.example", agent_key="KEY")
+    assert e.engine_version == "wss://relay.example|KEY|path"
+    e.kill()
+    await e.wait()

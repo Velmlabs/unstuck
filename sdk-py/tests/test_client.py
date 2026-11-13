@@ -38,6 +38,29 @@ async def test_link_then_done_resolves(browser):
     await page.close()
 
 
+async def test_require_code_gives_on_link_a_code_not_in_the_url(browser):
+    page = await browser.new_page()
+    links = []
+    async with Unstuck(engine_path=str(ENGINE), on_link=links.append, require_code=True) as u:
+        task = asyncio.ensure_future(u.takeover(page, reason="Log in", timeout_s=30))
+        await wait_for(lambda: links)
+        assert links[0].code is not None and len(links[0].code) == 6 and links[0].code.isdigit()
+        assert links[0].code not in links[0].url
+        task.cancel()
+    await page.close()
+
+
+async def test_per_call_require_code_false_wins(browser):
+    page = await browser.new_page()
+    links = []
+    async with Unstuck(engine_path=str(ENGINE), on_link=links.append, require_code=True) as u:
+        task = asyncio.ensure_future(u.takeover(page, reason="x", timeout_s=30, require_code=False))
+        await wait_for(lambda: links)
+        assert links[0].code is None
+        task.cancel()
+    await page.close()
+
+
 async def test_page_closed_mid_takeover_returns_failed_quickly(browser):
     page = await browser.new_page()
     async with Unstuck(engine_path=str(ENGINE), on_link=lambda l: None) as u:

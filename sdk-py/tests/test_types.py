@@ -16,6 +16,12 @@ def test_link_from_wire():
     assert l == TakeoverLink(url="http://x", reason="r", session_id="s", expires_at=5)
 
 
+def test_link_code_is_optional():
+    l = TakeoverLink.from_wire({"url": "u", "reason": "r", "sessionId": "s", "expiresAt": 1, "code": "123456"})
+    assert l.code == "123456"
+    assert TakeoverLink.from_wire({"url": "u", "reason": "r", "sessionId": "s", "expiresAt": 1}).code is None
+
+
 def test_errors_and_versions():
     e = UnstuckEngineError("boom", engine_path="/x")
     assert str(e) == "boom" and e.engine_path == "/x"

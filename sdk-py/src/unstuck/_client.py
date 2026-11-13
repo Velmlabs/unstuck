@@ -18,7 +18,8 @@ _PAGE_CLOSED = TakeoverResult(status="failed", session_id="", url="", duration_s
 
 
 def _default_on_link(link: TakeoverLink) -> None:
-    print(f"Unstuck: a human is needed ({link.reason}) → {link.url}", file=sys.stderr, flush=True)
+    code = f" (code {link.code})" if link.code else ""
+    print(f"Unstuck: a human is needed ({link.reason}) → {link.url}{code}", file=sys.stderr, flush=True)
 
 
 def _site_of(url: str) -> str | None:
@@ -39,12 +40,21 @@ class Unstuck:
         port: int | None = None,
         timeout_s: int | None = None,
         on_link: Callable[[TakeoverLink], None] | None = None,
+        relay: str | None = None,
+        agent_key: str | None = None,
+        require_code: bool | None = None,
     ) -> None:
+        """``relay``/``agent_key`` use a relay instead of the local server (or set UNSTUCK_RELAY_URL /
+        UNSTUCK_AGENT_KEY; with only UNSTUCK_API_KEY set, Unstuck Cloud is used). ``require_code`` asks the
+        human for a 6-digit code delivered with the link."""
         self._engine_path = engine_path
         self._host = host
         self._port = port
         self._timeout_s = timeout_s
         self._on_link = on_link or _default_on_link
+        self._relay = relay
+        self._agent_key = agent_key
+        self._require_code = require_code
         self._engine: asyncio.Task[EngineProcess] | None = None
         self._pages: dict[str, AttachedPage] = {}
 
@@ -54,7 +64,7 @@ class Unstuck:
     async def __aexit__(self, *exc: Any) -> None:
         await self.close()
 
-    async def takeover(self, page: Any, *, reason: str, timeout_s: int | None = None) -> TakeoverResult:
+    async def takeover(self, page: Any, *, reason: str, timeout_s: int | None = None, require_code: bool | None = None) -> TakeoverResult:
         """Returns the outcome; raises only UnstuckEngineError when the engine can't run."""
         try:
             attached = await attach_page(page)
@@ -100,6 +110,9 @@ class Unstuck:
             page.on("popup", on_popup)
             popup_listener.append(on_popup)
             params = {"pageId": attached.page_id, "reason": reason, "timeoutS": timeout_s or self._timeout_s, "site": _site_of(attached.url())}
+            code = self._require_code if require_code is None else require_code
+            if code is not None:
+                params["requireCode"] = code
             try:
                 result = TakeoverResult.from_wire(await engine.peer.request("takeover", params))
                 answered.append(True)
@@ -150,7 +163,9 @@ class Unstuck:
         return task
 
     async def _start_engine(self) -> EngineProcess:
-        engine = await spawn_engine(resolve_engine_path(self._engine_path), host=self._host, port=self._port)
+        engine = await spawn_engine(
+            resolve_engine_path(self._engine_path), host=self._host, port=self._port, relay=self._relay, agent_key=self._agent_key
+        )
         peer = engine.peer
 
         def page_for(params: dict[str, Any]) -> AttachedPage:

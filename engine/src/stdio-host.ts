@@ -17,6 +17,8 @@ export interface StdioHostOptions {
   transport: Transport;
   log?: EventLog;
   version: string;
+  /** Default for takeovers that don't say (UNSTUCK_REQUIRE_CODE=1). */
+  requireCode?: boolean;
 }
 
 /**
@@ -25,7 +27,7 @@ export interface StdioHostOptions {
  */
 export function runStdioHost(opts: StdioHostOptions): Promise<void> {
   const peer = createRpcPeer((line) => opts.output.write(line + '\n'));
-  const engine = createEngine({ transport: opts.transport, log: opts.log });
+  const engine = createEngine({ transport: opts.transport, log: opts.log, requireCode: opts.requireCode });
   const rl = readline.createInterface({ input: opts.input, crlfDelay: Infinity });
   let finished: Promise<void> | null = null;
   let resolveDone!: () => void;
@@ -67,6 +69,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
         reason: p.reason,
         timeoutS: p.timeoutS,
         site: p.site,
+        requireCode: p.requireCode,
         onLink: (info) => peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId }),
         popups: {
           onPopup(cb) {

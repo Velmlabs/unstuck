@@ -34,7 +34,7 @@ const text = (t: string, isError = false) => ({ content: [{ type: 'text' as cons
 /** MCP server exposing request_human_takeover (spec §5). */
 export function createMcpServer(opts: McpServerOptions): McpServer {
   const server = new McpServer({ name: 'unstuck', version: VERSION }, { capabilities: { logging: {} } });
-  const engine = createEngine({ transport: opts.transport, log: opts.log });
+  const engine = createEngine({ transport: opts.transport, log: opts.log, requireCode: opts.env.UNSTUCK_REQUIRE_CODE === '1' });
   const connect = opts.connect ?? connectCdp;
   const openUrl = opts.openUrl ?? openInBrowser;
 
@@ -74,8 +74,8 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           timeoutS: timeout_s,
           site,
           popups: cdp.popups,
-          onLink: ({ url: link }) => {
-            const line = `Unstuck: a human is needed (${reason}) → ${link}`;
+          onLink: ({ url: link, code }) => {
+            const line = `Unstuck: a human is needed (${reason}) → ${link}${code ? ` (code ${code})` : ''}`;
             opts.stderr.write(line + '\n');
             void server.sendLoggingMessage({ level: 'notice', logger: 'unstuck', data: line }).catch(() => {});
             if (opts.open) openUrl(link);

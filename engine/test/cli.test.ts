@@ -76,6 +76,21 @@ describe('main', () => {
     expect(x.err()).toMatch(/MCP server ready/);
   });
 
+  it('relay mode: the startup line names the relay and never the key', async () => {
+    const x = io('');
+    (x as { env: Record<string, string> }).env = { UNSTUCK_RELAY_URL: 'ws://127.0.0.1:9', UNSTUCK_AGENT_KEY: 'secret-key' };
+    await expect(main(['--stdio'], x)).resolves.toBe(0);
+    expect(x.err()).toContain('[unstuck] engine');
+    expect(x.err()).toContain('relay ws://127.0.0.1:9');
+    expect(x.err()).not.toContain('secret-key');
+  });
+
+  it('--relay and --agent-key flags pick relay mode', async () => {
+    const x = io('');
+    await expect(main(['--stdio', '--relay', 'ws://127.0.0.1:9', '--agent-key', 'k'], x)).resolves.toBe(0);
+    expect(x.err()).toContain('relay ws://127.0.0.1:9');
+  });
+
   it('--open without --mcp is a usage error', async () => {
     const x = io();
     await expect(main(['--stdio', '--open'], x)).resolves.toBe(2);

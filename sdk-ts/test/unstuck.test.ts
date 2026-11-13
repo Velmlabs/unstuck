@@ -73,6 +73,32 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     await u.close();
   });
 
+  it('requireCode: onLink gets a 6-digit code that is not in the URL', async () => {
+    const page = await browser.newPage();
+    await page.setContent('<p>code</p>');
+    const links: { url: string; code?: string }[] = [];
+    const unstuck = new Unstuck({ enginePath: ENGINE, onLink: (l) => links.push(l), requireCode: true });
+    const result = unstuck.takeover(page, { reason: 'Log in', timeoutS: 30 });
+    await vi.waitFor(() => expect(links).toHaveLength(1), { timeout: 10_000 });
+    expect(links[0]!.code).toMatch(/^\d{6}$/);
+    expect(links[0]!.url).not.toContain(links[0]!.code!);
+    await unstuck.close();
+    await result.catch(() => {});
+    await page.close();
+  });
+
+  it('a per-call requireCode: false wins over the client default', async () => {
+    const page = await browser.newPage();
+    const links: { code?: string }[] = [];
+    const unstuck = new Unstuck({ enginePath: ENGINE, onLink: (l) => links.push(l), requireCode: true });
+    const result = unstuck.takeover(page, { reason: 'x', timeoutS: 30, requireCode: false });
+    await vi.waitFor(() => expect(links).toHaveLength(1), { timeout: 10_000 });
+    expect(links[0]!.code).toBeUndefined();
+    await unstuck.close();
+    await result.catch(() => {});
+    await page.close();
+  });
+
   it('prints the link to stderr by default', async () => {
     const page = await browser.newPage();
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);

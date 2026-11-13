@@ -80,6 +80,28 @@ describe('MCP server', () => {
     await server.close();
   }, 30_000);
 
+  it('a relay refusal comes back as the tool result detail (relay_quota_exceeded)', async () => {
+    const { RelayError } = await import('@unstuck/core');
+    const refusing = new FakeTransport();
+    refusing.publish = async () => Promise.reject(new RelayError('relay_quota_exceeded', 4402));
+    const { client, server } = await connect({ transport: refusing });
+    const res = (await client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}` } })) as { content: { text: string }[]; isError: boolean };
+    expect(JSON.parse(res.content[0]!.text)).toMatchObject({ status: 'failed', detail: 'relay_quota_exceeded' });
+    expect(res.isError).toBe(true);
+    await server.close();
+  }, 30_000);
+
+  it('UNSTUCK_REQUIRE_CODE=1 adds the 6-digit code to the link line, never to the URL', async () => {
+    const { client, server, err } = await connect({ transport: new FakeTransport(), env: { UNSTUCK_REQUIRE_CODE: '1' } });
+    const call = client.callTool({ name: TOOL_NAME, arguments: { reason: 'Log in', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 10 } });
+    await vi.waitFor(() => expect(err()).toMatch(/→ \S+ \(code \d{6}\)/), { timeout: 15_000 });
+    const url = /→ (\S+)/.exec(err())![1]!;
+    const code = /code (\d{6})/.exec(err())![1]!;
+    expect(url).not.toContain(code);
+    await server.close();
+    await call.catch(() => {});
+  }, 30_000);
+
   it('no browser configured → a clear tool error', async () => {
     const { client, server } = await connect({ transport: new FakeTransport() });
     const res = (await client.callTool({ name: TOOL_NAME, arguments: { reason: 'r' } })) as { content: { text: string }[]; isError: boolean };

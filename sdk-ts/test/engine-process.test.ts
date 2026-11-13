@@ -46,6 +46,18 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     e.kill();
   });
 
+  it('relay settings reach the engine as environment variables (merged over the parent environment)', async () => {
+    const e = await spawnEngine(fakeEngine(`
+import readline from 'node:readline';
+readline.createInterface({ input: process.stdin }).on('line', (l) => {
+  const m = JSON.parse(l);
+  const v = [process.env.UNSTUCK_RELAY_URL, process.env.UNSTUCK_AGENT_KEY, process.env.PATH ? 'path' : 'nopath'].join('|');
+  process.stdout.write(JSON.stringify({ id: m.id, result: { engineVersion: v, protocolVersion: 1 } }) + '\\n');
+});`), { relay: 'wss://relay.example', agentKey: 'KEY' });
+    expect(e.engineVersion).toBe('wss://relay.example|KEY|path');
+    e.kill();
+  });
+
   it('Review Focus 4: a missing binary rejects with UnstuckEngineError naming the path', async () => {
     const t0 = Date.now();
     const err = await spawnEngine('/nonexistent/unstuck-engine', {}).catch((e) => e);

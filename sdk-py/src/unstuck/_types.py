@@ -25,7 +25,9 @@ class TakeoverLink:
     reason: str
     session_id: str
     expires_at: int
+    code: str | None = None
+    """The 6-digit code to give the human, when the takeover requires one. Never part of ``url``."""
 
     @classmethod
     def from_wire(cls, d: Mapping[str, Any]) -> "TakeoverLink":
-        return cls(url=d["url"], reason=d["reason"], session_id=d["sessionId"], expires_at=d["expiresAt"])
+        return cls(url=d["url"], reason=d["reason"], session_id=d["sessionId"], expires_at=d["expiresAt"], code=d.get("code"))

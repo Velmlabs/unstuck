@@ -16,6 +16,8 @@ export interface TakeoverLink {
   reason: string;
   sessionId: string;
   expiresAt: number;
+  /** The 6-digit code to give the human, when the takeover requires one. Never part of `url`. */
+  code?: string;
 }
 
 export interface UnstuckOptions {
@@ -26,9 +28,15 @@ export interface UnstuckOptions {
   timeoutS?: number;
   /** Called when a human is needed. Default: print the link to stderr. */
   onLink?: (link: TakeoverLink) => void;
+  /** Relay to use instead of the local server, e.g. wss://relay.example.com (or set UNSTUCK_RELAY_URL). */
+  relay?: string;
+  /** Key for that relay (or UNSTUCK_AGENT_KEY). With only UNSTUCK_API_KEY set, Unstuck Cloud is used. */
+  agentKey?: string;
+  /** Ask the human for a 6-digit code delivered with the link (default false). */
+  requireCode?: boolean;
 }
 
-const defaultOnLink = (l: TakeoverLink) => process.stderr.write(`Unstuck: a human is needed (${l.reason}) → ${l.url}\n`);
+const defaultOnLink = (l: TakeoverLink) => process.stderr.write(`Unstuck: a human is needed (${l.reason}) → ${l.url}${l.code ? ` (code ${l.code})` : ''}\n`);
 
 /** Playwright and Puppeteer pages are event emitters that emit 'popup' with the new page. */
 function pageEvents(page: unknown): { on(e: string, cb: (p: unknown) => void): unknown; off?(e: string, cb: (p: unknown) => void): unknown } | null {
@@ -55,7 +63,7 @@ export class Unstuck {
    * Pauses your agent until a human finishes. Awaiting this IS the pause: don't drive the page meanwhile.
    * Resolves with the outcome; rejects only with UnstuckEngineError if the engine can't run.
    */
-  async takeover(page: unknown, opts: { reason: string; timeoutS?: number }): Promise<TakeoverResult> {
+  async takeover(page: unknown, opts: { reason: string; timeoutS?: number; requireCode?: boolean }): Promise<TakeoverResult> {
     const pageClosed: TakeoverResult = { status: 'failed', sessionId: '', url: '', durationS: 0, detail: 'page_closed' };
     let attached: AttachedPage;
     try {
@@ -99,7 +107,14 @@ export class Unstuck {
       };
       pageEvents(page)?.on('popup', onPopup);
       engine.setBusy(++this.inFlight > 0);
-      const params: TakeoverParams = { pageId: attached.pageId, reason: opts.reason, timeoutS: opts.timeoutS ?? this.opts.timeoutS, site: siteOf(attached.url()) };
+      const requireCode = opts.requireCode ?? this.opts.requireCode;
+      const params: TakeoverParams = {
+        pageId: attached.pageId,
+        reason: opts.reason,
+        timeoutS: opts.timeoutS ?? this.opts.timeoutS,
+        site: siteOf(attached.url()),
+        ...(requireCode !== undefined ? { requireCode } : {}),
+      };
       const died = engine.exited.then((code): never => {
         throw new UnstuckEngineError(`engine exited with code ${code}`);
       });
@@ -140,7 +155,7 @@ export class Unstuck {
   private ensureEngine(): Promise<EngineProcess> {
     if (this.engine) return this.engine;
     const started = (async () => {
-      const engine = await spawnEngine(resolveEnginePath(this.opts), { host: this.opts.host, port: this.opts.port });
+      const engine = await spawnEngine(resolveEnginePath(this.opts), { host: this.opts.host, port: this.opts.port, relay: this.opts.relay, agentKey: this.opts.agentKey });
       engine.peer.handle(Methods.cdpSend, (raw) => {
         const p = raw as CdpSendParams;
         const page = this.pages.get(p.pageId);
@@ -156,7 +171,7 @@ export class Unstuck {
       });
       engine.peer.onNotification(Methods.takeoverLink, (raw) => {
         const l = raw as TakeoverLinkParams;
-        (this.opts.onLink ?? defaultOnLink)({ url: l.url, reason: l.reason, sessionId: l.sessionId, expiresAt: l.expiresAt });
+        (this.opts.onLink ?? defaultOnLink)({ url: l.url, reason: l.reason, sessionId: l.sessionId, expiresAt: l.expiresAt, ...(l.code ? { code: l.code } : {}) });
       });
       void engine.exited.then(() => {
         if (this.engine === started) this.engine = null;

@@ -58,7 +58,13 @@ class EngineProcess:
 
 
 async def spawn_engine(
-    path: str, *, host: str | None = None, port: int | None = None, handshake_timeout_s: float = HANDSHAKE_TIMEOUT_S
+    path: str,
+    *,
+    host: str | None = None,
+    port: int | None = None,
+    relay: str | None = None,
+    agent_key: str | None = None,
+    handshake_timeout_s: float = HANDSHAKE_TIMEOUT_S,
 ) -> EngineProcess:
     args = ["--stdio"]
     if host:
@@ -66,8 +72,14 @@ async def spawn_engine(
     if port is not None:
         args += ["--port", str(port)]
     try:
+        # Relay mode is chosen by the engine from its environment (relay spec 5.6).
+        env = dict(os.environ)
+        if relay:
+            env["UNSTUCK_RELAY_URL"] = relay
+        if agent_key:
+            env["UNSTUCK_AGENT_KEY"] = agent_key
         proc = await asyncio.create_subprocess_exec(
-            path, *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=None, limit=16 * 1024 * 1024
+            path, *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=None, limit=16 * 1024 * 1024, env=env
         )
     except OSError as e:
         raise UnstuckEngineError(f"could not start the Unstuck engine at {path}: {e.strerror or e}. {HINT}", path) from e

@@ -5,11 +5,12 @@ import { JsonlFileEventLog, defaultLogPath } from './jsonl-log';
 import { VERSION } from './version';
 import { createMcpServer } from './mcp';
 import { formatReport, runDoctor } from './doctor';
+import { buildTransport } from './transport-select';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { Readable, Writable } from 'node:stream';
 
-export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <port>]
-       unstuck-engine --mcp [--open] [--host <host>] [--port <port>]
+export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <port>] [--relay <wss://…> [--agent-key <key>]]
+       unstuck-engine --mcp [--open] [--host <host>] [--port <port>] [--relay <wss://…> [--agent-key <key>]]
        unstuck-engine doctor --cdp <url>
        unstuck-engine --version | --help
 
@@ -22,6 +23,10 @@ doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
 Runs the Unstuck engine for one SDK process over JSON lines on stdin/stdout.
 The viewer is served on 127.0.0.1 by default (UNSTUCK_HOST, UNSTUCK_PORT,
 UNSTUCK_PUBLIC_URL and UNSTUCK_LOG override defaults).
+
+Relay mode: --relay/--agent-key, else UNSTUCK_RELAY_URL + UNSTUCK_AGENT_KEY, else
+UNSTUCK_API_KEY (Unstuck Cloud, wss://unstuck.sh). UNSTUCK_REQUIRE_CODE=1 asks
+humans for a 6-digit code sent with the link.
 `;
 
 export interface CliIO {
@@ -35,12 +40,12 @@ export interface CliIO {
 /** Returns the process exit code. */
 export async function main(argv: string[], io: CliIO): Promise<number> {
   let positionals: string[];
-  let values: { cdp?: string; stdio?: boolean; mcp?: boolean; open?: boolean; version?: boolean; help?: boolean; host?: string; port?: string };
+  let values: { cdp?: string; stdio?: boolean; mcp?: boolean; open?: boolean; version?: boolean; help?: boolean; host?: string; port?: string; relay?: string; 'agent-key'?: string };
   try {
     ({ values, positionals } = parseArgs({
       args: argv,
       allowPositionals: true,
-      options: { cdp: { type: 'string' }, stdio: { type: 'boolean' }, mcp: { type: 'boolean' }, open: { type: 'boolean' }, version: { type: 'boolean' }, help: { type: 'boolean' }, host: { type: 'string' }, port: { type: 'string' } },
+      options: { cdp: { type: 'string' }, stdio: { type: 'boolean' }, mcp: { type: 'boolean' }, open: { type: 'boolean' }, version: { type: 'boolean' }, help: { type: 'boolean' }, host: { type: 'string' }, port: { type: 'string' }, relay: { type: 'string' }, 'agent-key': { type: 'string' } },
       strict: true,
     }));
   } catch (e) {
@@ -80,14 +85,22 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
     return 2;
   }
   const warn = (m: string) => io.stderr.write(`[unstuck] ${m}\n`);
+  const requireCode = io.env.UNSTUCK_REQUIRE_CODE === '1';
   let transport;
-  try {
-    transport = await createEmbeddedTransport({ assets: io.assets, host: values.host, port, env: io.env, warn });
-  } catch (e) {
-    io.stderr.write(`[unstuck] could not start the viewer server: ${(e as Error).message}\n`);
-    return 1;
+  const relay = buildTransport({ relay: values.relay, agentKey: values['agent-key'] }, io.env, io.stderr);
+  if (relay) {
+    transport = relay.transport;
+    io.stderr.write(`[unstuck] engine ${VERSION}; ${relay.description}\n`);
+  } else {
+    try {
+      const embedded = await createEmbeddedTransport({ assets: io.assets, host: values.host, port, env: io.env, warn });
+      transport = embedded;
+      io.stderr.write(`[unstuck] engine ${VERSION}; viewer server listening on http://${embedded.host}:${embedded.port}\n`);
+    } catch (e) {
+      io.stderr.write(`[unstuck] could not start the viewer server: ${(e as Error).message}\n`);
+      return 1;
+    }
   }
-  io.stderr.write(`[unstuck] engine ${VERSION}; viewer server listening on http://${transport.host}:${transport.port}\n`);
   if (values.mcp) {
     const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open });
     const closed = new Promise<void>((r) => io.stdin.once('end', () => r()));
@@ -97,6 +110,6 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
     await server.close();
     return 0;
   }
-  await runStdioHost({ input: io.stdin, output: io.stdout, transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), version: VERSION });
+  await runStdioHost({ input: io.stdin, output: io.stdout, transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), version: VERSION, requireCode });
   return 0;
 }
