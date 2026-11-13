@@ -86,8 +86,10 @@ describe('local takeover end to end', () => {
     const big = wire.filter((b) => b.length > 1000);
     expect(big.length).toBeGreaterThan(0);
     for (const b of wire) {
-      expect(b.subarray(0, 64).includes(Buffer.from([0xff, 0xd8]))).toBe(false);
-      expect(b[0]).not.toBe(0x7b);
+      // A plaintext frame is [0x01][w][h][FF D8 …]; a plaintext JSON message starts with '{'. Ciphertext is neither
+      // (chance per message ~2^-24 for the frame shape; the '{' check covers JSON only together with no '"t":').
+      expect(b[0] === 0x01 && b[5] === 0xff && b[6] === 0xd8).toBe(false);
+      expect(b.includes(Buffer.from('"t":'))).toBe(false);
     }
     await expect(human.getByText('Solve the test CAPTCHA').count()).resolves.toBe(1);
 

@@ -137,7 +137,9 @@ describe('full takeover through the Node relay', () => {
     expect(r.events.map((e) => e.name)).toEqual(expect.arrayContaining(['session_opened', 'viewer_connected', 'takeover_opened', 'session_closed']));
     for (const b of v.raw) {
       const s = Buffer.from(b);
-      expect(s.includes(Buffer.from([0xff, 0xd8]))).toBe(false);
+      // The frame's plaintext (30 000 bytes of 0x07) must not appear: a run of 16 is ~2^-128 likely by chance.
+      // (Checking for FF D8 anywhere was wrong: 30 KB of ciphertext contains it about a third of the time.)
+      expect(s.includes(Buffer.alloc(16, 7))).toBe(false);
       expect(s.includes(Buffer.from('"ready"'))).toBe(false);
       expect(s.includes(Buffer.from(v.token))).toBe(false);
     }
@@ -287,6 +289,18 @@ describe('edge cases', () => {
     raw.send(Buffer.alloc(3 * 1024 * 1024)); // beyond the server's maxPayload
     await new Promise((res) => raw.once('close', res));
     expect((await fetch(`${r.http}/healthz`)).status).toBe(200);
+  });
+
+  it('Final #5: each session has its own timer: expiry is enforced on time, not at the next sweep', async () => {
+    const r = await relay({ sweepMs: 60_000 });
+    const ws = new WebSocket(`${r.url}/agent/SESSIONEXPIRES_0000000`, ['unstuck-relay.1', 'key.K']);
+    const closed = new Promise<number>((res) => (ws.onclose = (e) => res(e.code)));
+    await new Promise((res) => (ws.onopen = res));
+    ws.send(JSON.stringify({ t: 'hello', expiresAt: Date.now() + 300, secret: 'S' }));
+    await waitFor(() => r.stats().sessions === 1);
+    await waitFor(() => r.stats().sessions === 0, 2000);
+    expect(await closed).toBe(1000);
+    expect(r.events.filter((e) => e.name === 'session_closed')).toHaveLength(1);
   });
 });
 

@@ -53,14 +53,28 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
   const viewerDir = path.resolve(opts.viewerDir);
   const index = await fs.readFile(path.join(viewerDir, 'index.html'));
 
+  // One timer per session at its next deadline (expiry, grace, heartbeat, idle); the sweep is only a backstop.
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const schedule = (id: string) => {
+    clearTimeout(timers.get(id));
+    timers.delete(id);
+    const s = sessions.get(id);
+    if (!s) return;
+    if (s.ended) return void sessions.delete(id);
+    const t = setTimeout(() => {
+      timers.delete(id);
+      if (s.tick() === 'ended') sessions.delete(id);
+      else schedule(id);
+    }, Math.max(0, s.deadline() - now()));
+    t.unref();
+    timers.set(id, t);
+  };
+
   const live = (id: string) => {
     const s = sessions.get(id);
     return s && !s.ended && s.record.secretHash !== null ? s : undefined;
   };
-  const forget = (id: string) => {
-    const s = sessions.get(id);
-    if (s?.ended) sessions.delete(id);
-  };
+  const forget = (id: string) => schedule(id);
   const ipOf = (req: http.IncomingMessage) =>
     (opts.trustProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim()) || req.socket.remoteAddress || 'unknown';
 
@@ -137,11 +151,12 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
         ws.on('error', () => ws.terminate()); // oversize frame, bad UTF-8, reset: drop this socket only
         const c = s.attachViewer(toSocket(ws));
         if (c === null) return ws.close(1013, 'try again later');
+        schedule(id);
         ws.on('message', (data: Buffer, isBinary: boolean) => {
           if (data.length > RELAY_LIMITS.viewerPayloadMax) return ws.close(RELAY_CLOSE.tooBig, 'too big');
           s.viewerMessage(c, payload(data, isBinary));
         });
-        ws.on('close', () => s.viewerClosed(c));
+        ws.on('close', () => (s.viewerClosed(c), schedule(id)));
       });
     }
 
@@ -163,11 +178,12 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
       opts.onAgent?.();
       const rs = toSocket(ws);
       session.attachAgent(rs);
+      schedule(id);
       ws.on('message', (data: Buffer, isBinary: boolean) => {
         session.agentMessage(rs, payload(data, isBinary));
         void session.flush().then(() => forget(id));
       });
-      ws.on('close', () => session.agentClosed(rs));
+      ws.on('close', () => (session.agentClosed(rs), schedule(id)));
     });
   }
 
@@ -177,6 +193,7 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
     for (const [id, s] of sessions) {
       if (s.record.secretHash === null && t - s.record.createdAt >= RELAY_LIMITS.heartbeatMs) s.end('never_registered');
       if (s.tick() === 'ended') sessions.delete(id);
+      else schedule(id);
     }
     viewerLimit.prune();
     agentLimit.prune();
@@ -193,6 +210,8 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
     stats: () => ({ sessions: sessions.size, limiterBuckets: viewerLimit.size() + agentLimit.size() }),
     async close() {
       clearInterval(sweep);
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
       for (const ws of wss.clients) ws.close(1001, 'relay shutting down');
       for (const s of sessions.values()) s.end('shutdown');
       sessions.clear();
