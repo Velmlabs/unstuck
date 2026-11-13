@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Drag puzzles fixture</title>
+    <style>
+      body { margin: 0; font: 16px sans-serif; background: #fafafa; }
+      #track { position: absolute; left: 100px; top: 80px; width: 400px; height: 48px; background: #e5e7eb; border-radius: 24px; }
+      #knob { position: absolute; left: 0; top: 0; width: 48px; height: 48px; background: #2563eb; border-radius: 24px; cursor: grab; }
+      #piece { position: absolute; left: 100px; top: 260px; width: 80px; height: 80px; background: #f59e0b; touch-action: none; }
+      #hole { position: absolute; left: 420px; top: 260px; width: 90px; height: 90px; border: 3px dashed #999; }
+      #card { position: absolute; left: 100px; top: 480px; width: 90px; height: 60px; background: #10b981; }
+      #bin { position: absolute; left: 420px; top: 460px; width: 120px; height: 100px; border: 3px dashed #555; }
+    </style>
+  </head>
+  <body>
+    <!-- 1. Slider CAPTCHA (GeeTest/Tencent style): mouse events, must be dragged with the button held, along a real path -->
+    <div id="track"><div id="knob"></div></div>
+    <!-- 2. "Drag the piece into the gap": pointer events with pointer capture -->
+    <div id="piece"></div><div id="hole"></div>
+    <!-- 3. Native HTML5 drag and drop -->
+    <div id="card" draggable="true"></div><div id="bin"></div>
+    <script>
+      window.slider = 'idle';
+      window.puzzle = 'idle';
+      window.dnd = 'idle';
+
+      // 1. Slider: target offset 250 px (±12), at least 5 moves, every move with the left button held.
+      const knob = document.getElementById('knob');
+      let start = null, moves = 0, x = 0;
+      knob.addEventListener('mousedown', (e) => { start = e.clientX; moves = 0; window.slider = 'dragging'; });
+      document.addEventListener('mousemove', (e) => {
+        if (start === null) return;
+        if ((e.buttons & 1) !== 1) { start = null; window.slider = 'dropped: no button held'; return; }
+        moves++;
+        x = Math.max(0, Math.min(352, e.clientX - start));
+        knob.style.left = x + 'px';
+      });
+      document.addEventListener('mouseup', () => {
+        if (start === null) return;
+        start = null;
+        window.slider = Math.abs(x - 250) <= 12 && moves >= 5 ? 'ok' : `fail: x=${x} moves=${moves}`;
+      });
+
+      // 2. Pointer-events drag with capture.
+      const piece = document.getElementById('piece');
+      let grab = null;
+      piece.addEventListener('pointerdown', (e) => { piece.setPointerCapture(e.pointerId); grab = { dx: e.clientX - piece.offsetLeft, dy: e.clientY - piece.offsetTop }; window.puzzle = 'dragging'; });
+      piece.addEventListener('pointermove', (e) => {
+        if (!grab || (e.buttons & 1) !== 1) return;
+        piece.style.left = e.clientX - grab.dx + 'px';
+        piece.style.top = e.clientY - grab.dy + 'px';
+      });
+      piece.addEventListener('pointerup', () => {
+        grab = null;
+        const p = piece.getBoundingClientRect(), h = document.getElementById('hole').getBoundingClientRect();
+        window.puzzle = p.left >= h.left - 5 && p.right <= h.right + 5 && p.top >= h.top - 5 && p.bottom <= h.bottom + 5 ? 'ok' : `fail: ${Math.round(p.left)},${Math.round(p.top)}`;
+      });
+
+      // 3. HTML5 drag and drop.
+      const card = document.getElementById('card'), bin = document.getElementById('bin');
+      card.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/plain', 'card'); window.dnd = 'dragging'; });
+      bin.addEventListener('dragover', (e) => e.preventDefault());
+      bin.addEventListener('drop', (e) => { e.preventDefault(); window.dnd = e.dataTransfer.getData('text/plain') === 'card' ? 'ok' : 'fail: no data'; });
+    </script>
+  </body>
+</html>

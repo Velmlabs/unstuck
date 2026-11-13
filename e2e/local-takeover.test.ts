@@ -15,6 +15,7 @@ const FIXTURES: Record<string, Buffer> = {
   '/': fs.readFileSync(path.join(here, 'fixtures/fake-captcha.html')),
   '/popup-opener': fs.readFileSync(path.join(here, 'fixtures/popup-opener.html')),
   '/popup': fs.readFileSync(path.join(here, 'fixtures/popup.html')),
+  '/drag': fs.readFileSync(path.join(here, 'fixtures/drag-puzzles.html')),
 };
 
 let server: http.Server;
@@ -195,3 +196,54 @@ describe('local takeover end to end', () => {
     await page.close();
   });
 });
+
+/** A finger dragging across the human's screen, with a slightly wobbly, human-like path. */
+async function fingerDrag(human: any, from: { x: number; y: number }, to: { x: number; y: number }, steps = 24) {
+  const s = await human.context().newCDPSession(human);
+  const point = (x: number, y: number) => ({ touchPoints: [{ x, y, id: 1 }] });
+  await s.send('Input.dispatchTouchEvent', { type: 'touchStart', ...point(from.x, from.y) });
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    const ease = t * t * (3 - 2 * t);
+    await s.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      ...point(from.x + (to.x - from.x) * ease, from.y + (to.y - from.y) * ease + Math.sin(i) * 1.5),
+    });
+    await new Promise((r) => setTimeout(r, 16));
+  }
+  await s.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+}
+
+describe('drag CAPTCHAs (sliders, drag-the-piece, drag and drop)', () => {
+  it('a phone-sized human solves all three by dragging with a finger', async () => {
+    const { page, unstuck, result, link } = await startTakeover({ path: '/drag' });
+    const { ctx, human } = await openHuman(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width === 1280, null, { timeout: 15_000 });
+
+    const drag = async (fromSel: string, dx: number, dy: number) => {
+      const from = await centerOf(page, fromSel);
+      const a = await canvasPointFor(human, from);
+      const b = await canvasPointFor(human, { x: from.x + dx, y: from.y + dy });
+      await fingerDrag(human, a, b);
+    };
+
+    await drag('#knob', 250, 0);
+    await expect.poll(() => page.evaluate('window.slider'), { timeout: 10_000 }).toBe('ok');
+
+    const piece = await centerOf(page, '#piece');
+    const hole = await centerOf(page, '#hole');
+    await drag('#piece', hole.x - piece.x, hole.y - piece.y);
+    await expect.poll(() => page.evaluate('window.puzzle'), { timeout: 10_000 }).toBe('ok');
+
+    const card = await centerOf(page, '#card');
+    const bin = await centerOf(page, '#bin');
+    await drag('#card', bin.x - card.x, bin.y - card.y);
+    await expect.poll(() => page.evaluate('window.dnd'), { timeout: 10_000 }).toBe('ok');
+
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await unstuck.close();
+    await ctx.close();
+  }, 90_000);
+});
+
