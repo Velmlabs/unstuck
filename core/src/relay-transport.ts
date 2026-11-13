@@ -135,6 +135,14 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
         if (!m) return;
         if (m.t === 'registered') {
           if (registered) return;
+          if (s.gone) {
+            // The takeover ended while this socket was connecting: release the relay's session at once.
+            clearTimeout(timer);
+            ws.send('{"t":"end"}');
+            ws.onclose = null;
+            ws.close(1000);
+            return reject(new RelayError('relay_unreachable'));
+          }
           registered = true;
           clearTimeout(timer);
           if (s.everRegistered) {
@@ -193,6 +201,8 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
       ws.send('{"t":"end"}');
       ws.onclose = null;
       ws.close(1000);
+    } else if (ws && ws.readyState === 0) {
+      ws.close(1000); // still connecting: don't let it register a session nobody will use
     }
   };
 

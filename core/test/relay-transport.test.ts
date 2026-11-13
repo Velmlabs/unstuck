@@ -225,6 +225,30 @@ describe('createRelayTransport', () => {
     expect(FakeWs.all.length).toBe(n + 1);
   });
 
+  it('Final #4: unpublish during a reconnect closes the connecting socket, and a late registration is ended', async () => {
+    const { t, ws } = await published();
+    ws.drop();
+    await vi.advanceTimersByTimeAsync(500);
+    const connecting = FakeWs.all[1]!;
+    expect(connecting.readyState).toBe(0);
+    await t.unpublish(ID);
+    expect(connecting.readyState).toBe(3);
+    // A relay that registers it anyway gets an immediate end.
+    connecting.readyState = 1;
+    connecting.text({ t: 'registered' });
+    expect(connecting.json().at(-1)).toEqual({ t: 'end' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(FakeWs.all).toHaveLength(2);
+  });
+
+  it('Final #4: close() while the first publish is still connecting closes that socket', async () => {
+    const t = make('K');
+    const p = t.publish(ID, { expiresAt: 1 });
+    await t.close();
+    expect(FakeWs.all[0]!.readyState).toBe(3);
+    await expect(p).rejects.toBeInstanceOf(RelayError);
+  });
+
   it('close() unpublishes every session', async () => {
     const { t, ws } = await published();
     await t.close();
