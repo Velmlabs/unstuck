@@ -29,7 +29,8 @@ export const RELAY_CLOSE = {
   refused: (status: number) => 4000 + status,
 } as const;
 
-export type RelayToAgent = { t: 'open'; c: number } | { t: 'close'; c: number } | { t: 'ping' };
+/** `registered` confirms a hello (first registration or a reconnect); only then is the session live. */
+export type RelayToAgent = { t: 'open'; c: number } | { t: 'close'; c: number } | { t: 'ping' } | { t: 'registered' };
 export type AgentToRelay =
   | { t: 'hello'; expiresAt: number; secret: string }
   | { t: 'close'; c: number; code: number }
@@ -43,6 +44,7 @@ const RelayToAgentSchema = Type.Union([
   Type.Object({ t: Type.Literal('open'), c: C }, strict),
   Type.Object({ t: Type.Literal('close'), c: C }, strict),
   Type.Object({ t: Type.Literal('ping') }, strict),
+  Type.Object({ t: Type.Literal('registered') }, strict),
 ]);
 const AgentToRelaySchema = Type.Union([
   Type.Object({ t: Type.Literal('hello'), expiresAt: Type.Number(), secret: Type.String({ minLength: 1, maxLength: 128 }) }, strict),

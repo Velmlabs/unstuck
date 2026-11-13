@@ -68,8 +68,10 @@ describe('six-digit code', () => {
     await settle();
     const resumeKey = holder.json()[0].resumeKey;
     const guesser = t.open();
-    for (let i = 0; i < 5; i++) guesser.push({ t: 'hello', token: t.token(), code: t.wrong() });
-    await settle();
+    for (let i = 0; i < 5; i++) {
+      guesser.push({ t: 'hello', token: t.token(), code: t.wrong() }); // a viewer waits for each reply
+      await settle();
+    }
     const fresh = t.open();
     fresh.push({ t: 'hello', token: t.token(), code: t.links[0]!.code });
     await settle();
@@ -88,8 +90,10 @@ describe('six-digit code', () => {
     const t = setup(true);
     await settle();
     const guesser = t.open();
-    for (let i = 0; i < 5; i++) guesser.push({ t: 'hello', token: t.token(), code: t.wrong() });
-    await settle();
+    for (let i = 0; i < 5; i++) {
+      guesser.push({ t: 'hello', token: t.token(), code: t.wrong() }); // a viewer waits for each reply
+      await settle();
+    }
     expect(t.result()).toBeUndefined();
     await vi.advanceTimersByTimeAsync(600_000);
     await settle();

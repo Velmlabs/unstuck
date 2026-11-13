@@ -75,4 +75,42 @@ describe('sealConnection', () => {
     expect(t.raw.sent).toHaveLength(1);
     expect(t.raw.closed?.code).toBe(1008);
   });
+
+  it('after close: sends are ignored, late messages are dropped, a second close is a no-op', async () => {
+    const t = await setup();
+    const late = await seal(t.key, 'S1', 'v2e', enc('{"t":"ping"}'));
+    t.conn.close(1000);
+    t.conn.close(1000);
+    t.conn.send('{"t":"x"}');
+    t.raw.push(late);
+    await tick();
+    expect(t.raw.sent).toEqual([]);
+    expect(t.got).toEqual([]);
+  });
+
+  it('a text message from the wire is treated as bytes and must still open', async () => {
+    const t = await setup();
+    t.raw.push('{"t":"hello"}');
+    await tick();
+    expect(t.raw.closed?.code).toBe(1008);
+  });
+
+  it('messages queued behind a bad one are not delivered', async () => {
+    const t = await setup();
+    t.raw.push(new Uint8Array(40));
+    t.raw.push(await seal(t.key, 'S1', 'v2e', enc('{"t":"ping"}')));
+    await tick();
+    expect(t.got).toEqual([]);
+  });
+
+  it('the remote closing stops delivery of messages still being opened', async () => {
+    const t = await setup();
+    let closed = 0;
+    t.conn.onClose(() => closed++);
+    t.raw.push(await seal(t.key, 'S1', 'v2e', enc('{"t":"ping"}')));
+    t.raw.close(1006);
+    await tick();
+    expect(closed).toBe(1);
+    expect(t.got).toEqual([]);
+  });
 });

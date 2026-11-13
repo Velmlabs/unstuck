@@ -85,6 +85,7 @@ The agent key travels in `Sec-WebSocket-Protocol`. Browsers, Node's global `WebS
 The relay multiplexes every viewer connection of a session onto that session's one agent socket. Each viewer connection gets a relay-assigned connection number `c` (u32, starting at 1).
 
 **Text frames (JSON control), relay → agent**
+- `{"t":"registered"}`: the relay accepted the `hello` (first registration or a reconnect). Only now is the session live; `publish()` resolves on it (ruling, Plan 3 Task 7).
 - `{"t":"open","c":N}`: a viewer connected.
 - `{"t":"close","c":N}`: that viewer went away.
 - `{"t":"ping"}`: heartbeat.
@@ -112,7 +113,7 @@ The relay never parses payloads. Anything else on either socket, such as unknown
 ### 5.5 Relay behaviour (`relay-core`)
 
 **Lifecycle**
-1. An agent connects to `/agent/<id>`. The host calls `authorize(agentKey, { sessionId, ip })` before accepting the upgrade. On refusal it answers the upgrade with that HTTP status (401, 402, 403 or 429) and a JSON body `{error}`, and the engine maps it (§5.7). A second agent socket for a registered `<id>` replaces the first only if its `hello` carries the session's secret and the same key; otherwise it's closed with 4409. (A different key is refused at the upgrade with 409.)
+1. An agent connects to `/agent/<id>`. The host calls `authorize(agentKey, { sessionId, ip })` before letting the agent register. On refusal it **accepts the upgrade and immediately closes it with `4000 + status`** (4401, 4402, 4403 or 4429), with `{error}` as the close reason, because WebSocket clients can't read an upgrade's HTTP status (ruling, Plan 3 Task 7). The engine maps the code (§5.7). A second agent socket for a registered `<id>` replaces the first only if its `hello` carries the session's secret and the same key; otherwise it's closed with 4409. (A different key is refused at the upgrade with 409.)
 2. A viewer connects to `/ws/<id>`. If no agent is registered, the upgrade gets 404. Otherwise the relay assigns `c`, sends `open` to the agent and starts forwarding.
 3. **The agent drops:** viewers are closed with 1012 ("agent reconnecting"). The session stays known for a **60 s grace period**, during which the viewer page keeps showing "reconnecting…" and retries. Its existing resume flow with `resumeKey` takes over once the agent is back. If the grace runs out, the session is forgotten.
 4. **The session ends** on `end`, on expiry, or when the grace runs out. `onEvent(session_closed)` fires once.
@@ -179,10 +180,10 @@ The engine CLI gains `--relay <url>` and `--agent-key <key>`, which beat the env
 
 | Relay answer | `takeover()` result |
 |---|---|
-| 401 or 403 at the agent upgrade | `failed`, detail `relay_unauthorized` |
-| 402 | `failed`, detail `relay_quota_exceeded` (Cloud's free tier is used up) |
-| 429 | `failed`, detail `relay_rate_limited` |
-| Can't connect within 15 s at publish | `failed`, detail `relay_unreachable` |
+| close 4401 or 4403 | `failed`, detail `relay_unauthorized` |
+| close 4402 | `failed`, detail `relay_quota_exceeded` (Cloud's free tier is used up) |
+| close 4429 | `failed`, detail `relay_rate_limited` |
+| No `registered` within 15 s, or any other close before it | `failed`, detail `relay_unreachable` |
 | Drop mid-takeover | reconnect with backoff; viewers see "reconnecting…"; no change in result unless the takeover times out |
 
 `takeover()` never throws for relay errors. That matches §10 of the parent spec.

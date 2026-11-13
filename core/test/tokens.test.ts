@@ -25,8 +25,11 @@ describe('tokens', () => {
   it('rejects a tampered MAC', async () => {
     const key = await importSecret(newSecret());
     const token = await signToken(key, 'sess', 2000);
-    const last = token.at(-1) === 'A' ? 'B' : 'A';
-    await expect(verifyToken(key, token.slice(0, -1) + last, 1)).resolves.toEqual({ ok: false, code: 'token_invalid' });
+    // Flip a character inside the MAC: the last base64url character carries 2 padding bits, so changing
+    // it can decode to the same bytes (that made this test fail about 1 run in 16).
+    const i = token.length - 10;
+    const swapped = token[i] === 'A' ? 'B' : 'A';
+    await expect(verifyToken(key, token.slice(0, i) + swapped + token.slice(i + 1), 1)).resolves.toEqual({ ok: false, code: 'token_invalid' });
   });
 
   it('rejects a tampered payload', async () => {

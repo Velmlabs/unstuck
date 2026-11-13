@@ -27,6 +27,7 @@ describe('registration', () => {
   it('hello registers once, caps expiry at 1 h, and fires session_opened', async () => {
     const { s, agent } = await registered();
     expect(names()).toEqual(['session_opened']);
+    expect(agent.json()).toEqual([{ t: 'registered' }]);
     s.agentMessage(agent, hello('SECRET', now + 10 * 3_600_000));
     await s.flush();
     expect(names()).toEqual(['session_opened']);
@@ -158,6 +159,7 @@ describe('agent drop and reconnect', () => {
     s.attachAgent(back);
     s.agentMessage(back, hello('SECRET'));
     await s.flush();
+    expect(back.json()).toEqual([{ t: 'registered' }]);
     expect(s.record.agentDownSince).toBeNull();
     expect(s.attachViewer(new FakeSocket())).not.toBeNull();
   });

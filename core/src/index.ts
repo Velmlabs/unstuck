@@ -9,3 +9,4 @@ export { applyInput } from './stream/input';
 export { createLatestSender, type FrameSink } from './stream/latest';
 export { nextStatus, isTerminal, InvalidTransitionError, type SessionEvent } from './session/status';
 export { newSessionId, newSecret, importSecret, signToken, verifyToken, type TokenCheck } from './session/tokens';
+export { createRelayTransport, RelayError, type RelayErrorDetail, type RelayTransportOptions } from './relay-transport';

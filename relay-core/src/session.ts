@@ -224,12 +224,14 @@ export class RelaySession {
       this.rec.secretHash = h;
       this.rec.expiresAt = Math.min(m.expiresAt, this.now() + RELAY_LIMITS.maxExpiryMs);
       this.agent = s;
+      s.send('{"t":"registered"}');
       return this.emit({ name: 'session_opened' });
     }
     if (!sameHash(h, this.rec.secretHash)) return s.close(RELAY_CLOSE.replaced, 'session belongs to another agent');
     const old = this.agent;
     this.agent = s;
     this.rec.agentDownSince = null;
+    s.send('{"t":"registered"}');
     if (old) {
       this.lastSeen.delete(old);
       old.close(RELAY_CLOSE.replaced, 'replaced by reconnect');

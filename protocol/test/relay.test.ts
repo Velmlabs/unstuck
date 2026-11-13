@@ -31,7 +31,7 @@ describe('envelope', () => {
 });
 
 describe('control messages', () => {
-  it.each(['{"t":"open","c":1}', '{"t":"close","c":2}', '{"t":"ping"}'])('relay→agent accepts %s', (raw) => {
+  it.each(['{"t":"open","c":1}', '{"t":"close","c":2}', '{"t":"ping"}', '{"t":"registered"}'])('relay→agent accepts %s', (raw) => {
     expect(parseRelayToAgent(raw)).toEqual(JSON.parse(raw));
   });
   it.each([

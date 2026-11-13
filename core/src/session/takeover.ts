@@ -402,7 +402,9 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       const token = await signToken(key, sessionId, expiresAt);
       url = `${baseUrl}#t=${token}&k=${b64urlEncode(rawE2e)}`;
     } catch (e) {
-      return finish('failed', `publish_error: ${(e as Error).message}`);
+      // A relay says why it refused (relay_unauthorized, relay_quota_exceeded, ...): pass that through.
+      const detail = (e as { detail?: unknown }).detail;
+      return finish('failed', typeof detail === 'string' ? detail : `publish_error: ${(e as Error).message}`);
     }
     if (isTerminal(status)) return;
     go('published');
