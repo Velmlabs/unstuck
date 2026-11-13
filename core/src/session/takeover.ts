@@ -24,6 +24,8 @@ import { sealConnection } from './sealed';
 
 export const HELLO_TIMEOUT_MS = 10_000;
 export const RESUME_WINDOW_MS = 60_000;
+/** Wrong 6-digit codes before the link stops admitting anyone new (relay spec §5.8). */
+export const MAX_CODE_ATTEMPTS = 5;
 export const DRAIN_INTERVAL_MS = 50;
 /** Upper bound on waiting for CDP during cleanup, so a dead browser can never stall the result. */
 export const STOP_TIMEOUT_MS = 2_000;
@@ -33,6 +35,8 @@ export interface LinkInfo {
   url: string;
   reason: string;
   expiresAt: number;
+  /** The 6-digit code the human must enter, when required. Never part of the URL. */
+  code?: string;
 }
 
 export interface TakeoverDeps {
@@ -62,6 +66,8 @@ export interface TakeoverOptions {
   closedBefore?: string;
   /** Popups to follow: the newest open popup is what the human sees and controls. */
   popups?: PopupSource;
+  /** Ask the human for a 6-digit code delivered with the link. */
+  requireCode?: boolean;
 }
 
 export interface RunningTakeover {
@@ -108,6 +114,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let leftTimer: ReturnType<typeof setTimeout> | null = null;
   /** The path to humans (e.g. the relay) is down: the viewer-left timer is paused meanwhile. */
   let transportDown = false;
+  const code = opts.requireCode ? newCode() : undefined;
+  let wrongCodes = 0;
   let lastFrame: Uint8Array | null = null;
   let caps: Capabilities = { screencast: true, insertText: true, input: true };
   /** Stack of controllable targets: [page, ...open popups]; the last one is shown to the human. */
@@ -281,7 +289,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     }
   }
 
-  async function onHello(conn: ViewerConnection, token: string, offeredResumeKey?: string): Promise<boolean> {
+  async function onHello(conn: ViewerConnection, token: string, offeredResumeKey?: string, offeredCode?: string): Promise<boolean> {
     const check = await verifyToken(key, token, now());
     if (isTerminal(status)) {
       reject(conn, 'session_closed');
@@ -296,6 +304,24 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       offeredResumeKey !== undefined &&
       offeredResumeKey === resumeKey &&
       (holder !== null || (leftAt !== null && now() - leftAt <= RESUME_WINDOW_MS));
+    if (code !== undefined && !resumeOk) {
+      // Resume needs no code: the resume key proves it's the device that already entered it.
+      if (wrongCodes >= MAX_CODE_ATTEMPTS) {
+        reject(conn, 'session_closed');
+        emit('viewer_rejected', { code: 'code_locked' });
+        return false;
+      }
+      if (offeredCode === undefined) {
+        reject(conn, 'code_required', false);
+        return false;
+      }
+      if (!sameCode(offeredCode, code)) {
+        wrongCodes++;
+        reject(conn, 'code_invalid', false);
+        emit('viewer_rejected', { code: 'code_invalid' });
+        return false;
+      }
+    }
     if (redeemed && !resumeOk) {
       reject(conn, 'token_used');
       emit('viewer_rejected', { code: 'token_used' });
@@ -347,7 +373,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       greeting = true;
       clearTimeout(helloTimer);
       helloTimers.delete(helloTimer);
-      void onHello(conn, msg.token, msg.resumeKey).then((ok) => {
+      void onHello(conn, msg.token, msg.resumeKey, msg.code).then((ok) => {
         greeted = ok;
         greeting = false;
       });
@@ -384,8 +410,24 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     // Notifiers arrive in Plan 4; until then "notifying" completes immediately.
     go('notified');
     emit('link', { expiresAt });
-    opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt });
+    opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) });
   })();
 
   return { result, cancel: (detail) => finish('cancelled', detail) };
+}
+
+/** Uniform 000000–999999 from the CSPRNG (rejection sampling avoids modulo bias). */
+function newCode(): string {
+  const buf = new Uint32Array(1);
+  do crypto.getRandomValues(buf);
+  while (buf[0]! >= 4_294_000_000);
+  return String(buf[0]! % 1_000_000).padStart(6, '0');
+}
+
+/** Constant-time comparison of two 6-digit strings. */
+function sameCode(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }

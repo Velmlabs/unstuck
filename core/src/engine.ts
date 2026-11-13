@@ -15,6 +15,8 @@ export interface EngineOptions {
   now?: () => number;
   defaultTimeoutS?: number;
   onLink?: LinkHandler;
+  /** Default for `requireCode` on every takeover. */
+  requireCode?: boolean;
 }
 
 export interface TakeoverCallOptions {
@@ -24,6 +26,8 @@ export interface TakeoverCallOptions {
   timeoutS?: number;
   site?: string;
   onLink?: LinkHandler;
+  /** Ask the human for a 6-digit code delivered with the link. */
+  requireCode?: boolean;
 }
 
 export interface Engine {
@@ -54,6 +58,7 @@ export function createEngine(opts: EngineOptions): Engine {
         site: call.site,
         onLink: call.onLink ?? opts.onLink,
         popups: call.popups,
+        requireCode: call.requireCode ?? opts.requireCode,
       });
       running.add(session);
       try {
