@@ -10,7 +10,7 @@
     "build": "pnpm -r build",
     "test": "pnpm run test:scripts && pnpm -r test && pnpm run test:py",
     "test:scripts": "vitest run --config scripts/vitest.config.ts --coverage",
-    "check:runtime": "node scripts/check-runtime-agnostic.mjs protocol/src core/src viewer/src",
+    "check:runtime": "node scripts/check-runtime-agnostic.mjs protocol/src core/src viewer/src relay-core/src",
     "test:py": "cd sdk-py && uv run pytest --cov=unstuck -q"
   },
   "devDependencies": {

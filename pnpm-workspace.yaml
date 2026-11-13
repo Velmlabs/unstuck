@@ -3,6 +3,7 @@ packages:
   - core
   - engine
   - viewer
+  - relay-core
   - sdk-ts
   - e2e
   - examples/*
