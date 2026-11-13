@@ -130,6 +130,49 @@ describe('takeover through a Durable Object', () => {
     await a.engine.close();
   });
 
+  it('Final #6: frames do not cause storage writes; billing state does, and the alarm flushes counters', async () => {
+    const a = await agent();
+    const v = await viewerFor(a.link.url);
+    await v.send({ t: 'hello', token: v.token });
+    await waitFor(() => v.json.some((m) => m.t === 'ready'));
+    for (let i = 0; i < 5; i++) a.cdp.emit('Page.screencastFrame', frame);
+    await waitFor(() => v.raw.filter((b) => b.length > 4096).length >= 2);
+    const rec = await runInDurableObject(stub(a.id), async (_i, state) => (await state.storage.get<any>('rec'))!);
+    const received = v.raw.reduce((n, b) => n + b.length, 0);
+    expect(rec.billed).toBe(true);
+    // Stored counters lag behind: only the write that recorded billing happened, not one per frame.
+    expect(rec.bytesToViewers).toBeLessThan(received);
+    await runDurableObjectAlarm(stub(a.id));
+    const after = await runInDurableObject(stub(a.id), async (_i, state) => (await state.storage.get<any>('rec'))!);
+    expect(after.bytesToViewers).toBeGreaterThanOrEqual(received); // the alarm flushes them (more frames may have arrived)
+    await a.engine.close();
+  });
+
+  it('Final #7: after an agent reconnect only one socket is marked as the live agent', async () => {
+    const id = 'SESSIONREPLACE_0000000';
+    const helloMsg = JSON.stringify({ t: 'hello', expiresAt: Date.now() + 60_000, secret: 'SAME' });
+    const registered = (ws: FetchWs) => {
+      const got: string[] = [];
+      ws.onmessage = (e) => got.push(String(e.data));
+      return () => got.includes('{"t":"registered"}');
+    };
+    const first = new FetchWs(`wss://relay.test/agent/${id}`, ['unstuck-relay.1', 'key.K']);
+    await waitFor(() => first.readyState === 1);
+    const firstOk = registered(first);
+    first.send(helloMsg);
+    await waitFor(firstOk);
+    const second = new FetchWs(`wss://relay.test/agent/${id}`, ['unstuck-relay.1', 'key.K']);
+    await waitFor(() => second.readyState === 1);
+    const secondOk = registered(second);
+    second.send(helloMsg);
+    await waitFor(secondOk);
+    const actives = await runInDurableObject(stub(id), async (_i, state) =>
+      state.getWebSockets().filter((ws) => (ws.deserializeAttachment() as { active?: boolean } | null)?.active === true).length,
+    );
+    expect(actives).toBe(1);
+    second.close();
+  });
+
   it('keeps forwarding after the Durable Object is evicted (hibernation)', async () => {
     const a = await agent();
     const v = await viewerFor(a.link.url);

@@ -27,6 +27,8 @@ export function makeRelaySessionDO<E>(opts: DoOptions<E>) {
     private session: RelaySession | null = null;
     private readonly wrappers = new WeakMap<WebSocket, RelaySocket>();
     private alarmAt: number | null = null;
+    /** What was last written; byte counters alone don't justify a write (one per frame would be billed). */
+    private savedKey: string | null = null;
 
     private readonly onEvent: OnEvent = (e) => {
       const p = opts.onEvent?.(e, this.env);
@@ -78,16 +80,25 @@ export function makeRelaySessionDO<E>(opts: DoOptions<E>) {
       return (this.session = s);
     }
 
-    /** After every change: persist and re-arm the alarm, or wipe everything once the takeover is over. */
-    private async settle(s: RelaySession): Promise<void> {
+    /**
+     * After every change: persist when state that matters changed (registration, billing, agent up/down, viewers,
+     * expiry) and re-arm the alarm, or wipe everything once the takeover is over. `flush` also saves byte counters.
+     */
+    private async settle(s: RelaySession, flush = false): Promise<void> {
       if (s.ended) {
         this.session = null;
         this.alarmAt = null;
+        this.savedKey = null;
         await this.ctx.storage.deleteAll();
         await this.ctx.storage.deleteAlarm();
         return;
       }
-      await this.ctx.storage.put('rec', s.record);
+      const r = s.record;
+      const key = JSON.stringify([r.secretHash, r.billed, r.agentDownSince, r.nextC, r.expiresAt, r.keyHash, r.account]);
+      if (flush || key !== this.savedKey) {
+        this.savedKey = key;
+        await this.ctx.storage.put('rec', r);
+      }
       const at = s.deadline();
       if (at !== this.alarmAt) {
         this.alarmAt = at;
@@ -166,7 +177,7 @@ export function makeRelaySessionDO<E>(opts: DoOptions<E>) {
       const s = await this.load();
       if (!s) return void (await this.ctx.storage.deleteAll());
       s.tick();
-      await this.settle(s);
+      await this.settle(s, true);
     }
   };
 }
