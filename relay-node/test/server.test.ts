@@ -141,7 +141,7 @@ describe('full takeover through the Node relay', () => {
       expect(s.includes(Buffer.from('"ready"'))).toBe(false);
       expect(s.includes(Buffer.from(v.token))).toBe(false);
     }
-    expect(r.stats().sessions).toBe(0);
+    await waitFor(() => r.stats().sessions === 0);
   });
 
   it('Review Focus 1: the agent socket dropping mid-takeover recovers and still resolves', async () => {
@@ -271,6 +271,22 @@ describe('edge cases', () => {
     now += 31_000;
     await waitFor(() => r.stats().sessions === 0);
     ws.close();
+  });
+
+  it('Final #1: a malformed asset path is a 404, not a crash', async () => {
+    const r = await relay();
+    expect((await fetch(`${r.http}/assets/%E0`)).status).toBe(404);
+    expect((await fetch(`${r.http}/healthz`)).status).toBe(200);
+  });
+
+  it('Final #2: an oversize viewer frame closes that viewer without crashing the relay', async () => {
+    const r = await relay();
+    const a = await agent(r.url);
+    const raw = new (await import('ws')).WebSocket(`${r.url.replace('ws:', 'ws:')}/ws/${a.link.sessionId}`);
+    await new Promise((res) => raw.once('open', res));
+    raw.send(Buffer.alloc(3 * 1024 * 1024)); // beyond the server's maxPayload
+    await new Promise((res) => raw.once('close', res));
+    expect((await fetch(`${r.http}/healthz`)).status).toBe(200);
   });
 });
 

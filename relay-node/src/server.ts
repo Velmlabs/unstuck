@@ -64,7 +64,15 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
   const ipOf = (req: http.IncomingMessage) =>
     (opts.trustProxy && String(req.headers['x-forwarded-for'] ?? '').split(',')[0]!.trim()) || req.socket.remoteAddress || 'unknown';
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer((req, res) => {
+    // Never let one request take the relay (and every live takeover) down.
+    handle(req, res).catch(() => {
+      if (!res.headersSent) res.writeHead(500, { 'content-type': 'text/plain' });
+      res.end();
+    });
+  });
+
+  async function handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<unknown> {
     const url = new URL(req.url ?? '/', 'http://x');
     const p = url.pathname;
     if (p === '/healthz') {
@@ -84,8 +92,14 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
       return res.end(ok ? index : EXPIRED_HTML);
     }
     if (p.startsWith('/assets/')) {
-      const file = path.resolve(viewerDir, '.' + decodeURIComponent(p));
-      if (file.startsWith(path.join(viewerDir, 'assets') + path.sep)) {
+      let decoded: string | null = null;
+      try {
+        decoded = decodeURIComponent(p);
+      } catch {
+        // malformed escape: not an asset
+      }
+      const file = decoded === null ? '' : path.resolve(viewerDir, '.' + decoded);
+      if (decoded !== null && file.startsWith(path.join(viewerDir, 'assets') + path.sep)) {
         const body = await fs.readFile(file).catch(() => null);
         if (body) {
           res.writeHead(200, { 'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream', 'cache-control': 'public, max-age=3600', 'x-content-type-options': 'nosniff' });
@@ -95,7 +109,7 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
     }
     res.writeHead(404, { 'content-type': 'text/plain' });
     res.end('not found');
-  });
+  }
 
   const wss = new WebSocketServer({
     noServer: true,
@@ -105,7 +119,12 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
   const refuseHttp = (socket: Duplex, status: number, text: string) =>
     socket.end(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
 
-  server.on('upgrade', async (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
+  server.on('upgrade', (req: http.IncomingMessage, socket: Duplex, head: Buffer) => {
+    socket.on('error', () => socket.destroy());
+    onUpgrade(req, socket, head).catch(() => socket.destroy());
+  });
+
+  async function onUpgrade(req: http.IncomingMessage, socket: Duplex, head: Buffer): Promise<unknown> {
     const m = /^\/(agent|ws)\/([^/]+)$/.exec(new URL(req.url ?? '/', 'http://x').pathname);
     if (!m || !SESSION_ID_RE.test(m[2]!)) return refuseHttp(socket, 404, 'Not Found');
     const [, kind, id] = m as unknown as [string, 'agent' | 'ws', string];
@@ -115,6 +134,7 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
       const s = live(id);
       if (!s) return refuseHttp(socket, 404, 'Not Found');
       return wss.handleUpgrade(req, socket, head, (ws) => {
+        ws.on('error', () => ws.terminate()); // oversize frame, bad UTF-8, reset: drop this socket only
         const c = s.attachViewer(toSocket(ws));
         if (c === null) return ws.close(1013, 'try again later');
         ws.on('message', (data: Buffer, isBinary: boolean) => {
@@ -132,6 +152,7 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
       ? ({ ok: false, status: 429, error: 'rate_limited' } as const)
       : await opts.authorize(key, { sessionId: id, ip: ipOf(req) }).catch(() => ({ ok: false, status: 403, error: 'authorize_failed' }) as const);
     wss.handleUpgrade(req, socket, head, (ws) => {
+      ws.on('error', () => ws.terminate());
       // Refusals are delivered as close codes (4000 + status): WebSocket clients can't read an upgrade's HTTP status.
       if (!verdict.ok) return ws.close(RELAY_CLOSE.refused(verdict.status), JSON.stringify({ error: verdict.error }));
       let s = sessions.get(id);
@@ -148,7 +169,7 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
       });
       ws.on('close', () => session.agentClosed(rs));
     });
-  });
+  }
 
   // Housekeeping (spec §5.9): tick every session, drop ended ones and sessions that never registered.
   const sweep = setInterval(() => {
