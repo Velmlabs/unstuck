@@ -332,6 +332,7 @@ describe('takeover session', () => {
     await settle();
     const v = t.transport.connect(t.links[0]!.url);
     await vi.advanceTimersByTimeAsync(10_000);
+    await settle(); // the close is queued behind the challenge's encryption
     expect(v.closed).not.toBeNull();
     expect(t.result()).toBeUndefined();
     const v2 = await t.join();
@@ -464,7 +465,7 @@ describe('end-to-end encryption', () => {
     v.push({ t: 'hello', token: t.token() });
     await settle();
     expect(v.raw.closed?.code).toBe(1008);
-    expect(v.raw.sent).toEqual([]);
+    expect(v.raw.sent).toHaveLength(1); // only the challenge, which that key can't read
     t.engine.close();
   });
 

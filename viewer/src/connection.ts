@@ -1,4 +1,4 @@
-import { decodeFrame, isJsonPlaintext, open, seal, type EngineToViewer, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@unstuck/protocol';
+import { decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@unstuck/protocol';
 
 export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed';
 type Ready = Extract<EngineToViewer, { t: 'ready' }>;
@@ -13,15 +13,18 @@ export interface ConnectionHandlers {
   onCodeRequest?(invalid: boolean): void;
 }
 
-/** End-to-end sealing for this session (relay spec §5.4). */
+/**
+ * End-to-end sealing for this session (relay spec §5.4). `conn` is the nonce from the engine's challenge ('' for the
+ * challenge itself); `seq` must increase per direction, so a relay can't replay messages.
+ */
 export interface Codec {
-  seal(plain: Uint8Array): Promise<Uint8Array>;
-  open(sealed: Uint8Array): Promise<Uint8Array | null>;
+  seal(conn: string, seq: number, plain: Uint8Array): Promise<Uint8Array>;
+  open(conn: string, sealed: Uint8Array): Promise<{ seq: number; plain: Uint8Array } | null>;
 }
 
 export const e2eCodec = (key: CryptoKey, sessionId: string): Codec => ({
-  seal: (p) => seal(key, sessionId, 'v2e', p),
-  open: (b) => open(key, sessionId, 'e2v', b),
+  seal: (conn, seq, p) => sealMsg(key, sessionId, 'v2e', conn, seq, p),
+  open: (conn, b) => openMsg(key, sessionId, 'e2v', conn, b),
 });
 
 export interface ViewerSocket {
@@ -57,13 +60,23 @@ export function connect(
   const enc = new TextEncoder();
   const dec = new TextDecoder();
 
+  // Per socket: the engine's challenge nonce and the sequence numbers in each direction.
+  let nonce: string | null = null;
+  let outSeq = 0;
+  let lastIn = 0;
+
   /** Seals and sends in order on the socket that was open when the message was queued. */
   const write = (target: WebSocket, m: ViewerToEngine) => {
+    if (nonce === null) return; // nothing goes out before the engine's challenge
+    const conn = nonce;
+    const seq = ++outSeq;
     const plain = enc.encode(JSON.stringify(m));
-    outChain = outChain.then(async () => {
-      const sealed = await codec.seal(plain);
-      if (target.readyState === 1) target.send(sealed);
-    });
+    outChain = outChain
+      .then(async () => {
+        const sealed = await codec.seal(conn, seq, plain);
+        if (target.readyState === 1 && target === ws) target.send(sealed);
+      })
+      .catch(() => {});
   };
   const hello = (target: WebSocket, code?: string) =>
     write(target, { t: 'hello', token, ...(resumeKey ? { resumeKey } : {}), ...(code ? { code } : {}) } as ViewerToEngine);
@@ -89,16 +102,34 @@ export function connect(
     ws = new WS(url);
     ws.binaryType = 'arraybuffer';
     const socket = ws;
+    nonce = null;
+    outSeq = 0;
+    lastIn = 0;
     ws.onopen = () => {
-      hello(socket);
       ping = setInterval(() => socket.readyState === 1 && write(socket, { t: 'ping' }), PING_MS);
     };
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data === 'string') return; // everything from the engine is sealed binary (binaryType arraybuffer)
       const bytes = new Uint8Array(e.data as ArrayBuffer);
       inChain = inChain.then(async () => {
-        const plain = await codec.open(bytes);
-        if (!plain || socket !== ws) return; // not for us (wrong key) or from a socket we've replaced
+        if (socket !== ws) return; // from a socket we've replaced
+        if (nonce === null) {
+          // The first message on every connection is the engine's challenge: hello only after it.
+          const c = await codec.open('', bytes);
+          if (!c || socket !== ws) return;
+          try {
+            const m = JSON.parse(dec.decode(c.plain)) as { t?: string; n?: unknown };
+            if (m.t !== 'challenge' || typeof m.n !== 'string') return;
+            nonce = m.n;
+          } catch {
+            return;
+          }
+          return hello(socket);
+        }
+        const msg = await codec.open(nonce, bytes);
+        if (!msg || socket !== ws || msg.seq <= lastIn) return; // not ours, or a replay
+        lastIn = msg.seq;
+        const plain = msg.plain;
         if (!isJsonPlaintext(plain)) {
           const f = decodeFrame(plain);
           if (f) h.onFrame(f);

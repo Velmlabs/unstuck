@@ -1,4 +1,4 @@
-import { b64urlDecode, importE2eKey, isJsonPlaintext, open, seal } from '@unstuck/protocol';
+import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@unstuck/protocol';
 import type { Transport, ViewerConnection } from '../transport';
 
 /** A fake human's browser tab connected to the session. */
@@ -38,7 +38,8 @@ export class FakeViewer implements ViewerConnection {
 }
 
 /**
- * A human's tab that speaks plaintext to the test but end-to-end ciphertext on the wire, like the real viewer.
+ * A human's tab that speaks plaintext to the test but end-to-end ciphertext on the wire, like the real viewer:
+ * it reads the engine's challenge, then seals every message with the connection nonce and an increasing sequence.
  * `raw` is the connection the engine sees; `sent`/`json()`/`binary()` are what the human decrypted.
  */
 export class SealedFakeViewer extends FakeViewer {
@@ -46,6 +47,10 @@ export class SealedFakeViewer extends FakeViewer {
   private key: Promise<CryptoKey | null>;
   private inChain: Promise<void> = Promise.resolve();
   private outChain: Promise<void> = Promise.resolve();
+  private nonce: string | null = null;
+  private gotNonce!: () => void;
+  private readonly nonceReady = new Promise<void>((r) => (this.gotNonce = r));
+  private seq = 0;
 
   constructor(private readonly sessionId: string, rawKey: Uint8Array | null) {
     super();
@@ -56,21 +61,30 @@ export class SealedFakeViewer extends FakeViewer {
       const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
       this.inChain = this.inChain.then(async () => {
         const k = await this.key;
-        const p = k ? await open(k, this.sessionId, 'e2v', bytes) : null;
-        if (p) this.sent.push(isJsonPlaintext(p) ? new TextDecoder().decode(p) : p);
+        if (!k) return;
+        if (this.nonce === null) {
+          const c = await openMsg(k, this.sessionId, 'e2v', '', bytes);
+          // A wrong key can't read the challenge; it still answers (and the engine will refuse it).
+          this.nonce = c ? (JSON.parse(new TextDecoder().decode(c.plain)) as { n: string }).n : 'unreadable';
+          return this.gotNonce();
+        }
+        const m = await openMsg(k, this.sessionId, 'e2v', this.nonce, bytes);
+        if (m) this.sent.push(isJsonPlaintext(m.plain) ? new TextDecoder().decode(m.plain) : m.plain);
       });
     };
     this.raw.onClose(() => {
       if (!this.closed) this.closed = this.raw.closed;
     });
   }
-  /** The human sends a message: sealed with the link's key (plaintext if the link had none). */
+  /** The human sends a message: sealed for this connection once the challenge arrived (plaintext if the link had no key). */
   override push(msg: object | string | Uint8Array): void {
     const data = typeof msg === 'string' || msg instanceof Uint8Array ? msg : JSON.stringify(msg);
     const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
     this.outChain = this.outChain.then(async () => {
       const k = await this.key;
-      this.raw.push(k ? await seal(k, this.sessionId, 'v2e', bytes) : bytes);
+      if (!k) return this.raw.push(bytes);
+      await this.nonceReady;
+      this.raw.push(await sealMsg(k, this.sessionId, 'v2e', this.nonce!, ++this.seq, bytes));
     });
   }
   override close(code?: number, reason?: string): void {

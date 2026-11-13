@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { encodeFrame, importE2eKey, newE2eKey, open as openSealed, seal } from '@unstuck/protocol';
+import { encodeFrame, importE2eKey, newE2eKey, openMsg, sealMsg } from '@unstuck/protocol';
 import { connect, e2eCodec, type Codec, type ConnectionHandlers } from '../src/connection';
 
 class FakeWs {
@@ -24,9 +24,11 @@ class FakeWs {
     this.readyState = 3;
     this.onclose?.({ code: 1000 });
   }
+  /** Opens, then the engine's challenge arrives (plaintext under the pass-through codec). */
   open() {
     this.readyState = 1;
     this.onopen?.();
+    this.msg({ t: 'challenge', n: 'NONCE' });
   }
   msg(m: object) {
     this.onmessage?.({ data: new TextEncoder().encode(JSON.stringify(m)).buffer });
@@ -44,8 +46,9 @@ const ready = { t: 'ready', reason: 'r', site: 's', expiresAt: 9e12, resumeKey: 
 function handlers(): ConnectionHandlers & Record<string, ReturnType<typeof vi.fn>> {
   return { onReady: vi.fn(), onFrame: vi.fn(), onState: vi.fn(), onError: vi.fn(), onPhase: vi.fn() } as never;
 }
-/** Pass-through codec: the wire format is tested with the real codec below. */
-const plain: Codec = { seal: async (p) => p, open: async (b) => b };
+/** Pass-through codec (increasing sequence numbers): the wire format is tested with the real codec below. */
+let inSeq = 0;
+const plain: Codec = { seal: async (_c, _s, p) => p, open: async (_c, b) => ({ seq: ++inSeq, plain: b }) };
 const make = (h = handlers()) => ({ h, sock: connect('ws://x/ws/abc', 'TOK', plain, h, { WebSocketImpl: FakeWs as never }) });
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
@@ -265,22 +268,27 @@ describe('connect', () => {
     expect(h.onPhase).not.toHaveBeenCalledWith('closed');
   });
 
-  it('with the real codec, everything on the wire is sealed and undecryptable input is ignored', async () => {
+  it('with the real codec: waits for the challenge, then seals hello with its nonce; replays are ignored', async () => {
     const raw = newE2eKey();
     const key = await importE2eKey(raw);
     const h = handlers();
     vi.useRealTimers();
     connect('ws://x/ws/abc', 'TOK', e2eCodec(key, 'SID'), h, { WebSocketImpl: FakeWs as never });
     const ws = FakeWs.all[0]!;
-    ws.open();
+    ws.readyState = 1;
+    ws.onopen?.();
     await new Promise((r) => setTimeout(r, 20));
-    const hello = await openSealed(key, 'SID', 'v2e', ws.sent[0]!);
-    expect(JSON.parse(new TextDecoder().decode(hello!))).toEqual({ t: 'hello', token: 'TOK' });
-    expect(ws.sent[0]![0]).not.toBe(0x7b);
-    ws.onmessage?.({ data: (await seal(key, 'SID', 'e2v', new TextEncoder().encode(JSON.stringify(ready)))).buffer });
-    ws.onmessage?.({ data: new TextEncoder().encode(JSON.stringify(ready)).buffer });
+    expect(ws.sent).toHaveLength(0); // nothing before the challenge
+    const enc = (m: object) => new TextEncoder().encode(JSON.stringify(m));
+    ws.onmessage?.({ data: (await sealMsg(key, 'SID', 'e2v', '', 0, enc({ t: 'challenge', n: 'N1' }))).buffer });
+    await new Promise((r) => setTimeout(r, 20));
+    const hello = await openMsg(key, 'SID', 'v2e', 'N1', ws.sent[0]!);
+    expect(JSON.parse(new TextDecoder().decode(hello!.plain))).toEqual({ t: 'hello', token: 'TOK' });
+    const readyMsg = await sealMsg(key, 'SID', 'e2v', 'N1', 1, enc(ready));
+    ws.onmessage?.({ data: readyMsg.buffer });
+    ws.onmessage?.({ data: readyMsg.slice().buffer }); // replayed by the relay
+    ws.onmessage?.({ data: (await sealMsg(key, 'SID', 'e2v', 'OTHER', 2, enc(ready))).buffer }); // another connection's
     await new Promise((r) => setTimeout(r, 20));
     expect(h.onReady).toHaveBeenCalledTimes(1);
   });
 });
-

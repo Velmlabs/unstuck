@@ -35,7 +35,7 @@ const INCOMPLETE_SCREEN: Screen = {
 /** Seals with the key from the link; the key is imported once, lazily, so connecting stays synchronous. */
 function lazyCodec(raw: Uint8Array, sessionId: string): Codec {
   const codec = importE2eKey(raw).then((k) => e2eCodec(k, sessionId));
-  return { seal: async (p) => (await codec).seal(p), open: async (b) => (await codec).open(b) };
+  return { seal: async (conn, seq, p) => (await codec).seal(conn, seq, p), open: async (conn, b) => (await codec).open(conn, b) };
 }
 
 const FINAL_SCREENS: Partial<Record<SessionStatus, Screen>> = {

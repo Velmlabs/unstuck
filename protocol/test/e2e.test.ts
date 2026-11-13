@@ -43,3 +43,26 @@ describe('end-to-end seal/open', async () => {
     expect(isJsonPlaintext(new Uint8Array())).toBe(false);
   });
 });
+
+describe('per-connection, sequenced messages (Final #8: replay protection)', async () => {
+  const { sealMsg, openMsg, newConnNonce } = await import('../src/e2e');
+  const key = await importE2eKey(newE2eKey());
+  const p = new TextEncoder().encode('{"t":"done"}');
+
+  it('round-trips with the connection nonce and sequence number', async () => {
+    const n = newConnNonce();
+    expect(n).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    const sealed = await sealMsg(key, 'S', 'v2e', n, 7, p);
+    expect(sealed.length).toBe(p.length + 32);
+    expect(await openMsg(key, 'S', 'v2e', n, sealed)).toEqual({ seq: 7, plain: p });
+  });
+
+  it('a message from another connection, or with its sequence number altered, does not open', async () => {
+    const sealed = await sealMsg(key, 'S', 'v2e', 'CONN_A', 1, p);
+    expect(await openMsg(key, 'S', 'v2e', 'CONN_B', sealed)).toBeNull();
+    const bumped = sealed.slice();
+    bumped[3]! ^= 1; // seq 1 → 0: the AAD no longer matches
+    expect(await openMsg(key, 'S', 'v2e', 'CONN_A', bumped)).toBeNull();
+    expect(await openMsg(key, 'S', 'v2e', 'CONN_A', new Uint8Array(31))).toBeNull();
+  });
+});
