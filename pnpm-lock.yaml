@@ -32,6 +32,15 @@ importers:
 
   e2e:
     dependencies:
+      '@unstuck/core':
+        specifier: workspace:*
+        version: link:../core
+      '@unstuck/relay':
+        specifier: workspace:*
+        version: link:../relay-node
+      '@unstuck/relay-core':
+        specifier: workspace:*
+        version: link:../relay-core
       unstuck:
         specifier: workspace:*
         version: link:../sdk-ts
