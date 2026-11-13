@@ -365,9 +365,12 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       helloTimers.delete(helloTimer);
       detachViewer(conn);
     });
-    conn.onMessage((raw) => {
+    // Messages that arrive while a hello is being handled (e.g. Done tapped the moment the screen appears)
+    // wait their turn instead of being dropped.
+    const waiting: (string | Uint8Array)[] = [];
+    const dispatch = (raw: string | Uint8Array): void => {
       if (greeted) return handleInput(conn, raw);
-      if (greeting) return;
+      if (greeting) return void waiting.push(raw);
       const msg = typeof raw === 'string' ? parseViewerMessage(raw) : null;
       if (!msg || msg.t !== 'hello') return reject(conn, 'bad_message');
       greeting = true;
@@ -376,8 +379,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       void onHello(conn, msg.token, msg.resumeKey, msg.code).then((ok) => {
         greeted = ok;
         greeting = false;
+        for (const next of waiting.splice(0)) dispatch(next);
       });
-    });
+    };
+    conn.onMessage(dispatch);
   }
 
   void (async () => {

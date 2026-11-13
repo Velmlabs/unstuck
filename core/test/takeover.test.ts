@@ -507,3 +507,33 @@ describe('end-to-end encryption', () => {
   });
 });
 
+describe('messages that arrive while the hello is still being handled', () => {
+  it('a Done tapped as soon as the screen appears is not lost', async () => {
+    const held: (() => void)[] = [];
+    const t = setup();
+    await settle();
+    // (the capability probe already ran) hold the stream start, as a real browser takes a moment
+    t.cdp.respond('Page.startScreencast', () => new Promise<object>((r) => held.push(() => r({}))));
+    const v = t.transport.connect(t.links[0]!.url);
+    v.push({ t: 'hello', token: t.token() });
+    v.push({ t: 'done' }); // the human taps Done before the stream finished starting
+    await settle();
+    held.splice(0).forEach((r) => r());
+    await settle();
+    await t.done;
+    expect(t.result()?.status).toBe('resolved');
+  });
+
+  it('messages after a refused hello are still treated as a new hello', async () => {
+    const t = setup();
+    await settle();
+    const v = t.transport.connect(t.links[0]!.url);
+    v.push({ t: 'hello', token: 'bogus.token' });
+    v.push({ t: 'done' });
+    await settle();
+    expect(v.json()[0]).toMatchObject({ t: 'error', code: 'token_invalid' });
+    expect(t.result()).toBeUndefined();
+    t.engine.close();
+  });
+});
+
