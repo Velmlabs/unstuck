@@ -7,6 +7,7 @@ Add UNSTUCK_API_KEY=uk_live_... to your environment to send the link through Uns
 """
 
 import asyncio
+import os
 import sys
 
 from playwright.async_api import async_playwright
@@ -14,7 +15,7 @@ from selenium import webdriver
 
 from unstuck import Unstuck
 
-DEBUG_PORT = 9223
+DEBUG_PORT = int(os.environ.get("DEBUG_PORT", "9223"))
 
 
 async def ask_a_human(driver: webdriver.Chrome, reason: str) -> str:
@@ -22,7 +23,9 @@ async def ask_a_human(driver: webdriver.Chrome, reason: str) -> str:
     # Selenium's Chrome was started with --remote-debugging-port, so Playwright can attach to the same tab.
     async with async_playwright() as p:
         browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{DEBUG_PORT}")
-        page = next(pg for ctx in browser.contexts for pg in ctx.pages if pg.url == driver.current_url)
+        page = next((pg for ctx in browser.contexts for pg in ctx.pages if pg.url == driver.current_url), None)
+        if page is None:
+            raise RuntimeError(f"No tab is on {driver.current_url}; is another Chrome using port {DEBUG_PORT}? Set DEBUG_PORT.")
 
         def on_link(link):
             print(f"\n{link.reason}. Open this link:\n{link.url}\n", flush=True)

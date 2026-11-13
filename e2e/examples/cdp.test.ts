@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { actAsHuman, assertShownFile, CHROMIUM, chromium, chromiumNoSandbox, example, exampleEnv, REPO, requirementsWithoutUnstuck, runExample, startChrome, startSite } from './harness';
 
@@ -84,5 +85,8 @@ describe('any browser over CDP', () => {
   it('shown files use final names only, and the Selenium example at least compiles', () => {
     for (const f of ['cdp/index.ts', 'cdp/agent-page.ts', 'selenium/main.py']) assertShownFile(example(f));
     execFileSync('python3', ['-m', 'py_compile', example('selenium/main.py')]);
+    const sel = fs.readFileSync(example('selenium/main.py'), 'utf8');
+    expect(sel).toContain('DEBUG_PORT = int(os.environ.get("DEBUG_PORT", "9223"))'); // not fixed: a stale Chrome may hold 9223
+    expect(sel).toContain('raise RuntimeError(f"No tab is on {driver.current_url}');   // a clear error, not StopIteration
   });
 });

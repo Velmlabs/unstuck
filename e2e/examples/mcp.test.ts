@@ -60,6 +60,7 @@ describe('MCP example', () => {
     expect(readJson('cursor.json').mcpServers.unstuck).toEqual(UNSTUCK);
     const both = readJson('playwright-mcp.json').mcpServers;
     expect(both.unstuck).toEqual(UNSTUCK);
+    expect(both.playwright.args).toContain('@playwright/mcp@0.0.85'); // pinned, like every third-party version in the examples
     expect(both.playwright.args).toContain('--cdp-endpoint');
     expect(both.playwright.args).toContain('http://127.0.0.1:9222');
     const sh = fs.readFileSync(example('mcp/claude-code.sh'), 'utf8');
