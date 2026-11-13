@@ -240,6 +240,11 @@ export class RelaySession {
     if (old) {
       this.lastSeen.delete(old);
       old.close(RELAY_CLOSE.replaced, 'replaced by reconnect');
+      // The engine dropped its side of these viewers when its old socket went: make them reconnect and resume.
+      for (const [c, v] of this.viewers) {
+        v.close(RELAY_CLOSE.agentReconnecting, 'agent reconnected');
+        this.forgetViewer(c, false);
+      }
     }
   }
 

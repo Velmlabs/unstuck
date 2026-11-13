@@ -175,6 +175,20 @@ describe('agent drop and reconnect', () => {
     expect(s.attachViewer(new FakeSocket())).not.toBeNull();
   });
 
+  it('Final #3: replacing a still-open agent socket closes its viewers with 1012 so they resume on the new one', async () => {
+    const { s, agent } = await registered();
+    const v = new FakeSocket();
+    s.attachViewer(v);
+    const back = new FakeSocket();
+    s.attachAgent(back);
+    s.agentMessage(back, hello('SECRET'));
+    await s.flush();
+    expect(v.closed?.code).toBe(1012);
+    expect(back.json()).not.toContainEqual({ t: 'close', c: 1 }); // the new agent never knew viewer 1
+    expect(s.attachViewer(new FakeSocket())).toBe(2);
+    expect(agent.closed?.code).toBe(4409);
+  });
+
   it('a same-secret reconnect while the old socket is still open replaces it', async () => {
     const { s, agent } = await registered();
     const back = new FakeSocket();
