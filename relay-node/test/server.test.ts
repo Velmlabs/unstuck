@@ -225,7 +225,7 @@ describe('edge cases', () => {
   it('a 5th viewer is closed with 1013; an oversize viewer message closes it with 1009', async () => {
     const r = await relay();
     const a = await agent(r.url);
-    const vs = [];
+    const vs: Awaited<ReturnType<typeof viewerFor>>[] = [];
     for (let i = 0; i < 4; i++) vs.push(await viewerFor(a.link.url));
     const fifth = await viewerFor(a.link.url);
     await waitFor(() => fifth.closeCode() !== null);
