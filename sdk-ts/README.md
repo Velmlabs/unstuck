@@ -17,7 +17,7 @@ await unstuck.close();
 
 `result.status` is `resolved`, `timed_out`, `cancelled` (the human tapped "Can't solve") or `failed` (for example the page closed). `takeover()` only rejects with `UnstuckEngineError` when the engine binary can't run.
 
-The engine comes with the package: npm installs the build for your computer (macOS 13+ on Apple silicon, Linux with glibc, Windows x64; Intel Macs come in a later version). To use another binary, set `UNSTUCK_ENGINE_PATH` or the `enginePath` option.
+The engine comes with the package: npm installs the build for your computer (macOS 13+ on Apple silicon or Intel, Linux with glibc, Windows x64). To use another binary, set `UNSTUCK_ENGINE_PATH` or the `enginePath` option.
 
 Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_…`. Tutorials for Playwright, Puppeteer, MCP, browser-use, Stagehand and any Chromium: https://unstuck.sh/docs
 

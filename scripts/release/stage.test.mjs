@@ -13,6 +13,9 @@ describe('staging the engine packages', () => {
     expect(fs.readdirSync(dir).sort()).toEqual(['LICENSE', 'README.md', 'bin', 'package.json']);
     expect(fs.readdirSync(path.join(dir, 'bin'))).toEqual(['unstuck-engine.mjs']);
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).name).toBe('@velmlabs/unstuck-engine');
+    const readme = fs.readFileSync(path.join(dir, 'README.md'), 'utf8');
+    expect(readme).toContain('macOS (Apple silicon or Intel)');
+    expect(readme).not.toContain('Intel Macs come in a later version');
     expect(fs.statSync(path.join(dir, 'bin/unstuck-engine.mjs')).mode & 0o111).not.toBe(0);
   });
   it('a platform package: its binary (executable) under bin/', () => {

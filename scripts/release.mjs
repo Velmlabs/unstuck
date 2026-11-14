@@ -15,6 +15,7 @@ import { npmState, pypiState, sha1, sha256, writeManifest } from './release/mani
 import { buildWheel } from './release/build-wheels.mjs';
 import { tarballProblems, wheelProblems } from './release/checks.mjs';
 import { PLATFORMS } from './release/platforms.mjs';
+import { adhocSign, ensureRcodesign } from './release/rcodesign.mjs';
 import { stageLauncher, stagePlatform } from './release/stage.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -45,8 +46,11 @@ fs.mkdirSync(npmDir, { recursive: true });
 step(`engines (${PLATFORMS.length} platforms)`);
 embedViewer();
 const engines = {};
+const rcodesign = PLATFORMS.some((p) => p.resign) ? ensureRcodesign(path.join(OUT, 'tools')) : undefined;
 for (const p of PLATFORMS) {
   engines[p.id] = buildEngine(p, path.join(OUT, 'engines'));
+  // Bun keeps its own Developer ID signature on the Intel Mac build; it no longer matches, so sign it ad-hoc.
+  if (p.resign) adhocSign(engines[p.id], rcodesign);
   checkBinaryType(engines[p.id], p);
   if (p.os === 'darwin') {
     // The wheel tag must not claim an older macOS than the binary runs on, and the signature must match its pages.

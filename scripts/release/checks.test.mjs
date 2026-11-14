@@ -33,6 +33,7 @@ describe('npm tarball contents', () => {
   it('a platform package: its binary and both licences with the notice', () => {
     const plat = [...base, 'LICENSE-AGPL', 'NOTICE'];
     expect(tarballProblems('@velmlabs/unstuck-engine-win32-x64', [...plat, 'bin/unstuck-engine.exe'])).toEqual([]);
+    expect(tarballProblems('@velmlabs/unstuck-engine-darwin-x64', [...plat, 'bin/unstuck-engine'])).toEqual([]);
     expect(tarballProblems('@velmlabs/unstuck-engine-linux-x64', [...base, 'bin/unstuck-engine.exe'])).toEqual([
       '@velmlabs/unstuck-engine-linux-x64: missing LICENSE-AGPL',
       '@velmlabs/unstuck-engine-linux-x64: missing NOTICE',
@@ -52,6 +53,7 @@ describe('wheel contents', () => {
   it('the package, its engine for that platform and the licences', () => {
     expect(wheelProblems(name('manylinux_2_17_x86_64'), [...py, 'unstuck/_bin/unstuck-engine', ...meta])).toEqual([]);
     expect(wheelProblems(name('win_amd64'), [...py, 'unstuck/_bin/unstuck-engine.exe', ...meta])).toEqual([]);
+    expect(wheelProblems(name('macosx_13_0_x86_64'), [...py, 'unstuck/_bin/unstuck-engine', ...meta])).toEqual([]);
   });
   it('flags a missing engine or licence, bytecode, tests and the wrong binary', () => {
     const w = name('macosx_13_0_arm64');

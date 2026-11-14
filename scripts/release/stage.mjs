@@ -37,7 +37,7 @@ export function stageLauncher(out, version) {
   writePackage(
     dir,
     launcherManifest(version),
-    `# @velmlabs/unstuck-engine\n\nThe [Unstuck](https://unstuck.sh) engine: the process that takes over a browser tab and serves the person's link. It is also an MCP server with one tool, \`request_human_takeover\`:\n\n\`\`\`bash\nnpx -y @velmlabs/unstuck-engine --mcp\n\`\`\`\n\nnpm installs only the build for your computer: macOS on Apple silicon, Linux (x64, arm64) or Windows x64. Intel Macs come in a later version. The SDK \`@velmlabs/unstuck\` uses it for you.\n\nDocs: https://unstuck.sh/docs/mcp/ · License: Apache-2.0\n`,
+    `# @velmlabs/unstuck-engine\n\nThe [Unstuck](https://unstuck.sh) engine: the process that takes over a browser tab and serves the person's link. It is also an MCP server with one tool, \`request_human_takeover\`:\n\n\`\`\`bash\nnpx -y @velmlabs/unstuck-engine --mcp\n\`\`\`\n\nnpm installs only the build for your computer: macOS (Apple silicon or Intel), Linux (x64, arm64) or Windows x64. The SDK \`@velmlabs/unstuck\` uses it for you.\n\nDocs: https://unstuck.sh/docs/mcp/ · License: Apache-2.0\n`,
   );
   fs.copyFileSync(path.join(here, 'engine-launcher.mjs'), path.join(dir, 'bin/unstuck-engine.mjs'));
   fs.chmodSync(path.join(dir, 'bin/unstuck-engine.mjs'), 0o755);
