@@ -71,6 +71,17 @@ No change to viewer → engine messages: the engine validates `hello` strictly, 
 - `focus` with a kind while the bridge isn't focused shows a "Type here" chip near the bottom bar; tapping it focuses the bridge with that kind. `focus: null` hides the chip.
 - The **Keyboard** button stays, for anything else.
 
+## Every key reaches the page (owner requirement)
+
+Every key the person presses must reach the agent's page, on soft keyboards (iPhone, iPad, Android) and hardware keyboards (iPad, desktop), including modifier combinations. Today the bridge forwards only `beforeinput` text, so keys that change no text are dropped: Tab (it also moves focus off the bridge and closes the keyboard), arrows, Home/End, Page Up/Down, Escape, Delete, function keys, word deletes, Ctrl/Cmd shortcuts, and, on iOS, Backspace in the empty bridge (found by the owner on an iPad).
+
+- **Key presses first.** On the bridge's `keydown`, every real key, printable or not, is sent as a `key` message with its modifiers (Shift, Ctrl, Alt, Meta), with `text` for printable keys without Ctrl/Meta, and the default action is prevented, so the page sees keydown/keyup as if typed there (Shift+letter, Shift+Tab, Shift+Arrow, Option+letter, Ctrl/Cmd+A, Enter). Its `keyup` is sent too. Modifier keys alone are not sent; they travel as the modifiers of the next key. Copy, cut and paste shortcuts stay native.
+- **Text events as the fallback**, for input that never comes as a real key press: Android keyboards (`key` is `Unidentified`), IME composition (sent at `compositionend`), dictation, autocorrect (`insertReplacementText`), paste and drop (`insertFromPaste`, `insertFromDrop`, read from `dataTransfer`), the SMS code suggestion. Deletes map to keys: `delete*Backward` → Backspace, `delete*Forward` → Delete, `insertLineBreak`/`insertParagraph` → Enter. A text event right after a key press that already sent the same key is ignored (no doubles).
+- **The bridge always holds one invisible character** (U+200B) with the caret after it, so Backspace on iOS and Android always produces a delete event; it is restored after every event and never sent.
+- **Go / Return.** The bridge sits inside a form and has `enterkeyhint="go"`. A form submit that no Enter key press preceded (within 300 ms) sends Enter, for keyboards that report nothing for their action key; focus returns to the bridge.
+- **Autocorrect and autocapitalise off** on the bridge (it has no words to correct).
+- Spike: https://unstuck-keyboard-spike.zeandcode.workers.dev (v3) shows a checklist that lights up per key class; the owner's iPad results decide the iOS details.
+
 ## Goals, non-goals, anti-goals
 
 - Goal: on iPhone (Safari) and Android (Chrome), tapping a code, PIN, email or text field in the mirror opens the matching keyboard on the first tap, and iOS offers the SMS code for one-time-code fields.
