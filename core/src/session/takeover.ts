@@ -17,6 +17,9 @@ import { startScreencast } from '../stream/screencast';
 import { startScreenshotPolling } from '../stream/poll';
 import { probeCapabilities, type Capabilities } from '../capabilities';
 import { applyInput } from '../stream/input';
+import { scanFields, focusedKind } from '../stream/fields';
+import { browserPlatformIsMac, translateShortcut } from '../stream/shortcuts';
+import { createFieldFeed } from './field-feed';
 import { createLatestSender } from '../stream/latest';
 import { nextStatus, isTerminal, type SessionEvent } from './status';
 import { newSessionId, signToken, verifyToken } from './tokens';
@@ -134,6 +137,12 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     sendJson(c, { t: 'error', code, message: errorText[code] });
     if (close) c.close(1008, code);
   };
+  /** Native typing: where the fields are on the shown page, and what took focus (never their values). */
+  const fieldFeed = createFieldFeed({
+    scan: () => scanFields(active().cdp),
+    focus: () => focusedKind(active().cdp),
+    send: (m) => void (holder && sendJson(holder, m)),
+  });
   const go = (ev: SessionEvent) => {
     status = nextStatus(status, ev);
     emit('status', { status });
@@ -164,6 +173,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     helloTimers.clear();
     offClose();
     offPopups();
+    fieldFeed.stop();
     for (const t of targets) t.off();
     const viewer = holder;
     holder = null;
@@ -196,6 +206,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     sender = createLatestSender(conn);
     // Chrome only sends frames when the page repaints; a static CAPTCHA would leave a new viewer black.
     if (lastFrame) sender.push(lastFrame);
+    fieldFeed.onTargetChanged(); // the new viewer needs the current map even if it hasn't changed
     if (!stopScreencast) await startStream();
   }
 
@@ -210,6 +221,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
         if (gen !== streamGen) return;
         lastFrame = encodeFrame(f);
         sender?.push(lastFrame);
+        fieldFeed.onFrame();
       });
     } catch (e) {
       if (gen === streamGen) onTargetError(target, e as Error);
@@ -234,6 +246,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     lastFrame = null;
     if (!holder || isTerminal(status)) return;
     sender = createLatestSender(holder);
+    fieldFeed.onTargetChanged();
     await startStream();
   }
 
@@ -344,9 +357,17 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
         return finish('cancelled', msg.reason || 'cant_solve');
       default:
         inputCount++;
-        inputChain = inputChain.then(() => {
+        inputChain = inputChain.then(async () => {
           const target = active();
-          return applyInput(target.cdp, msg, target.caps).catch((e: Error) => onTargetError(target, e));
+          try {
+            // Shortcuts follow the agent browser's system (Cmd+A from a Mac reaches a Linux browser as Ctrl+A).
+            const msgs = msg.t === 'key' ? translateShortcut(msg, await browserPlatformIsMac(target.cdp)) : [msg];
+            for (const m of msgs) await applyInput(target.cdp, m, target.caps);
+          } catch (e) {
+            return onTargetError(target, e as Error);
+          }
+          // After the input has landed, so a tap's new focus and a scroll's new positions are what gets scanned.
+          fieldFeed.onInput(msg);
         });
     }
   }

@@ -25,9 +25,9 @@ describe('applyInput', () => {
     ]);
   });
 
-  it('printable key down → keyDown with text and unmodifiedText', async () => {
+  it('printable key down → keyDown with text, unmodifiedText and its virtual key code', async () => {
     expect(await run({ t: 'key', action: 'down', key: 'a', code: 'KeyA', text: 'a', modifiers: 0 })).toEqual([
-      { method: 'Input.dispatchKeyEvent', params: { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 0, text: 'a', unmodifiedText: 'a' } },
+      { method: 'Input.dispatchKeyEvent', params: { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 0, text: 'a', unmodifiedText: 'a', windowsVirtualKeyCode: 65 } },
     ]);
   });
 
@@ -82,5 +82,22 @@ describe('applyInput per-key fallback (no Input.insertText)', () => {
     const cdp = new FakeCdp();
     await applyInput(cdp, { t: 'text', text: 'ab' }, { screencast: true, insertText: true, input: true });
     expect(cdp.calls).toEqual([{ method: 'Input.insertText', params: { text: 'ab' } }]);
+  });
+
+  it('every key gets its Windows virtual key code: Home, End, Page keys, Insert, F-keys, letters and digits', async () => {
+    const vk = async (key: string, text?: string) =>
+      ((await run({ t: 'key', action: 'down', key, code: key, modifiers: 0, ...(text ? { text } : {}) }))[0]!.params as { windowsVirtualKeyCode?: number }).windowsVirtualKeyCode;
+    expect(await vk('Home')).toBe(36);
+    expect(await vk('End')).toBe(35);
+    expect(await vk('PageUp')).toBe(33);
+    expect(await vk('PageDown')).toBe(34);
+    expect(await vk('Insert')).toBe(45);
+    expect(await vk('F1')).toBe(112);
+    expect(await vk('F5')).toBe(116);
+    expect(await vk('F12')).toBe(123);
+    expect(await vk('a', 'a')).toBe(65);
+    expect(await vk('A', 'A')).toBe(65);
+    expect(await vk('7', '7')).toBe(55);
+    expect(await vk('˚', '˚')).toBeUndefined();
   });
 });

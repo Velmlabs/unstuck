@@ -531,5 +531,42 @@ describe('messages that arrive while the hello is still being handled', () => {
     expect(t.result()).toBeUndefined();
     t.engine.close();
   });
+
+  it('native typing: a joined viewer gets the field map after the first frame, and taps report focus', async () => {
+    const otp = { x: 10, y: 20, w: 100, h: 40, kind: 'otp' };
+    const t = setupWith((cdp) =>
+      cdp.respond('Runtime.evaluate', (p) => ({ result: { value: String((p as { expression: string }).expression).includes('activeElement') ? 'otp' : [otp] } })),
+    );
+    await settle();
+    const v = await t.join();
+    t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
+    expect(v.json()).toContainEqual({ t: 'fields', fields: [otp] });
+    v.push({ t: 'mouse', action: 'down', x: 15, y: 25, button: 'left', clickCount: 1, modifiers: 0 });
+    v.push({ t: 'mouse', action: 'up', x: 15, y: 25, button: 'left', clickCount: 1, modifiers: 0 });
+    v.push({ t: 'text', text: '4' });
+    await settle();
+    expect(v.json()).toContainEqual({ t: 'focus', kind: 'otp' });
+    const order = t.cdp.calls.filter((c) => c.method.startsWith('Input.')).map((c) => c.method + ':' + ((c.params as { type?: string }).type ?? ''));
+    // The first calls are the capability probe at start; the viewer's inputs follow, in order.
+    expect(order.slice(-3)).toEqual(['Input.dispatchMouseEvent:mousePressed', 'Input.dispatchMouseEvent:mouseReleased', 'Input.insertText:']);
+    v.push({ t: 'done' });
+    await settle();
+  });
+
+  it('native typing: a Mac viewer\'s Cmd+A reaches a Linux browser as Ctrl+A', async () => {
+    const t = setupWith((cdp) =>
+      cdp.respond('Runtime.evaluate', (p) => ({ result: { value: String((p as { expression: string }).expression).includes('navigator.platform') ? 'Linux x86_64' : [] } })),
+    );
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'key', action: 'down', key: 'a', code: 'KeyA', modifiers: 4 });
+    v.push({ t: 'key', action: 'up', key: 'a', code: 'KeyA', modifiers: 4 });
+    await settle();
+    const keys = t.cdp.calls.filter((c) => c.method === 'Input.dispatchKeyEvent').map((c) => c.params as { type: string; key: string; modifiers: number });
+    expect(keys.map((k) => [k.type, k.key, k.modifiers])).toEqual([['rawKeyDown', 'a', 2], ['keyUp', 'a', 2]]);
+    v.push({ t: 'done' });
+    await settle();
+  });
 });
 

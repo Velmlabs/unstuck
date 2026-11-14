@@ -4,11 +4,23 @@ import type { CdpClient } from '../src/cdp';
 import { scanFields, focusedKind } from '../src/stream/fields';
 
 // A real Chromium page driven through real CDP, so the in-page scanner is tested where it runs.
+// Minimal local types (as sdk-ts/test/helpers.ts does): playwright is a test-only tool here, not a dependency.
+interface Page {
+  setContent(html: string): Promise<void>;
+  focus(selector: string): Promise<void>;
+  evaluate<T>(fn: () => T): Promise<T>;
+  waitForFunction(fn: () => unknown): Promise<unknown>;
+  context(): { newCDPSession(page: Page): Promise<{ send(method: string, params?: object): Promise<unknown> }> };
+}
+interface Browser {
+  newPage(opts: { viewport: { width: number; height: number } }): Promise<Page>;
+  close(): Promise<void>;
+}
 const require = createRequire(import.meta.url);
-const { chromium } = require('playwright') as typeof import('playwright');
+const { chromium } = require('playwright') as { chromium: { launch(): Promise<Browser> } };
 
-let browser: import('playwright').Browser;
-let page: import('playwright').Page;
+let browser: Browser;
+let page: Page;
 let cdp: CdpClient;
 
 beforeAll(async () => {
@@ -16,7 +28,7 @@ beforeAll(async () => {
   page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   const session = await page.context().newCDPSession(page);
   cdp = {
-    send: (method, params) => session.send(method as never, params as never) as never,
+    send: <T>(method: string, params?: object) => session.send(method, params) as Promise<T>,
     on: () => () => {},
     onClose: () => () => {},
   };

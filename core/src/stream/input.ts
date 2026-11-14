@@ -12,7 +12,19 @@ const VIRTUAL_KEYS: Record<string, number> = {
   ArrowRight: 39,
   ArrowDown: 40,
   Delete: 46,
+  PageUp: 33,
+  PageDown: 34,
+  End: 35,
+  Home: 36,
+  Insert: 45,
+  ...Object.fromEntries(Array.from({ length: 12 }, (_, i) => [`F${i + 1}`, 112 + i])),
 };
+
+/** Windows virtual key code: named keys from the table, ASCII letters and digits by their upper-case code. */
+function virtualKey(key: string): number | undefined {
+  if (VIRTUAL_KEYS[key] !== undefined) return VIRTUAL_KEYS[key];
+  return /^[a-zA-Z0-9]$/.test(key) ? key.toUpperCase().charCodeAt(0) : undefined;
+}
 
 const MOUSE_TYPES = { down: 'mousePressed', up: 'mouseReleased', move: 'mouseMoved' } as const;
 
@@ -34,7 +46,7 @@ export async function applyInput(cdp: CdpClient, msg: ViewerInput, caps?: Capabi
       return;
     case 'key': {
       const base = { key: msg.key, code: msg.code, modifiers: msg.modifiers };
-      const vk = VIRTUAL_KEYS[msg.key];
+      const vk = virtualKey(msg.key);
       const withVk = vk === undefined ? {} : { windowsVirtualKeyCode: vk };
       if (msg.action === 'up') await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', ...base });
       else if (msg.text !== undefined)
