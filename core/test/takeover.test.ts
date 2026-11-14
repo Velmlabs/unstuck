@@ -180,7 +180,7 @@ describe('takeover session', () => {
     expect(v.json()[0]).toMatchObject({ t: 'error', code: 'expired' });
   });
 
-  it('resume: reconnect within 60 s with the resumeKey continues the session', async () => {
+  it('resume: reconnect within the window with the resumeKey continues the session', async () => {
     const t = setup();
     await settle();
     const v1 = await t.join();
@@ -195,13 +195,13 @@ describe('takeover session', () => {
     expect(t.cdp.methods().slice(before).filter((m) => m === 'Page.startScreencast')).toHaveLength(1);
   });
 
-  it('resume after the 60 s window finds the takeover already ended', async () => {
+  it('resume after the 5-minute window finds the takeover already ended', async () => {
     const t = setup();
     await settle();
     const v1 = await t.join();
     const resumeKey = v1.json()[0].resumeKey;
     v1.close();
-    await vi.advanceTimersByTimeAsync(61_000);
+    await vi.advanceTimersByTimeAsync(301_000);
     await settle();
     expect(t.result()).toMatchObject({ status: 'failed', detail: 'viewer_left' });
   });
@@ -299,27 +299,29 @@ describe('takeover session', () => {
     expect(t.result()).toMatchObject({ status: 'resolved' });
   });
 
-  it('Final I1: if the holder leaves and does not come back within 60 s, the takeover ends as failed/viewer_left', async () => {
+  it('if the holder leaves and does not come back within 5 minutes, the takeover ends as failed/viewer_left', async () => {
     const t = setup();
     await settle();
     const v = await t.join();
     v.close();
     await settle();
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(299_000);
+    expect(t.result()).toBeUndefined(); // still waiting (the human is reading a code in another app)
+    await vi.advanceTimersByTimeAsync(1_000);
     await settle();
     expect(t.result()).toMatchObject({ status: 'failed', detail: 'viewer_left' });
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('Final I1: a resume within 60 s cancels the viewer_left deadline', async () => {
+  it('a resume after 4 minutes away (reading an SMS) cancels the viewer_left deadline', async () => {
     const t = setup();
     await settle();
     const v1 = await t.join();
     const resumeKey = v1.json()[0].resumeKey;
     v1.close();
-    await vi.advanceTimersByTimeAsync(59_000);
+    await vi.advanceTimersByTimeAsync(240_000);
     await t.join({ resumeKey });
-    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(120_000);
     expect(t.result()).toBeUndefined();
   });
 

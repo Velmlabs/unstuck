@@ -7,14 +7,15 @@ const NOW = 1_700_000_000_000;
 let handlers: ConnectionHandlers;
 let sent: unknown[];
 let closed: boolean;
-let connectOpts: { resumeKey?: string } | undefined;
+let connectOpts: { resumeKey?: string; alive?: () => Promise<boolean> } | undefined;
+let wakes = 0;
 let connects = 0;
 let hellos: (string | undefined)[];
 const connectFn: AppProps['connectFn'] = (_url, _token, _codec, h, opts) => {
   connects++;
   handlers = h;
   connectOpts = opts;
-  return { send: (m) => void sent.push(m), sendHello: (c) => void hellos.push(c), close: () => void (closed = true) };
+  return { send: (m) => void sent.push(m), sendHello: (c) => void hellos.push(c), close: () => void (closed = true), wake: () => void wakes++ };
 };
 const KEY = 'A'.repeat(43);
 const loc = (hash = `#t=TOK&k=${KEY}`) => ({ hash, pathname: '/s/SESSION', origin: 'http://127.0.0.1:5000' });
@@ -49,6 +50,47 @@ beforeEach(() => {
   drawFrame.mockClear();
 });
 afterEach(() => cleanup());
+
+describe('coming back to the page', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('reconnects at once when the page is visible again or the network returns', () => {
+    setup();
+    goLive();
+    wakes = 0;
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+    expect(wakes).toBe(0);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+    act(() => void window.dispatchEvent(new Event('online')));
+    act(() => void window.dispatchEvent(new Event('pageshow')));
+    expect(wakes).toBe(3);
+  });
+  it('asks the relay whether the session still exists with a HEAD of its own page', async () => {
+    const fetchMock = vi.fn(async () => ({ status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    setup();
+    expect(await connectOpts!.alive!()).toBe(false);
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:5000/s/SESSION', { method: 'HEAD', cache: 'no-store' });
+    fetchMock.mockResolvedValueOnce({ status: 200 });
+    expect(await connectOpts!.alive!()).toBe(true);
+    fetchMock.mockRejectedValueOnce(new Error('offline'));
+    expect(await connectOpts!.alive!()).toBe(true); // can't tell: keep trying
+  });
+  it('a session that ended while the page was away says so instead of "Reconnecting"', () => {
+    setup();
+    goLive();
+    act(() => handlers.onPhase('ended'));
+    expect(screen.getByText('This check has ended')).toBeTruthy();
+    expect(screen.queryByText(/Reconnecting/)).toBeNull();
+  });
+  it('a lost connection says how long there is to come back', () => {
+    setup();
+    goLive();
+    act(() => handlers.onPhase('closed'));
+    expect(screen.getByText(/within 5 minutes/)).toBeTruthy();
+  });
+});
 
 describe('App', () => {
   it('shows an invalid-link screen when the URL has no token, without connecting', () => {
@@ -280,7 +322,7 @@ describe('App', () => {
     expect(localStorage.getItem('unstuck:resume:SESSION')).toBe('k');
     first.unmount();
     setup();
-    expect(connectOpts).toEqual({ resumeKey: 'k' });
+    expect(connectOpts?.resumeKey).toBe('k');
   });
 
   it('Final I1: forgets the resumeKey when the takeover ends', () => {
@@ -299,7 +341,7 @@ describe('App', () => {
     });
     setup();
     goLive();
-    expect(connectOpts).toEqual({});
+    expect(connectOpts?.resumeKey).toBeUndefined();
     get.mockRestore();
     set.mockRestore();
   });
@@ -307,7 +349,7 @@ describe('App', () => {
   it('Final I1: the connection-lost screen tells the human how to resume', () => {
     setup();
     act(() => handlers.onPhase('closed'));
-    expect(screen.getByText(/reopen the link on this device within a minute/i)).toBeTruthy();
+    expect(screen.getByText(/reopen the link on this device within 5 minutes/i)).toBeTruthy();
   });
 
   it('Final I3: releasing a drag in the letterbox still releases the button, clamped to the page edge', () => {

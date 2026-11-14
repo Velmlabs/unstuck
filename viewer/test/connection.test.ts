@@ -132,14 +132,19 @@ describe('connect', () => {
     expect(FakeWs.all).toHaveLength(3);
   });
 
-  it('gives up reconnecting after 60 s', async () => {
+  it('keeps trying for 5 minutes (long enough to fetch a code from another app), then gives up', async () => {
     const { h } = make();
     FakeWs.all[0]!.open();
     await flush();
     FakeWs.all[0]!.msg(ready);
     await flush();
     FakeWs.all[0]!.drop();
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 70; i++) {
+      vi.advanceTimersByTime(4000);
+      FakeWs.all.at(-1)!.drop();
+    }
+    expect(h.onPhase).not.toHaveBeenCalledWith('closed'); // 280 s
+    for (let i = 0; i < 10; i++) {
       vi.advanceTimersByTime(4000);
       FakeWs.all.at(-1)!.drop();
     }
@@ -147,6 +152,73 @@ describe('connect', () => {
     const count = FakeWs.all.length;
     vi.advanceTimersByTime(10_000);
     expect(FakeWs.all).toHaveLength(count);
+  });
+
+  it('a failed reconnect asks whether the session still exists: when it has ended, it stops at once', async () => {
+    const h = handlers();
+    let answer = true;
+    const alive = vi.fn(async () => answer);
+    connect('ws://x/ws/abc', 'TOK', plain, h, { WebSocketImpl: FakeWs as never, alive });
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    FakeWs.all[0]!.drop();
+    await flush();
+    expect(alive).toHaveBeenCalledTimes(1);
+    expect(h.onPhase).toHaveBeenLastCalledWith('reconnecting');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(FakeWs.all).toHaveLength(2);
+    answer = false;
+    FakeWs.all[1]!.drop();
+    await flush();
+    expect(h.onPhase).toHaveBeenLastCalledWith('ended');
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(FakeWs.all).toHaveLength(2);
+  });
+
+  it('only one existence check runs at a time', async () => {
+    let release: (v: boolean) => void = () => {};
+    const alive = vi.fn(() => new Promise<boolean>((r) => (release = r)));
+    connect('ws://x/ws/abc', 'TOK', plain, handlers(), { WebSocketImpl: FakeWs as never, alive });
+    FakeWs.all[0]!.drop();
+    await vi.advanceTimersByTimeAsync(500);
+    FakeWs.all[1]!.drop();
+    await flush();
+    expect(alive).toHaveBeenCalledTimes(1);
+    release(true);
+    await flush();
+    await vi.advanceTimersByTimeAsync(1000);
+    FakeWs.all[2]!.drop();
+    await flush();
+    expect(alive).toHaveBeenCalledTimes(2);
+  });
+
+  it('wake() (page visible again, network back) retries at once instead of waiting out the backoff', async () => {
+    const { h, sock } = make();
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    sock.wake();
+    expect(FakeWs.all).toHaveLength(1); // live: nothing to do
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(4000);
+      FakeWs.all.at(-1)!.drop();
+    }
+    const n = FakeWs.all.length;
+    sock.wake();
+    expect(FakeWs.all).toHaveLength(n + 1);
+    vi.advanceTimersByTime(4000);
+    expect(FakeWs.all).toHaveLength(n + 1); // the pending retry was replaced, not doubled
+    expect(h.onPhase).toHaveBeenLastCalledWith('reconnecting');
+  });
+
+  it('wake() after giving up does nothing', async () => {
+    const { sock } = make();
+    sock.close();
+    sock.wake();
+    expect(FakeWs.all).toHaveLength(1);
   });
 
   it('a socket that drops before ready also retries (link not yet redeemed)', async () => {
@@ -247,7 +319,7 @@ describe('connect', () => {
     expect(FakeWs.all).toHaveLength(2);
   });
 
-  it('the 60 s give-up window restarts after every successful ready', async () => {
+  it('the give-up window restarts after every successful ready', async () => {
     const { h } = make();
     FakeWs.all[0]!.open();
     await flush();

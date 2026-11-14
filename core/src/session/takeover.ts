@@ -1,4 +1,5 @@
 import {
+  RESUME_WINDOW_MS,
   b64urlEncode,
   importE2eKey,
   newE2eKey,
@@ -26,7 +27,7 @@ import { newSessionId, signToken, verifyToken } from './tokens';
 import { sealConnection } from './sealed';
 
 export const HELLO_TIMEOUT_MS = 10_000;
-export const RESUME_WINDOW_MS = 60_000;
+export { RESUME_WINDOW_MS };
 /** Wrong 6-digit codes before the link stops admitting anyone new (relay spec §5.8). */
 export const MAX_CODE_ATTEMPTS = 5;
 export const DRAIN_INTERVAL_MS = 50;

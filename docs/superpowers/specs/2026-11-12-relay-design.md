@@ -175,7 +175,7 @@ The engine CLI gains `--relay <url>` and `--agent-key <key>`, which beat the env
 - `unpublish` sends `end` and closes.
 - On an unexpected drop it reconnects with exponential backoff from 0.5 s up to 30 s, while the takeover's own timeout keeps running. It reports `onStatus('down')` on the drop and `'up'` once re-registered.
 
-**Timers during a relay outage.** While the transport is `down`, the session pauses its viewer-left timer (`RESUME_WINDOW_MS`), and restarts it in full when the transport is back `up`. The viewer restarts its own 60 s give-up window on every successful reconnect, not only on the first disconnect. The relay's 60 s grace only bounds how long it remembers a session with no agent. So a relay or network blip shorter than the takeover's timeout never fails the takeover as `viewer_left`.
+**Timers during a relay outage.** While the transport is `down`, the session pauses its viewer-left timer (`RESUME_WINDOW_MS`), and restarts it in full when the transport is back `up`. The viewer restarts its own give-up window (`RESUME_WINDOW_MS`, 5 minutes) on every successful reconnect, not only on the first disconnect. After a failed reconnect it sends a HEAD request for its own `/s/<id>` page; a 404 means the session has ended, so it shows "This check has ended" at once instead of retrying. It also retries at once when the page becomes visible again or the network returns (iOS freezes timers in the background). The relay's 60 s grace only bounds how long it remembers a session with no agent. So a relay or network blip shorter than the takeover's timeout never fails the takeover as `viewer_left`.
 
 ### 5.7 Errors seen by the agent
 

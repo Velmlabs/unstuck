@@ -11,7 +11,7 @@ import { parseFragment, sessionIdFromPath, wsUrlFor } from './url';
 
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string };
-  connectFn?: (url: string, token: string, codec: Codec, h: ConnectionHandlers, opts: { resumeKey?: string }) => ViewerSocket;
+  connectFn?: (url: string, token: string, codec: Codec, h: ConnectionHandlers, opts: { resumeKey?: string; alive?: () => Promise<boolean> }) => ViewerSocket;
   drawFrame?: (canvas: HTMLCanvasElement, frame: Frame) => void;
   now?: () => number;
 }
@@ -162,11 +162,31 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       onPhase: (p) => {
         setPhase(p);
         if (p === 'closed')
-          setScreen({ kind: 'message', title: 'Connection lost', body: 'Reopen the link on this device within a minute to continue where you left off.', tone: 'error' });
+          setScreen({ kind: 'message', title: 'Connection lost', body: 'Reopen the link on this device within 5 minutes to continue where you left off.', tone: 'error' });
+        if (p === 'ended') {
+          resumeStore.set(sessionId, null);
+          setScreen({ kind: 'message', title: 'This check has ended', body: 'The agent is no longer waiting for this check. If it still needs you, it will send a new link.', tone: 'error' });
+        }
       },
-    }, saved ? { resumeKey: saved } : {});
+    }, {
+      ...(saved ? { resumeKey: saved } : {}),
+      // The relay answers 404 for a session that has ended (its page shows "expired").
+      alive: () => fetch(`${location.origin}${location.pathname}`, { method: 'HEAD', cache: 'no-store' }).then((r) => r.status !== 404, () => true),
+    });
     sockRef.current = sock;
-    return () => sock.close();
+    // Back from another app (iOS froze the page and its retry timers), or back online: reconnect now.
+    const wake = () => {
+      if (document.visibilityState !== 'hidden') sock.wake();
+    };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('online', wake);
+    window.addEventListener('pageshow', wake);
+    return () => {
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('online', wake);
+      window.removeEventListener('pageshow', wake);
+      sock.close();
+    };
   }, []);
 
   useEffect(() => {

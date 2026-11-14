@@ -83,3 +83,9 @@ export function parseViewerMessage(raw: string): ViewerToEngine | null {
   }
   return Value.Check(ViewerToEngineSchema, v) ? (v as ViewerToEngine) : null;
 }
+
+/**
+ * How long a human who left the viewer (switched apps to read a code, lost signal) can come back and resume.
+ * The engine frees the agent after this; the viewer stops retrying after it.
+ */
+export const RESUME_WINDOW_MS = 5 * 60_000;

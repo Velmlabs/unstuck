@@ -259,7 +259,7 @@ Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice 
 
 | Failure | Behaviour |
 |---|---|
-| Viewer disconnects | Session goes back to `waiting`; the same device can resume within 60 s with the session's resume key |
+| Viewer disconnects | Session goes back to `waiting`; the same device can resume within 5 minutes (`RESUME_WINDOW_MS`, long enough to read a code in another app) with the session's resume key |
 | Relay connection drops | Engine reconnects with exponential backoff (max 30 s); the session survives; viewer shows "reconnecting…" |
 | Page closes or CDP error | `failed` with detail; `takeover()` returns, it doesn't throw |
 | Engine process crashes | SDK detects the closed pipe, raises `UnstuckEngineError`, restarts the engine on the next call |

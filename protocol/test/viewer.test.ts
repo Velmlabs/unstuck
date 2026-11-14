@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseViewerMessage, ViewerToEngineSchema, EngineToViewerSchema, FieldKinds } from '../src/viewer';
+import { parseViewerMessage, ViewerToEngineSchema, EngineToViewerSchema, FieldKinds, RESUME_WINDOW_MS } from '../src/viewer';
 import { Value } from '@sinclair/typebox/value';
 
 describe('parseViewerMessage', () => {
@@ -83,5 +83,11 @@ describe('native typing messages', () => {
   it('a focus report can carry the focused field\'s box (never its value)', () => {
     expect(Value.Check(EngineToViewerSchema, { t: 'focus', kind: 'otp', field: { x: 1, y: 2, w: 3, h: 4, kind: 'otp' } })).toBe(true);
     expect(Value.Check(EngineToViewerSchema, { t: 'focus', kind: 'otp', field: { x: 1, y: 2, w: 3, h: 4, kind: 'otp', value: '4' } })).toBe(false);
+  });
+});
+
+describe('resume window', () => {
+  it('gives a human who left the page 5 minutes to come back (time to read a code in another app)', () => {
+    expect(RESUME_WINDOW_MS).toBe(300_000);
   });
 });

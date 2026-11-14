@@ -1,6 +1,7 @@
-import { decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Field, type FieldKind, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
+import { RESUME_WINDOW_MS, decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Field, type FieldKind, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
 
-export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed';
+/** `closed`: gave up retrying; `ended`: the relay says the session no longer exists (no point retrying). */
+export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed' | 'ended';
 type Ready = Extract<EngineToViewer, { t: 'ready' }>;
 
 export interface ConnectionHandlers {
@@ -35,11 +36,12 @@ export interface ViewerSocket {
   send(m: ViewerToEngine): void;
   /** Send hello again, with the 6-digit code the human typed. */
   sendHello(code?: string): void;
+  /** The page is visible again or the network is back: retry now instead of waiting out the backoff. */
+  wake(): void;
   close(): void;
 }
 
 const BACKOFF_MS = [500, 1000, 2000, 4000];
-const RESUME_WINDOW_MS = 60_000;
 const PING_MS = 20_000;
 const FATAL: ReadonlySet<ViewerErrorCode> = new Set(['token_invalid', 'token_used', 'expired', 'session_closed']);
 const TERMINAL: ReadonlySet<SessionStatus> = new Set(['resolved', 'timed_out', 'cancelled', 'failed']);
@@ -49,7 +51,12 @@ export function connect(
   token: string,
   codec: Codec,
   h: ConnectionHandlers,
-  opts: { WebSocketImpl?: typeof WebSocket; resumeKey?: string } = {},
+  opts: {
+    WebSocketImpl?: typeof WebSocket;
+    resumeKey?: string;
+    /** Whether the session still exists (false: it has ended, stop retrying). Asked after a connection drops. */
+    alive?: () => Promise<boolean>;
+  } = {},
 ): ViewerSocket {
   const WS = opts.WebSocketImpl ?? globalThis.WebSocket;
   let ws: WebSocket;
@@ -59,6 +66,7 @@ export function connect(
   let downSince: number | null = null;
   let ping: ReturnType<typeof setInterval> | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
+  let checking = false;
   let outChain: Promise<void> = Promise.resolve();
   let inChain: Promise<void> = Promise.resolve();
   const enc = new TextEncoder();
@@ -160,7 +168,24 @@ export function connect(
       }
       h.onPhase('reconnecting');
       retry = setTimeout(open, BACKOFF_MS[Math.min(attempt++, BACKOFF_MS.length - 1)]);
+      checkAlive();
     };
+  };
+
+  /** A reconnect can't tell "session over" from "network down" (browsers hide the upgrade's 404): ask the relay. */
+  const checkAlive = () => {
+    if (!opts.alive || checking) return;
+    checking = true;
+    void opts.alive().then(
+      (alive) => {
+        checking = false;
+        if (alive || stopped) return;
+        stopped = true;
+        clearTimeout(retry);
+        h.onPhase('ended');
+      },
+      () => void (checking = false),
+    );
   };
 
   h.onPhase('connecting');
@@ -171,6 +196,11 @@ export function connect(
     },
     sendHello(code) {
       if (ws.readyState === 1) hello(ws, code);
+    },
+    wake() {
+      if (stopped || downSince === null || ws.readyState === 0 || ws.readyState === 1) return;
+      clearTimeout(retry);
+      open();
     },
     close() {
       stopped = true;

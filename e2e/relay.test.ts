@@ -97,6 +97,38 @@ describe('takeover through a relay, end to end', () => {
     await page.close();
   }, 60_000);
 
+  it('a phone that was away while the session ended says so when it comes back, instead of "Reconnecting"', async () => {
+    const page = await agentPage();
+    let link!: TakeoverLink;
+    let arrived!: () => void;
+    const got = new Promise<void>((r) => (arrived = r));
+    const unstuck = new Unstuck({ enginePath: ENGINE, relay: relays.node!.url, agentKey: RELAY_KEY, onLink: (l) => ((link = l), arrived()) });
+    const result = unstuck.takeover(page, { reason: 'Away test', timeoutS: 10 });
+    await got;
+    const ctx = await humanBrowser.newContext({ ...devices['iPhone 13'] });
+    const human = await ctx.newPage();
+    // Stand-in for iOS suspending Safari: the live socket is cut and new ones fail until the human is back.
+    let away = false;
+    const sockets: any[] = [];
+    await human.routeWebSocket(/\/ws\//, (ws: any) => {
+      if (away) return ws.close();
+      ws.connectToServer();
+      sockets.push(ws);
+    });
+    await human.goto(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+    away = true;
+    for (const ws of sockets) await ws.close();
+    await expect.poll(() => human.getByText(/Reconnecting/).isVisible(), { timeout: 5_000 }).toBe(true);
+    await expect(result).resolves.toMatchObject({ status: 'timed_out' }); // the session ends while the phone is away
+    away = false;
+    await human.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); // back in Safari
+    await expect.poll(() => human.getByText('This check has ended').isVisible(), { timeout: 5_000 }).toBe(true);
+    await ctx.close();
+    await unstuck.close();
+    await page.close();
+  }, 60_000);
+
   it('Python SDK × Node relay', async () => {
     const child = spawn('uv', ['run', '--project', path.join(here, '../sdk-py'), 'python', path.join(here, 'py_agent.py'), site, relays.node!.url, RELAY_KEY, ENGINE], {
       stdio: ['ignore', 'pipe', 'inherit'],
