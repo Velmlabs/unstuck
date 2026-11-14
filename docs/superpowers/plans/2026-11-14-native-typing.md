@@ -19,6 +19,8 @@
 - Bridge: full size over the field (min 44×32 CSS px), `color`/`caret-color`/`background` transparent, no border/outline, `pointer-events: none`, `font-size: 16px`, inside a `<form>`, `enterkeyhint="go"`, `autocorrect="off"`, `autocapitalize="off"`, `spellcheck="false"`; reserve of 64 × U+200B with the caret at the end, refilled below 16.
 - Bridge attributes per kind: otp → inputmode `numeric`, autocomplete `one-time-code`; numeric → `numeric`, `off`; email → `email`, `off`; password → `text`, `off`, type `password`; text → `text`, `off`. Type is `text` except password.
 - Focus on `pointerup` when the pointer moved < 10 px since `pointerdown`.
+- Code splitting: in `otp`/`numeric` fields, one-piece text becomes key presses only if ≤ 12 characters with no whitespace; otherwise one `text` message.
+- Shortcut translation table: the spec's "Shortcuts follow the agent browser's system" table, verbatim.
 - Coverage > 90% in every package; `protocol/`, `core/`, `viewer/` import no Node built-ins in `src/`.
 - Commit as `Velm Labs <velmlabs@users.noreply.github.com>`, no AI attribution.
 
@@ -75,6 +77,7 @@
 
 **Files:**
 - Create: `core/src/session/field-feed.ts`
+- Create: `core/src/stream/shortcuts.ts` (`translateShortcut(msg: Extract<ViewerInput, { t: 'key' }>, browserIsMac: boolean): Extract<ViewerInput, { t: 'key' }>[]`, returning one or more key messages per the spec's table; `browserPlatformIsMac(cdp): Promise<boolean>` via `Runtime.evaluate('navigator.platform')`, cached per target, `false` on error)
 - Modify: `core/src/session/takeover.ts` (create the feed in `attachViewer`, call it from the frame callback in `startStream`, from `handleInput`, from `switchStream`; stop it in `stopStream`/`finish`), `core/src/stream/input.ts` (`VIRTUAL_KEYS` adds Home 36, End 35, PageUp 33, PageDown 34, Insert 45, F1–F12 112–123; a printable ASCII letter or digit key gets `windowsVirtualKeyCode` = its upper-case char code)
 - Test: `core/test/field-feed.test.ts` (fake timers, injected scan/focus), `core/test/takeover.test.ts`, `core/test/input.test.ts`
 
@@ -90,6 +93,7 @@
   - `onTargetChanged` rescans immediately; `stop` cancels timers and later results are dropped;
   - `a failing scan never fails the takeover`: scan rejects → nothing sent, no throw, next trigger scans again.
 - [ ] **Step 2: Failing takeover test:** with FakeCdp responding to `Runtime.evaluate` with one `otp` field, a joined viewer receives `{ t: 'fields', … }` after the first frame; inputs still apply in order.
+- [ ] **Step 3a: Failing shortcut tests** (`core/test/shortcuts.test.ts`), one per table row in both directions, plus: plain `a` with Shift unchanged; Option+K (text `˚`) unchanged; keyup messages translated consistently with their keydown; Cmd+Backspace → two key presses (Shift+Home, Backspace). Takeover test: with `navigator.platform` answering `Linux x86_64`, a viewer's Cmd+A reaches `Input.dispatchKeyEvent` with modifiers 2 (Ctrl).
 - [ ] **Step 3: Failing input tests:** `Home` → `windowsVirtualKeyCode: 36`; `F5` → 116; key `a` with text → `windowsVirtualKeyCode: 65`; `7` → 55.
 - [ ] **Step 4:** Implement; scans run outside `inputChain` so a slow scan never delays input.
 - [ ] **Step 5:** `pnpm --filter @velmlabs/unstuck-core test` passes; coverage > 90%.
@@ -113,7 +117,7 @@
   - `deleteWordBackward`/`deleteSoftLineBackward` → one Backspace, prevented; `deleteContentForward` → Delete;
   - `keydown` with `key: 'Unidentified'` (keyCode 229) sends nothing; the following `beforeinput insertText "x"` sends `{ t:'text', text:'x' }`;
   - `insertReplacementText`, `insertFromPaste`, `insertFromDrop` (data from `dataTransfer`) send text;
-  - for kind `otp` or `numeric`, text of length > 1 (`"482913"`) sends six key presses (down with `text`, up), not one `text` message;
+  - for kind `otp` or `numeric`, text of length > 1 (`"482913"`) sends six key presses (down with `text`, up), not one `text` message; a 13-character or whitespace-containing paste (`"https://x.example/"`) sends one `text` message;
   - `compositionend "日本"` sends text once; `insertCompositionText` is not prevented;
   - form `submit` with no Enter key press in the last 300 ms sends Enter down/up once and refocuses; after an Enter key press it sends nothing;
   - `never keeps typed text`: after any of the above the input's value is only U+200B characters, ≥ 16 of them.

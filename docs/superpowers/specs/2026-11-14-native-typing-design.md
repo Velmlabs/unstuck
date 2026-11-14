@@ -78,6 +78,20 @@ Every key the person presses must reach the agent's page, on soft keyboards (iPh
 - **Key presses first.** On the bridge's `keydown`, every real key, printable or not, is sent as a `key` message with its modifiers (Shift, Ctrl, Alt, Meta), with `text` for printable keys without Ctrl/Meta, and the default action is prevented, so the page sees keydown/keyup as if typed there (Shift+letter, Shift+Tab, Shift+Arrow, Option+letter, Ctrl/Cmd+A, Enter). Its `keyup` is sent too. Modifier keys alone are not sent; they travel as the modifiers of the next key. Copy, cut and paste shortcuts stay native.
 - **Text events as the fallback**, for input that never comes as a real key press: Android keyboards (`key` is `Unidentified`), IME composition (sent at `compositionend`), dictation, autocorrect (`insertReplacementText`), paste and drop (`insertFromPaste`, `insertFromDrop`, read from `dataTransfer`), the SMS code suggestion. Deletes map to keys: `delete*Backward` → Backspace, `delete*Forward` → Delete, `insertLineBreak`/`insertParagraph` → Enter. A text event right after a key press that already sent the same key is ignored (no doubles).
 - **Go / Return.** The bridge sits inside a form and has `enterkeyhint="go"`. A form submit that no Enter key press preceded (within 300 ms) sends Enter, for keyboards that report nothing for their action key; focus returns to the bridge.
+- **Short codes as keys, long text as text.** In `otp` and `numeric` fields, text that arrives in one piece is split into key presses only when it looks like a code: at most 12 characters and no whitespace (an SMS code, a pasted PIN). Anything longer (a pasted URL, measured on a Mac: 54 key presses) is sent as one `text` message.
+- **Shortcuts follow the agent browser's system** (found on a Mac viewer). The engine learns its browser's platform once per target (`navigator.platform` via `Runtime.evaluate`) and translates editing shortcuts that differ between macOS and other systems; plain keys and modifiers on text are never changed:
+
+  | Viewer sends | Agent browser on Windows/Linux gets | Agent browser on macOS gets |
+  |---|---|---|
+  | Cmd+A / Cmd+Z / Cmd+Shift+Z / Cmd+Y | Ctrl+A / Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y | unchanged |
+  | Ctrl+A / Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y | unchanged | Cmd+A / Cmd+Z / Cmd+Shift+Z / Cmd+Shift+Z |
+  | Option+Backspace / Option+Delete | Ctrl+Backspace / Ctrl+Delete | unchanged |
+  | Option+Left/Right | Ctrl+Left/Right | unchanged |
+  | Cmd+Left / Cmd+Right (with Shift kept) | Home / End | unchanged |
+  | Cmd+Backspace | Shift+Home, then Backspace | unchanged |
+  | Ctrl+Backspace / Ctrl+Left/Right | unchanged | Option+Backspace / Option+Left/Right |
+  | Home / End | unchanged | Cmd+Left / Cmd+Right |
+
 - **Autocorrect and autocapitalise off** on the bridge (it has no words to correct).
 - **The bridge is full size, over the tapped field.** Measured on an iPad (Safari 18.7, owner, hold-Backspace lab): iOS auto-repeats a held Backspace in a full-size input whether it is invisible by `opacity: 0` or by transparent text and caret, and stops after one delete in a 1×1 px input, on screen or off. Today's bridge is a 1×1 px off-screen input, so a held Backspace is broken in the current viewer. The bridge therefore sits exactly over the tapped field's rectangle in the mirror (minimum 44×32 CSS px), with transparent text, caret and background, no border, `pointer-events: none` (taps still reach the mirror), and `font-size: 16px` so iOS doesn't zoom on focus. With the Keyboard button or the "Type here" chip (no field rectangle known), it sits over the bottom of the mirror.
 - **A reserve of invisible characters** (64 × U+200B, caret at the end) replaces the single one: a plain Backspace is allowed to delete one for real (iOS repeats only while text changes), each deletion sends one Backspace, and the reserve is topped up when fewer than 16 are left.
