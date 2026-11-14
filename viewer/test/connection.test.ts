@@ -291,4 +291,25 @@ describe('connect', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(h.onReady).toHaveBeenCalledTimes(1);
   });
+
+  it('native typing: the field map and focus reports reach their handlers; older viewers just ignore them', async () => {
+    const h = { ...handlers(), onFields: vi.fn(), onFocus: vi.fn() };
+    connect('ws://x/ws/abc', 'TOK', plain, h, { WebSocketImpl: FakeWs as never });
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    FakeWs.all[0]!.msg({ t: 'fields', fields: [{ x: 1, y: 2, w: 3, h: 4, kind: 'otp' }] });
+    FakeWs.all[0]!.msg({ t: 'focus', kind: 'email' });
+    await flush();
+    expect(h.onFields).toHaveBeenCalledWith([{ x: 1, y: 2, w: 3, h: 4, kind: 'otp' }]);
+    expect(h.onFocus).toHaveBeenCalledWith('email');
+    const old = handlers(); // no onFields/onFocus
+    connect('ws://x/ws/abc', 'TOK', plain, old, { WebSocketImpl: FakeWs as never });
+    FakeWs.all[1]!.open();
+    await flush();
+    FakeWs.all[1]!.msg({ t: 'fields', fields: [] });
+    FakeWs.all[1]!.msg({ t: 'focus', kind: null });
+    await flush();
+    expect(old.onError).not.toHaveBeenCalled();
+  });
 });

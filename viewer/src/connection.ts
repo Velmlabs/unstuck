@@ -1,4 +1,4 @@
-import { decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
+import { decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Field, type FieldKind, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
 
 export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed';
 type Ready = Extract<EngineToViewer, { t: 'ready' }>;
@@ -11,6 +11,10 @@ export interface ConnectionHandlers {
   onPhase(p: Phase): void;
   /** The engine wants the 6-digit code (`invalid` after a wrong one). */
   onCodeRequest?(invalid: boolean): void;
+  /** Native typing: where the typable fields are on the page (engine 0.1.3+). */
+  onFields?(fields: Field[]): void;
+  /** Native typing: what took focus after the last tap. */
+  onFocus?(kind: FieldKind | null): void;
 }
 
 /**
@@ -95,7 +99,8 @@ export function connect(
       if (m.code === 'code_required' || m.code === 'code_invalid') return h.onCodeRequest?.(m.code === 'code_invalid');
       if (FATAL.has(m.code)) stopped = true;
       h.onError(m.code, m.message);
-    }
+    } else if (m.t === 'fields') h.onFields?.(m.fields);
+    else if (m.t === 'focus') h.onFocus?.(m.kind);
   };
 
   const open = () => {

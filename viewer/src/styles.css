@@ -132,12 +132,37 @@ body {
   font-size: 14px;
 }
 
+.keyboard-form {
+  margin: 0;
+}
+
+/* Full size over the tapped field (iOS won't repeat a held Backspace in a tiny input), invisible, and taps pass
+   through to the mirror. 16px so iOS doesn't zoom in when it gets focus. */
 .keyboard-bridge {
   position: absolute;
-  left: -9999px;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
+  left: 0;
+  top: 0;
+  width: 44px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  pointer-events: none;
+}
+
+.type-here {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
 }
 
 .bottombar {

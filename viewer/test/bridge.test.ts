@@ -193,7 +193,7 @@ describe('keyboard bridge', () => {
     expect(attrs()).toEqual(['text', 'off', 'password']);
     configureBridge(input, 'text');
     expect(attrs()).toEqual(['text', 'off', 'text']);
-    for (const [a, v] of [['autocorrect', 'off'], ['autocapitalize', 'off'], ['spellcheck', 'false'], ['enterkeyhint', 'go']]) expect(input.getAttribute(a)).toBe(v);
+    for (const [a, v] of ([['autocorrect', 'off'], ['autocapitalize', 'off'], ['spellcheck', 'false'], ['enterkeyhint', 'go']] as const)) expect(input.getAttribute(a)).toBe(v);
     expect(input.value).toBe(ZW.repeat(RESERVE));
   });
 

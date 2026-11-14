@@ -270,7 +270,8 @@ describe('App', () => {
       { t: 'key', action: 'up', key: 'Enter', code: 'Enter', modifiers: 0 },
       { t: 'text', text: '日本' },
     ]);
-    expect(bridge.value).toBe('');
+    // Nothing typed stays in the viewer: only the reserve of invisible characters.
+    expect([...bridge.value].every((c) => c === '\u200b')).toBe(true);
   });
 
   it('Final I1: remembers the resumeKey for this session and offers it on the next load', () => {
@@ -383,6 +384,106 @@ describe('incomplete links and the six-digit code', () => {
     act(() => handlers.onCodeRequest!(false));
     goLive();
     expect(screen.queryByLabelText('Enter the 6-digit code')).toBeNull();
+  });
+
+  describe('native typing', () => {
+    const otp = { x: 200, y: 300, w: 400, h: 80, kind: 'otp' as const }; // page px; on the 640×360 canvas: 100,150 200×40
+    const text = { x: 200, y: 500, w: 400, h: 80, kind: 'text' as const };
+    const live = () => {
+      setup();
+      const canvas = goLive();
+      act(() => handlers.onFields?.([otp, text]));
+      return { canvas, bridge: screen.getByTestId('keyboard-bridge') as HTMLInputElement };
+    };
+    const tap = (canvas: Element, x: number, y: number, moveTo?: { x: number; y: number }) => {
+      pointer(canvas, 'pointerdown', { clientX: x, clientY: y, button: 0 });
+      const end = moveTo ?? { x, y };
+      pointer(canvas, 'pointerup', { clientX: end.x, clientY: end.y, button: 0 });
+    };
+
+    it('a tap on a code field opens the number pad on release, over the field, and still taps the page', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 150, 170);
+      expect(document.activeElement).toBe(bridge);
+      expect(bridge.inputMode).toBe('numeric');
+      expect(bridge.getAttribute('autocomplete')).toBe('one-time-code');
+      expect([bridge.style.left, bridge.style.top, bridge.style.width, bridge.style.height]).toEqual(['100px', '150px', '200px', '40px']);
+      expect(sent.filter((m) => (m as { t: string }).t === 'mouse').map((m) => (m as { action: string }).action)).toEqual(['down', 'up']);
+    });
+
+    it('a drag that starts on a field does not open the keyboard; a tap outside fields closes it', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 150, 170, { x: 150, y: 190 });
+      expect(document.activeElement).not.toBe(bridge);
+      tap(canvas, 150, 170);
+      expect(document.activeElement).toBe(bridge);
+      tap(canvas, 20, 20);
+      expect(document.activeElement).not.toBe(bridge);
+    });
+
+    it('focus null after a mapped tap closes the keyboard', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 150, 170);
+      act(() => handlers.onFocus?.(null));
+      expect(document.activeElement).not.toBe(bridge);
+    });
+
+    it('a field the map missed shows a "Type here" chip that opens the keyboard; focus null hides it', () => {
+      const { bridge } = live();
+      act(() => handlers.onFocus?.('email'));
+      const chip = screen.getByRole('button', { name: /type here/i });
+      fireEvent.click(chip);
+      expect(document.activeElement).toBe(bridge);
+      expect(bridge.inputMode).toBe('email');
+      expect(screen.queryByRole('button', { name: /type here/i })).toBeNull();
+      act(() => (bridge.blur(), handlers.onFocus?.('text')));
+      expect(screen.getByRole('button', { name: /type here/i })).toBeTruthy();
+      act(() => handlers.onFocus?.(null));
+      expect(screen.queryByRole('button', { name: /type here/i })).toBeNull();
+    });
+
+    it('without a field map the Keyboard button still opens the bridge, over the bottom of the mirror', () => {
+      setup();
+      goLive();
+      const bridge = screen.getByTestId('keyboard-bridge') as HTMLInputElement;
+      fireEvent.click(screen.getByRole('button', { name: /^keyboard$/i }));
+      expect(document.activeElement).toBe(bridge);
+      expect(bridge.inputMode).toBe('text');
+      expect([bridge.style.top, bridge.style.height]).toEqual(['316px', '44px']);
+    });
+
+    it('a paste into the bridge is sent once', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 150, 270);
+      sent = [];
+      const data = { getData: () => 'hello there' };
+      const paste = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(paste, 'clipboardData', { value: data });
+      act(() => void bridge.dispatchEvent(paste));
+      const e = new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertFromPaste', data: null });
+      Object.defineProperty(e, 'dataTransfer', { value: data });
+      act(() => void bridge.dispatchEvent(e));
+      expect(sent).toEqual([{ t: 'text', text: 'hello there' }]);
+    });
+
+    it('keeps the field in view above the keyboard, and lets go when the keyboard closes', () => {
+      const listeners: Record<string, () => void> = {};
+      const vv = { height: 800, addEventListener: (t: string, f: () => void) => (listeners[t] = f), removeEventListener: () => {} };
+      Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
+      try {
+        const { canvas, bridge } = live();
+        tap(canvas, 150, 170);
+        const stage = canvas.parentElement as HTMLElement;
+        vv.height = 120;
+        act(() => listeners.resize?.());
+        expect(stage.style.transform).toMatch(/^translateY\(-\d+px\)$/);
+        act(() => bridge.blur());
+        act(() => listeners.resize?.());
+        expect(stage.style.transform).toBe('');
+      } finally {
+        Object.defineProperty(window, 'visualViewport', { value: undefined, configurable: true });
+      }
+    });
   });
 });
 

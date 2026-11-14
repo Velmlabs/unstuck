@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
-import type { Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@velmlabs/unstuck-protocol';
+import type { Field, FieldKind, Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@velmlabs/unstuck-protocol';
 import { connect as defaultConnect, e2eCodec, type Codec, type ConnectionHandlers, type Phase, type ViewerSocket } from './connection';
 import { importE2eKey } from '@velmlabs/unstuck-protocol';
 import { drawFrameOnCanvas } from './draw';
+import { attachBridge, configureBridge } from './bridge';
+import { bridgeBox, hitField, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { clampToPage, toPagePoint } from './mapping';
 import { parseFragment, sessionIdFromPath, wsUrlFor } from './url';
@@ -68,6 +70,9 @@ const resumeStore = {
   },
 };
 
+/** A press that moves less than this (CSS px) before release is a tap, not a drag. */
+const TAP_SLOP_PX = 10;
+
 function formatRemaining(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -90,6 +95,15 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const [reason, setReason] = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bridgeRef = useRef<HTMLInputElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  /** Native typing: the engine's field map, the field under the current press, and where the bridge sits. */
+  const fieldsRef = useRef<Field[]>([]);
+  const tapRef = useRef<{ x: number; y: number; field: Field | null } | null>(null);
+  const bridgeKind = useRef<FieldKind>('text');
+  const bridgeBoxRef = useRef<Box | null>(null);
+  const mappedTap = useRef(false);
+  const [chip, setChip] = useState<FieldKind | null>(null);
   const sockRef = useRef<ViewerSocket | null>(null);
   const pageSize = useRef({ width: 0, height: 0 });
   const moveQueued = useRef(false);
@@ -105,6 +119,15 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const saved = resumeStore.get(sessionId);
     const sock = connectFn(wsUrlFor(location.origin, sessionId), token, lazyCodec(link.key, sessionId), {
       onCodeRequest: (invalid) => setCodeAsk({ invalid }),
+      onFields: (fields) => void (fieldsRef.current = fields),
+      onFocus: (kind) => {
+        const typing = document.activeElement === bridgeRef.current;
+        if (kind === null) {
+          setChip(null);
+          // The map said "field" but the page didn't take focus there: no keyboard over a non-field.
+          if (typing && mappedTap.current) closeBridge();
+        } else if (!typing) setChip(kind);
+      },
       onReady: (r) => {
         setCodeAsk(null);
         resumeStore.set(sessionId, r.resumeKey);
@@ -152,7 +175,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       send(m);
     };
     const onPaste = (e: Event) => {
-      if (!liveRef.current) return;
+      if (!liveRef.current || e.target === bridgeRef.current) return; // the bridge sends its own pastes
       const text = (e as ClipboardEvent).clipboardData?.getData('text/plain');
       if (text) {
         e.preventDefault();
@@ -169,6 +192,29 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     };
   }, [send]);
 
+  /** Opens the phone keyboard for a kind of field, with the bridge over the field (or the mirror's bottom strip). */
+  const openBridge = (kind: FieldKind, field: Field | null) => {
+    const el = bridgeRef.current;
+    const c = canvasRef.current;
+    const stage = stageRef.current;
+    if (!el || !c || !stage) return;
+    const cr = c.getBoundingClientRect();
+    const sr = stage.getBoundingClientRect();
+    const box = bridgeBox(field, { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height }, pageSize.current);
+    configureBridge(el, kind);
+    bridgeKind.current = kind;
+    bridgeBoxRef.current = box;
+    mappedTap.current = field !== null;
+    Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
+    el.focus({ preventScroll: true }); // inside the tap's own handler, or iOS won't open the keyboard
+    setChip(null);
+  };
+  const closeBridge = () => {
+    bridgeRef.current?.blur();
+    mappedTap.current = false;
+    if (stageRef.current) stageRef.current.style.transform = '';
+  };
+
   const point = (e: { clientX: number; clientY: number }) => {
     const c = canvasRef.current;
     return c ? toPagePoint({ x: e.clientX, y: e.clientY }, c.getBoundingClientRect(), pageSize.current) : null;
@@ -182,10 +228,18 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       e.preventDefault();
       (e.target as Element).setPointerCapture?.(e.pointerId);
       pressed.current = BUTTONS[e.button] ?? 'left';
+      tapRef.current = { x: e.clientX, y: e.clientY, field: hitField(fieldsRef.current, p) };
       send({ t: 'mouse', action, ...p, button: pressed.current, clickCount: 1, modifiers: modifiersOf(e) });
       return;
     }
     release(e);
+    // A tap (not a drag): open the right keyboard for the field under it, or close it elsewhere. Focusing on release
+    // is what iOS honours most reliably, and a drag that starts on a field doesn't open the keyboard.
+    const tap = tapRef.current;
+    tapRef.current = null;
+    if (!tap || Math.hypot(e.clientX - tap.x, e.clientY - tap.y) >= TAP_SLOP_PX) return;
+    if (tap.field) openBridge(tap.field.kind, tap.field);
+    else if (document.activeElement === bridgeRef.current) closeBridge();
   };
 
   /** Always pair a press with a release, even if the pointer ended in the letterbox or was cancelled. */
@@ -198,6 +252,11 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     pressed.current = null;
     e.preventDefault();
     send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers: modifiersOf(e) });
+  };
+
+  const cancel = (e: PointerEvent) => {
+    tapRef.current = null;
+    release(e);
   };
 
   const scroll = (direction: 1 | -1) => {
@@ -222,24 +281,6 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     send({ t: 'wheel', ...p, dx: e.deltaX, dy: e.deltaY });
   };
 
-  const keyTap = (key: string, text?: string) => {
-    send({ t: 'key', action: 'down', key, code: key, ...(text ? { text } : {}), modifiers: 0 });
-    send({ t: 'key', action: 'up', key, code: key, modifiers: 0 });
-  };
-
-  const onBeforeInput = (e: InputEvent) => {
-    if (e.inputType === 'insertCompositionText') return;
-    e.preventDefault();
-    if (e.inputType === 'insertText' && e.data) send({ t: 'text', text: e.data });
-    else if (e.inputType === 'deleteContentBackward') keyTap('Backspace');
-    else if (e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph') keyTap('Enter', '\r');
-  };
-
-  const onCompositionEnd = (e: CompositionEvent) => {
-    if (e.data) send({ t: 'text', text: e.data });
-    if (bridgeRef.current) bridgeRef.current.value = '';
-  };
-
   useEffect(() => {
     const c = canvasRef.current;
     if (!c) return;
@@ -249,29 +290,49 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     c.addEventListener('pointerdown', down);
     c.addEventListener('pointerup', up);
     c.addEventListener('pointermove', onMove);
-    c.addEventListener('pointercancel', release);
+    c.addEventListener('pointercancel', cancel);
     c.addEventListener('wheel', onWheel, { passive: false });
     c.addEventListener('contextmenu', noMenu);
     return () => {
       c.removeEventListener('pointerdown', down);
       c.removeEventListener('pointerup', up);
       c.removeEventListener('pointermove', onMove);
-      c.removeEventListener('pointercancel', release);
+      c.removeEventListener('pointercancel', cancel);
       c.removeEventListener('wheel', onWheel);
       c.removeEventListener('contextmenu', noMenu);
     };
   });
 
+  // The keyboard bridge: every key the person presses goes straight to the agent's page.
   useEffect(() => {
     const el = bridgeRef.current;
-    if (!el) return;
-    el.addEventListener('beforeinput', onBeforeInput);
-    el.addEventListener('compositionend', onCompositionEnd);
+    const form = formRef.current;
+    if (!el || !form) return;
+    configureBridge(el, 'text');
+    const detach = attachBridge(el, form, { send, kind: () => bridgeKind.current });
+    const unlift = () => void (stageRef.current && (stageRef.current.style.transform = ''));
+    el.addEventListener('blur', unlift);
     return () => {
-      el.removeEventListener('beforeinput', onBeforeInput);
-      el.removeEventListener('compositionend', onCompositionEnd);
+      detach();
+      el.removeEventListener('blur', unlift);
     };
-  });
+  }, [screen.kind]);
+
+  // Keep the field in view: when the keyboard shrinks the visible area, lift the mirror so the field sits above it.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const stage = stageRef.current;
+      const box = bridgeBoxRef.current;
+      if (!stage) return;
+      if (document.activeElement !== bridgeRef.current || !box) return void (stage.style.transform = '');
+      const lift = liftOffset(box, vv.height, stage.getBoundingClientRect().top - (Number.parseFloat(stage.style.transform.slice(11)) || 0));
+      stage.style.transform = lift ? `translateY(-${lift}px)` : '';
+    };
+    vv.addEventListener('resize', onResize);
+    return () => vv.removeEventListener('resize', onResize);
+  }, [screen.kind]);
 
   if (screen.kind === 'message') {
     return (
@@ -298,7 +359,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         ) : null}
       </header>
 
-      <div class="stage">
+      <div class="stage" ref={stageRef}>
         <canvas
           ref={canvasRef}
           data-testid="screen"
@@ -317,6 +378,14 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
             </svg>
           </button>
         </div>
+        <form ref={formRef} class="keyboard-form" action="#">
+          <input ref={bridgeRef} data-testid="keyboard-bridge" class="keyboard-bridge" aria-label="Type into the agent's page" />
+        </form>
+        {chip ? (
+          <button type="button" class="btn type-here" onClick={() => openBridge(chip, null)}>
+            Type here
+          </button>
+        ) : null}
         {phase !== 'live' ? (
           <div class="banner" role="status">
             {phase === 'reconnecting' ? 'Connection dropped. Reconnecting…' : 'Connecting…'}
@@ -324,18 +393,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         ) : null}
       </div>
 
-      <input
-        ref={bridgeRef}
-        data-testid="keyboard-bridge"
-        class="keyboard-bridge"
-        aria-label="Type into the agent's page"
-        autocomplete="off"
-        autocapitalize="off"
-        spellcheck={false}
-      />
+
 
       <footer class="bottombar">
-        <button type="button" class="btn btn-ghost" onClick={() => bridgeRef.current?.focus()}>
+        <button type="button" class="btn btn-ghost" onClick={() => openBridge('text', null)}>
           Keyboard
         </button>
         <button type="button" class="btn btn-secondary" onClick={() => setAsking(true)}>
