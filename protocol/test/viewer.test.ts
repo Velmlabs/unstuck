@@ -91,3 +91,10 @@ describe('resume window', () => {
     expect(RESUME_WINDOW_MS).toBe(300_000);
   });
 });
+
+describe('cant_solve reason', () => {
+  it('is at most 200 characters (it reaches the agent, which may be an AI)', () => {
+    expect(parseViewerMessage(JSON.stringify({ t: 'cant_solve', reason: 'x'.repeat(200) }))).toMatchObject({ t: 'cant_solve' });
+    expect(parseViewerMessage(JSON.stringify({ t: 'cant_solve', reason: 'x'.repeat(201) }))).toBeNull();
+  });
+});

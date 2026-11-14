@@ -182,7 +182,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     clearTimeout(timer);
   }
 
-  function finish(final: TakeoverStatus, detail?: string): void {
+  /** `logged` replaces what the audit log records for `detail` (the human's own words are never logged). */
+  function finish(final: TakeoverStatus, detail?: string, logged?: Record<string, string | number>): void {
     if (isTerminal(status)) return;
     status = nextStatus(status, FINAL_EVENT[final]);
     clearTimeout(expiryTimer);
@@ -208,7 +209,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       await Promise.race([Promise.all(locks.map((l) => l?.stop())), new Promise<void>((r) => (unlockTimer = setTimeout(r, STOP_TIMEOUT_MS)))]);
       clearTimeout(unlockTimer);
       if (published) await transport.unpublish(sessionId).catch(() => {});
-      emit('finished', { status: final, durationS, inputCount, ...(detail ? { detail } : {}) });
+      emit('finished', { status: final, durationS, inputCount, ...(logged ?? (detail ? { detail } : {})) });
       const fallbacks = [!caps.screencast && 'screenshots', !caps.insertText && 'per-key typing'].filter(Boolean).join(', ');
       const shown = detail ?? (fallbacks ? `fallback: ${fallbacks}` : undefined);
       resolveResult({ status: final, sessionId, url, durationS, ...(shown ? { detail: shown } : {}) });
@@ -384,8 +385,11 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
         return sendJson(conn, { t: 'pong' });
       case 'done':
         return finish('resolved');
-      case 'cant_solve':
-        return finish('cancelled', msg.reason || 'cant_solve');
+      case 'cant_solve': {
+        // Typed by the human and handed to the agent (often an AI): one clean line, and never written to the log.
+        const reason = cleanReason(msg.reason ?? '');
+        return finish('cancelled', reason || 'cant_solve', reason ? { detail: 'cant_solve', reasonLength: reason.length } : undefined);
+      }
       default: {
         const safe = safeInput(msg);
         if (!safe) return;
@@ -499,4 +503,13 @@ function sameCode(a: string, b: string): boolean {
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return diff === 0;
+}
+
+/** The human's "Can't solve" text as one plain line: no control, format or bidi characters, spaces collapsed. */
+export function cleanReason(text: string): string {
+  return text
+    .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
 }

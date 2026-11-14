@@ -40,7 +40,7 @@ export const ViewerToEngineSchema = Type.Union([
   ),
   Type.Object({ t: Lit('text'), text: Type.String() }, { additionalProperties: false }),
   Type.Object({ t: Lit('done') }, { additionalProperties: false }),
-  Type.Object({ t: Lit('cant_solve'), reason: Type.Optional(Type.String()) }, { additionalProperties: false }),
+  Type.Object({ t: Lit('cant_solve'), reason: Type.Optional(Type.String({ maxLength: 200 })) }, { additionalProperties: false }),
   Type.Object({ t: Lit('ping') }, { additionalProperties: false }),
 ]);
 export type ViewerToEngine = Static<typeof ViewerToEngineSchema>;
