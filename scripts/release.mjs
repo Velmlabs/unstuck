@@ -22,6 +22,11 @@ import { stageLauncher, stagePlatform } from './release/stage.mjs';
 // The dry run needs no credentials, and it runs third-party code (npm install, Bun, uv, the packages under test).
 // Drop every token/secret from this process first, so nothing it starts can inherit one (e.g. NPM_TOKEN, PYPI_TOKEN).
 for (const k of Object.keys(process.env)) if (!(k in scrubbedEnv())) delete process.env[k];
+// A token saved by `npm login` lives in ~/.npmrc, not the environment: point npm at an empty config instead.
+const emptyNpmrc = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'release-npmrc-')), '.npmrc');
+fs.writeFileSync(emptyNpmrc, '');
+process.env.NPM_CONFIG_USERCONFIG = emptyNpmrc;
+process.on('exit', () => fs.rmSync(path.dirname(emptyNpmrc), { recursive: true, force: true }));
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');

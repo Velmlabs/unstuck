@@ -53,7 +53,8 @@ jobs:
   publish:
     # Publishes exactly the files the dry run recorded (SHA-256 checked against release/dry-run-passed.json).
     needs: dry-run
-    if: ${{ !github.event.repository.private }}
+    # Only from main (workflow_dispatch can run on any branch); also restrict the `release` environment to main.
+    if: ${{ !github.event.repository.private && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release

@@ -124,9 +124,9 @@ describe('padPlaintext', () => {
     expect(JSON.parse(new TextDecoder().decode(p))).toEqual({ t: 'text', text: 'hunter2' });
     expect(p[0]).toBe(0x7b);
   });
-  it('never pads past the viewer message limit', () => {
-    expect(len(40_000)).toBe(65_536);
-    expect(len(65_536)).toBe(65_536);
+  it('never pads past what still fits the 64 KB viewer limit once sealed (+32 bytes)', () => {
+    expect(len(40_000)).toBe(65_504);
+    expect(len(65_504)).toBe(65_504);
     expect(len(70_000)).toBe(70_000);
   });
 });

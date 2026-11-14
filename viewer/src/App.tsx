@@ -168,6 +168,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         }
       },
       onError: (code) => {
+        // An error that ends this link for good: the secret kept for reloads goes with it.
+        if (code === 'token_used' || code === 'expired' || code === 'session_closed' || code === 'token_invalid') resumeStore.set(sessionId, null);
         if (code in ERROR_SCREENS) setScreen(ERROR_SCREENS[code as keyof typeof ERROR_SCREENS]);
       },
       onPhase: (p) => {

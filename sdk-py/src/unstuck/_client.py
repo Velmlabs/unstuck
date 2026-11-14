@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -78,7 +79,10 @@ class Unstuck:
         The human can only navigate the page within its own site (example.com and its subdomains); list any other
         sites the flow needs in ``allowed_sites``, e.g. ``["accounts.google.com"]``.
         """
-        if (self._require_code if require_code is None else require_code) and self._on_link is _default_on_link:
+        wants_code = self._require_code if require_code is None else require_code
+        if wants_code is None:
+            wants_code = os.environ.get("UNSTUCK_REQUIRE_CODE") == "1"  # the engine inherits this environment
+        if wants_code and self._on_link is _default_on_link:
             raise ValueError(
                 "require_code needs an on_link handler that sends the 6-digit code by a different channel than the link "
                 "(printed together, the code protects nothing)"

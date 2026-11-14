@@ -2,7 +2,8 @@
 // Playwright, the packages under test): they get no secrets at all. Publishing passes exactly one secret to the one
 // command that needs it.
 
-const SECRET = /(TOKEN|SECRET|PASSWORD|API_KEY|ACCESS_KEY|_AUTH)$|^ACTIONS_ID_TOKEN_REQUEST_|authtoken/i;
+const SECRET =
+  /(TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|API_KEY|ACCESS_KEY|PRIVATE_KEY|SIGNING_KEY|CREDENTIALS|_PAT|_AUTH)$|^ACTIONS_ID_TOKEN_REQUEST_|^SSH_AUTH_SOCK$|^DATABASE_URL$|authtoken/i;
 
 /** A copy of `env` without anything that looks like a credential, plus `extra`. */
 export function scrubbedEnv(env = process.env, extra = {}) {

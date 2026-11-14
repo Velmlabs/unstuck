@@ -42,6 +42,15 @@ export interface ViewerSocket {
 }
 
 const BACKOFF_MS = [500, 1000, 2000, 4000];
+/** Characters per text message: at most 4 bytes each in UTF-8 (plus JSON escaping) stays well under 64 KB. */
+const TEXT_CHUNK = 8_000;
+/** Splits text into pieces of at most TEXT_CHUNK code points (never inside a surrogate pair). */
+function chunks(text: string): string[] {
+  const cps = [...text];
+  const out: string[] = [];
+  for (let i = 0; i < cps.length; i += TEXT_CHUNK) out.push(cps.slice(i, i + TEXT_CHUNK).join(''));
+  return out;
+}
 const PING_MS = 20_000;
 const FATAL: ReadonlySet<ViewerErrorCode> = new Set(['token_invalid', 'token_used', 'expired', 'session_closed']);
 const TERMINAL: ReadonlySet<SessionStatus> = new Set(['resolved', 'timed_out', 'cancelled', 'failed']);
@@ -208,7 +217,10 @@ export function connect(
   open();
   return {
     send(m) {
-      if (ws.readyState === 1) write(ws, m);
+      if (ws.readyState !== 1) return;
+      // A long paste goes in pieces, each within the relay's 64 KB message limit once sealed.
+      if (m.t === 'text' && m.text.length > TEXT_CHUNK) for (const part of chunks(m.text)) write(ws, { t: 'text', text: part });
+      else write(ws, m);
     },
     sendHello(code) {
       if (ws.readyState === 1) hello(ws, code);

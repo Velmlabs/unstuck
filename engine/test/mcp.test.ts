@@ -109,13 +109,15 @@ describe('MCP server', () => {
     await server.close();
   }, 30_000);
 
-  it('UNSTUCK_REQUIRE_CODE=1 adds the 6-digit code to the link line, never to the URL', async () => {
-    const { client, server, err } = await connect({ transport: new FakeTransport(), env: { UNSTUCK_REQUIRE_CODE: '1' } });
+  it('UNSTUCK_REQUIRE_CODE=1: the code reaches the agent in its own message, never on the link line, in the URL or on stderr', async () => {
+    const { client, server, err, logs } = await connect({ transport: new FakeTransport(), env: { UNSTUCK_REQUIRE_CODE: '1' } });
     const call = client.callTool({ name: TOOL_NAME, arguments: { reason: 'Log in', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 10 } });
-    await vi.waitFor(() => expect(err()).toMatch(/→ \S+ \(code \d{6}\)/), { timeout: 15_000 });
-    const url = /→ (\S+)/.exec(err())![1]!;
-    const code = /code (\d{6})/.exec(err())![1]!;
-    expect(url).not.toContain(code);
+    await vi.waitFor(() => expect(logs.some((l) => /6-digit code .*: \d{6}$/.test(l))).toBe(true), { timeout: 15_000 });
+    const code = /(\d{6})$/.exec(logs.find((l) => /6-digit code/.test(l))!)![1]!;
+    const linkLine = logs.find((l) => l.includes('→'))!;
+    expect(linkLine).not.toContain(code);
+    expect(err()).not.toContain(code);
+    expect(/→ (\S+)/.exec(err())![1]).not.toContain(code);
     await server.close();
     await call.catch(() => {});
   }, 30_000);

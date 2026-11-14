@@ -61,6 +61,15 @@ describe('the link secret kept for reloads', () => {
     act(() => handlers.onState('resolved'));
     expect(sessionStorage.getItem('unstuck:link:SESSION')).toBeNull();
   });
+  it('is dropped on an error that ends this link for good (used, expired, closed, invalid)', () => {
+    for (const code of ['token_used', 'expired', 'session_closed', 'token_invalid'] as const) {
+      sessionStorage.setItem('unstuck:link:SESSION', '#t=TOK');
+      setup();
+      act(() => handlers.onError(code, 'm'));
+      expect(sessionStorage.getItem('unstuck:link:SESSION'), code).toBeNull();
+      cleanup();
+    }
+  });
 });
 
 describe('a viewer served from its own origin', () => {

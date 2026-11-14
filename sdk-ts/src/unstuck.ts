@@ -77,7 +77,8 @@ export class Unstuck {
       allowedSites?: string[];
     },
   ): Promise<TakeoverResult> {
-    if ((opts.requireCode ?? this.opts.requireCode) && !this.opts.onLink)
+    // The engine also asks for a code when UNSTUCK_REQUIRE_CODE=1 (it inherits this environment).
+    if ((opts.requireCode ?? this.opts.requireCode ?? process.env.UNSTUCK_REQUIRE_CODE === '1') && !this.opts.onLink)
       throw new TypeError('requireCode needs an onLink handler that sends the 6-digit code by a different channel than the link (printed together, the code protects nothing)');
     const pageClosed: TakeoverResult = { status: 'failed', sessionId: '', url: '', durationS: 0, detail: 'page_closed' };
     let attached: AttachedPage;

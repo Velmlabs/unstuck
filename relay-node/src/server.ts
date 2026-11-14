@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { KEY_SUBPROTOCOL_PREFIX, RELAY_CLOSE, RELAY_LIMITS, RELAY_SUBPROTOCOL, SESSION_ID_RE } from '@velmlabs/unstuck-protocol';
-import { createRateLimiter, hashKey, newRecord, refusalReason, RelaySession, type Authorize, type OnEvent, type RelaySocket } from '@velmlabs/unstuck-relay-core';
+import { createRateLimiter, hashKey, ipKey, newRecord, refusalReason, RelaySession, type Authorize, type OnEvent, type RelaySocket } from '@velmlabs/unstuck-relay-core';
 
 export interface NodeRelayOptions {
   port?: number;
@@ -91,7 +91,8 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
     const xs = String(req.headers['x-forwarded-for'] ?? '').split(',').map((x) => x.trim()).filter(Boolean);
     return xs[Math.max(0, xs.length - hops)];
   };
-  const ipOf = (req: http.IncomingMessage) => forwardedFor(req) || req.socket.remoteAddress || 'unknown';
+  // IPv6 counts by /64: one client usually holds a whole /64.
+  const ipOf = (req: http.IncomingMessage) => ipKey(forwardedFor(req) || req.socket.remoteAddress || 'unknown');
 
   const server = http.createServer((req, res) => {
     if (opts.hsts) res.setHeader('strict-transport-security', HSTS);

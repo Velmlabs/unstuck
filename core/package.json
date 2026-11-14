@@ -43,7 +43,8 @@
     "build:dist": "tsup"
   },
   "dependencies": {
-    "@velmlabs/unstuck-protocol": "workspace:*"
+    "@velmlabs/unstuck-protocol": "workspace:*",
+    "tldts": "^7.5.2"
   },
   "publishConfig": {
     "access": "public",

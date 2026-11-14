@@ -286,8 +286,15 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (gone || !popupCaps.input || isTerminal(status)) return void off();
     // Locked like the page (its site, the listed sites, and the site the popup itself opens): a popup that can't be
     // locked is never shown to the human.
-    const lock = await lockPage(popup, { allowedSites: [...(opts.allowedSites ?? []), ...pageSites], adoptFirstSite: true, onBlocked }).catch(() => null);
-    if (!lock || gone || isTerminal(status)) {
+    // Locked to the takeover's sites only (the page's site and the listed ones), never the site it opened on. A popup
+    // already elsewhere (e.g. a target=_blank link to another site) is closed, and a popup that can't be locked is
+    // never shown to the human.
+    const lock = await lockPage(popup, { allowedSites: pageSites, ownSite: false, onBlocked }).catch(() => null);
+    if (lock && !lock.onAllowedPage) {
+      onBlocked(await popup.send<{ frameTree: { frame: { url: string } } }>('Page.getFrameTree').then((t) => t.frameTree.frame.url, () => ''));
+      void popup.send('Page.close').catch(() => {});
+    }
+    if (!lock || !lock.onAllowedPage || gone || isTerminal(status)) {
       void lock?.stop();
       return void off();
     }
@@ -455,12 +462,13 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (!caps.input) return finish('failed', 'browser does not support input');
     try {
       const lock = await lockPage(cdp, { allowedSites: opts.allowedSites ?? [], onBlocked });
+      // The takeover may have ended while locking: then finish() didn't see this lock, so release it here.
+      if (isTerminal(status)) return void lock.stop();
       pageSites = lock.sites;
       targets.push({ cdp, caps, off: () => {}, lock });
     } catch {
       return finish('failed', 'page_lock_unavailable'); // never hand out a page that isn't locked
     }
-    if (isTerminal(status)) return;
     if (opts.popups) offPopups = opts.popups.onPopup((popup) => void addPopup(popup));
     try {
       const rawE2e = newE2eKey();

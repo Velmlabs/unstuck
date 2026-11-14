@@ -102,6 +102,13 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     await expect(unstuck.takeover(page, { reason: 'x' })).rejects.toThrow(/requireCode needs an onLink handler/);
     const plain = new Unstuck({ enginePath: ENGINE });
     await expect(plain.takeover(page, { reason: 'x', requireCode: true })).rejects.toThrow(/requireCode needs an onLink handler/);
+    // UNSTUCK_REQUIRE_CODE=1 makes the engine ask for a code too: the same rule applies.
+    process.env.UNSTUCK_REQUIRE_CODE = '1';
+    try {
+      await expect(plain.takeover(page, { reason: 'x' })).rejects.toThrow(/requireCode needs an onLink handler/);
+    } finally {
+      delete process.env.UNSTUCK_REQUIRE_CODE;
+    }
     await unstuck.close();
     await plain.close();
     await page.close();

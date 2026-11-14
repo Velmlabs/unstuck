@@ -26,6 +26,10 @@ describe('scrubbedEnv', () => {
   it('drops every token, secret, password, API key and OIDC request variable; keeps the rest', () => {
     expect(scrubbedEnv(base)).toEqual({ PATH: '/usr/bin', HOME: '/home/x', PLAYWRIGHT_BROWSERS_PATH: '/opt/pw' });
   });
+  it('also drops credentials named in other common ways', () => {
+    const more = { PATH: '/b', GOOGLE_APPLICATION_CREDENTIALS: 'x', AWS_CREDENTIALS: 'x', GH_PAT: 'x', GPG_PASSPHRASE: 'x', DB_PASSWD: 'x', SSH_PRIVATE_KEY: 'x', COSIGN_SIGNING_KEY: 'x', DATABASE_URL: 'x', SSH_AUTH_SOCK: 'x' };
+    expect(scrubbedEnv(more)).toEqual({ PATH: '/b' });
+  });
   it('adds extra variables after scrubbing', () => {
     expect(scrubbedEnv(base, { PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' })).toMatchObject({ PATH: '/usr/bin', PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' });
   });

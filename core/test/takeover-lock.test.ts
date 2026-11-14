@@ -142,3 +142,37 @@ describe('anti-replay: ready echoes the viewer freshness value', () => {
     expect(v2.json()[0]).not.toHaveProperty('vn');
   });
 });
+
+describe('review fixes', () => {
+  it('a popup that opened on another site is closed and never shown; one on the takeover site is locked to the takeover sites only', async () => {
+    const t = setup();
+    await settle();
+    const away = new FakeCdp();
+    away.respond('Page.getFrameTree', () => ({ frameTree: { frame: { id: 'P', url: 'https://mail.google.com/' } } }));
+    t.popups.open(away);
+    await settle();
+    expect(away.methods()).toContain('Page.close');
+    const ok = new FakeCdp();
+    ok.respond('Page.getFrameTree', () => ({ frameTree: { frame: { id: 'Q', url: 'https://pay.example.com/' } } }));
+    t.popups.open(ok);
+    await settle();
+    expect(ok.methods()).not.toContain('Page.close');
+    ok.emit('Fetch.requestPaused', { requestId: 'r', frameId: 'Q', request: { url: 'https://evil.net/' } });
+    await settle();
+    expect(ok.calls.at(-1)).toEqual({ method: 'Fetch.failRequest', params: { requestId: 'r', errorReason: 'Aborted' } });
+  });
+
+  it('a takeover that ends while the page is being locked still unlocks it', async () => {
+    let release: () => void = () => {};
+    const t = setup({ prepare: (cdp) => cdp.respond('Fetch.enable', () => new Promise<void>((r) => (release = r))) });
+    await settle();
+    await vi.advanceTimersByTimeAsync(61_000); // the takeover times out while Fetch.enable is pending
+    await settle();
+    release();
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    await settle();
+    expect(t.result()).toBeDefined();
+    expect(t.cdp.methods()).toContain('Fetch.disable');
+  });
+});

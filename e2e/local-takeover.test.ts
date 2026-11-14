@@ -34,7 +34,7 @@ beforeAll(async () => {
     if (pathname === '/links' || pathname === '/next') {
       const big = 'style="display:block;margin:40px;padding:40px;font-size:40px"';
       return void res.writeHead(200, { 'content-type': 'text/html' }).end(
-        `<!doctype html><title>${pathname}</title><a id="away" ${big} href="http://localhost:${port}/secret">Your inbox</a><a id="same" ${big} href="/next">Next step</a>`,
+        `<!doctype html><title>${pathname}</title><a id="away" ${big} href="http://localhost:${port}/secret">Your inbox</a><a id="same" ${big} href="/next">Next step</a><a id="blank" ${big} target="_blank" href="http://localhost:${port}/secret">Open inbox in a new tab</a>`,
       );
     }
     const body = FIXTURES[pathname];
@@ -197,6 +197,12 @@ describe('local takeover end to end', () => {
     await tapOn('#away');
     await new Promise((r) => setTimeout(r, 1500));
     expect(secretHits).toBe(0);
+    expect(page.url()).toBe(site + 'links');
+    // A link that opens another site in a new tab: the popup is closed, never shown, and the page stays put.
+    const opened = new Promise((r) => page.context().once('page', r));
+    await tapOn('#blank');
+    await opened; // the tap really opened the other site in a new tab
+    await expect.poll(() => page.context().pages().length, { timeout: 10_000 }).toBe(1);
     expect(page.url()).toBe(site + 'links');
     await tapOn('#same');
     await expect.poll(() => page.url(), { timeout: 10_000 }).toBe(site + 'next');

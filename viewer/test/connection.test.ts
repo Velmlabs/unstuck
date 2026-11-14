@@ -448,3 +448,19 @@ describe('anti-replay with engines that echo (challenge v: 2)', () => {
     expect(FakeWs.all[0]!.sent.map((b) => b.length)).toEqual([256, 256, 256]);
   });
 });
+
+describe('long text', () => {
+  it('a long paste goes as several text messages, each small enough for the relay once sealed', async () => {
+    const { sock } = make();
+    FakeWs.all[0]!.open();
+    await flush();
+    const text = 'é'.repeat(40_000) + '😀'.repeat(10);
+    sock.send({ t: 'text', text });
+    await flush();
+    const sent = FakeWs.all[0]!.texts().slice(1).map((t) => JSON.parse(t));
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.every((m) => m.t === 'text')).toBe(true);
+    expect(sent.map((m) => m.text).join('')).toBe(text);
+    expect(Math.max(...FakeWs.all[0]!.sent.map((b) => b.length))).toBeLessThanOrEqual(65_504);
+  });
+});

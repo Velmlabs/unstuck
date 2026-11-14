@@ -291,4 +291,11 @@ async def test_require_code_needs_an_on_link_handler(browser):
     async with Unstuck(engine_path=str(ENGINE)) as u:
         with pytest.raises(ValueError, match="require_code needs an on_link handler"):
             await u.takeover(page, reason="x", require_code=True)
+    os.environ["UNSTUCK_REQUIRE_CODE"] = "1"
+    try:
+        async with Unstuck(engine_path=str(ENGINE)) as u:
+            with pytest.raises(ValueError, match="require_code needs an on_link handler"):
+                await u.takeover(page, reason="x")
+    finally:
+        del os.environ["UNSTUCK_REQUIRE_CODE"]
     await page.close()

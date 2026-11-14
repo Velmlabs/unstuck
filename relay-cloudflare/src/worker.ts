@@ -1,5 +1,5 @@
 import { KEY_SUBPROTOCOL_PREFIX, RELAY_CLOSE, SESSION_ID_RE } from '@velmlabs/unstuck-protocol';
-import { createKeyAuthorizer, hashKey, refusalReason, type Authorize, type RelayEvent } from '@velmlabs/unstuck-relay-core';
+import { createKeyAuthorizer, hashKey, ipKey, refusalReason, type Authorize, type RelayEvent } from '@velmlabs/unstuck-relay-core';
 import { H_ACCOUNT, H_IP, H_KEY_HASH, H_SESSION, makeRelaySessionDO, upgradeResponse } from './durable-object';
 
 export interface RelayEnv {
@@ -87,7 +87,9 @@ export function createRelayWorker<E extends RelayEnv = RelayEnv>(opts: RelayWork
     if (!sock || !SESSION_ID_RE.test(sock[2]!)) return new Response('not found', { status: 404 });
     if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket upgrade', { status: 426 });
     const [, kind, id] = sock as unknown as [string, 'agent' | 'ws', string];
-    const clientIp = req.headers.get('cf-connecting-ip');
+    const raw = req.headers.get('cf-connecting-ip');
+    // IPv6 counts by /64: one client usually holds a whole /64.
+    const clientIp = raw ? ipKey(raw) : null;
     const ip = clientIp ?? 'unknown';
 
     if (kind === 'ws') {

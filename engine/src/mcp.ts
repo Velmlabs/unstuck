@@ -36,6 +36,7 @@ export function openInBrowser(url: string): void {
   }
 }
 
+const ignore = () => {};
 const text = (t: string, isError = false) => ({ content: [{ type: 'text' as const, text: t }], ...(isError ? { isError: true } : {}) });
 
 /** MCP server exposing request_human_takeover (spec §5). */
@@ -88,9 +89,11 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           allowedSites: hostnames(allowed_sites),
           popups: cdp.popups,
           onLink: ({ url: link, code }) => {
-            const line = `Unstuck: a human is needed (${reason}) → ${link}${code ? ` (code ${code})` : ''}`;
+            const line = `Unstuck: a human is needed (${reason}) → ${link}`;
             opts.stderr.write(line + '\n');
-            void server.sendLoggingMessage({ level: 'notice', logger: 'unstuck', data: line }).catch(() => {});
+            // The code goes to the agent in its own message (never to stderr), to deliver by a different channel.
+            for (const data of code ? [line, `Unstuck: the 6-digit code for that link (send it separately from the link): ${code}`] : [line])
+              void server.sendLoggingMessage({ level: 'notice', logger: 'unstuck', data }).catch(ignore);
             if (opts.open) openUrl(link);
           },
         });

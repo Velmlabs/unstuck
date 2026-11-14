@@ -223,6 +223,13 @@ describe('edge cases', () => {
     expect(statuses[30]).toBe(429);
   });
 
+  it('IPv6 clients are limited by /64: rotating addresses within one /64 does not escape the viewer limit', async () => {
+    const r = await relay({ trustProxy: true });
+    for (let i = 0; i < 30; i++) await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': `2001:db8:1:2::${(i + 1).toString(16)}` });
+    expect(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '2001:db8:1:2:ffff::1' })).toBe(429);
+    expect(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '2001:db8:1:3::1' })).toBe(404); // another /64
+  });
+
   it('security finding 1: trustProxy 0 ignores X-Forwarded-For', async () => {
     const r = await relay({ trustProxy: 0 });
     const statuses: number[] = [];

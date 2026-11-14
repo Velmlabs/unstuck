@@ -61,16 +61,18 @@ export function b64urlDecode(s: string): Uint8Array | null {
 export const isJsonPlaintext = (p: Uint8Array): boolean => p[0] === 0x7b;
 
 const PAD_MIN = 256;
-const PAD_MAX = 65_536;
+/** The 64 KB viewer message limit minus what sealing adds (4-byte seq + 12-byte IV + 16-byte tag). */
+const PAD_MAX = 65_536 - 32;
 
 /**
  * Pads a JSON plaintext with trailing spaces (still valid JSON for any peer) to 256 bytes, then to the next power of
- * two up to 64 KB, so a relay can't tell keys, digits or the length of typed text from message sizes.
+ * two up to what still fits 64 KB once sealed, so a relay can't tell keys, digits or the length of typed text from message sizes.
  */
 export function padPlaintext(p: Uint8Array): Uint8Array {
   if (p.length >= PAD_MAX) return p;
   let size = PAD_MIN;
   while (size < p.length) size *= 2;
+  size = Math.min(size, PAD_MAX);
   if (size === p.length) return p;
   const out = new Uint8Array(size).fill(0x20);
   out.set(p);

@@ -10,11 +10,14 @@ describe('siteOf: the site a takeover page belongs to', () => {
     expect(siteOf('a.b.example.com')).toBe('example.com');
     expect(siteOf('example.com')).toBe('example.com');
   });
-  it('keeps three labels under shared suffixes (country codes and hosting platforms)', () => {
+  it('uses the public suffix list: country codes, hosting platforms and multi-tenant services are tenant-sized', () => {
     expect(siteOf('www.shop.co.uk')).toBe('shop.co.uk');
     expect(siteOf('me.github.io')).toBe('me.github.io');
     expect(siteOf('app.vercel.app')).toBe('app.vercel.app');
     expect(siteOf('x.y.workers.dev')).toBe('y.workers.dev');
+    expect(siteOf('shop.co.at')).toBe('shop.co.at');
+    expect(siteOf('a.b.run.app')).toBe('a.b.run.app'); // *.run.app is itself a public suffix
+    expect(siteOf('store.myshopify.com')).toBe('store.myshopify.com');
   });
   it('is the exact host for IP addresses, localhost and single labels', () => {
     expect(siteOf('127.0.0.1')).toBe('127.0.0.1');
@@ -105,13 +108,14 @@ describe('lockPage', () => {
     expect(cdp.calls.filter((c) => c.method.startsWith('Fetch.') && c.method !== 'Fetch.enable').map((c) => c.method)).toEqual(['Fetch.failRequest', 'Fetch.continueRequest']);
   });
 
-  it('denies downloads while locked, and stop() undoes everything', async () => {
+  it('bypasses service workers while locked (they could serve an off-site page without a request), and never touches the agent\'s download setting; stop() undoes everything', async () => {
     const cdp = page();
     const lock = await lockPage(cdp, {});
-    expect(cdp.calls.find((c) => c.method === 'Page.setDownloadBehavior')?.params).toEqual({ behavior: 'deny' });
+    expect(cdp.calls.find((c) => c.method === 'Network.setBypassServiceWorker')?.params).toEqual({ bypass: true });
+    expect(cdp.methods()).not.toContain('Page.setDownloadBehavior');
     await lock.stop();
-    expect(cdp.methods().slice(-2)).toEqual(['Fetch.disable', 'Page.setDownloadBehavior']);
-    expect(cdp.calls.at(-1)?.params).toEqual({ behavior: 'default' });
+    expect(cdp.methods().slice(-2)).toEqual(['Fetch.disable', 'Network.setBypassServiceWorker']);
+    expect(cdp.calls.at(-1)?.params).toEqual({ bypass: false });
     expect(cdp.listenerCount('Fetch.requestPaused')).toBe(0);
     expect(cdp.listenerCount('Page.frameNavigated')).toBe(0);
     await lock.stop(); // twice is harmless
@@ -119,7 +123,7 @@ describe('lockPage', () => {
 
   it('never leaves a request hanging when CDP calls fail, and a failing download setting does not stop the lock', async () => {
     const cdp = page();
-    cdp.respond('Page.setDownloadBehavior', () => {
+    cdp.respond('Network.setBypassServiceWorker', () => {
       throw new Error('not supported');
     });
     cdp.respond('Fetch.continueRequest', () => {
@@ -143,15 +147,19 @@ describe('lockPage', () => {
   });
 });
 
-describe('lockPage for popups (adoptFirstSite)', () => {
-  it('a popup opened on about:blank adopts the site of its first page, then is locked to it', async () => {
+describe('popups', () => {
+  it('a popup is locked to the given sites only: it never gets the site it happens to open on', async () => {
     const cdp = page('about:blank');
-    await lockPage(cdp, { adoptFirstSite: true });
-    cdp.emit('Fetch.requestPaused', { requestId: 'r1', frameId: 'MAIN', resourceType: 'Document', request: { url: 'https://pay.provider.com/3ds' } });
-    cdp.emit('Fetch.requestPaused', { requestId: 'r2', frameId: 'MAIN', resourceType: 'Document', request: { url: 'https://www.provider.com/ok' } });
-    cdp.emit('Fetch.requestPaused', { requestId: 'r3', frameId: 'MAIN', resourceType: 'Document', request: { url: 'https://evil.net/' } });
+    await lockPage(cdp, { allowedSites: ['example.com'], ownSite: false });
+    cdp.emit('Fetch.requestPaused', { requestId: 'r1', frameId: 'MAIN', resourceType: 'Document', request: { url: 'https://mail.google.com/' } });
+    cdp.emit('Fetch.requestPaused', { requestId: 'r2', frameId: 'MAIN', resourceType: 'Document', request: { url: 'https://www.example.com/ok' } });
     await settle();
-    expect(cdp.calls.filter((c) => c.method.startsWith('Fetch.') && c.method !== 'Fetch.enable').map((c) => c.method)).toEqual(['Fetch.continueRequest', 'Fetch.continueRequest', 'Fetch.failRequest']);
+    expect(cdp.calls.filter((c) => c.method.startsWith('Fetch.') && c.method !== 'Fetch.enable').map((c) => c.method)).toEqual(['Fetch.failRequest', 'Fetch.continueRequest']);
+  });
+  it('reports whether the page is already somewhere it may not be', async () => {
+    expect((await lockPage(page('https://mail.google.com/'), { allowedSites: ['example.com'], ownSite: false })).onAllowedPage).toBe(false);
+    expect((await lockPage(page('about:blank'), { allowedSites: ['example.com'], ownSite: false })).onAllowedPage).toBe(true);
+    expect((await lockPage(page('https://a.example.com/'), { allowedSites: ['example.com'], ownSite: false })).onAllowedPage).toBe(true);
   });
 });
 
@@ -176,6 +184,14 @@ describe('safeInput: what a link holder may send to the page', () => {
     expect(safeInput(key(']', 4))).toBeNull();
     expect(safeInput(key('ArrowLeft', 4))).toEqual(key('ArrowLeft', 4)); // Cmd+Left in a field: line start
     expect(safeInput(key('a'))).toEqual(key('a'));
+    // On a focused link, Ctrl/Shift/Cmd/Alt+Enter or Space open it in another tab or window: sent without modifiers.
+    for (const m of [1, 2, 4, 8, 2 | 8]) {
+      expect(safeInput(key('Enter', m))).toEqual(key('Enter'));
+      expect(safeInput(key(' ', m))).toEqual(key(' '));
+    }
+    expect(safeInput(key('ContextMenu'))).toBeNull();
+    expect(safeInput(key('F10', 8))).toBeNull(); // Shift+F10: context menu
+    expect(safeInput(key('A', 8))).toEqual(key('A', 8)); // Shift+letter stays
     const text = { t: 'text' as const, text: 'x' };
     expect(safeInput(text)).toBe(text);
   });
