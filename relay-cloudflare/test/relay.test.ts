@@ -100,8 +100,8 @@ describe('agent refusals become close codes', () => {
       const ws = new FetchWs(`wss://relay.test/agent/SESSIONRATE_${String(i).padStart(10, '0')}`, ['unstuck-relay.1', 'key.K2']);
       let code = 0;
       ws.onclose = (e) => (code = e.code); // set before the upgrade completes: refusals close immediately
-      await waitFor(() => ws.readyState !== 0);
-      await new Promise((r) => setTimeout(r, 5));
+      // Accepted (open) or refused (closed with a code): wait for one of the two, not a fixed time.
+      await waitFor(() => ws.readyState === 1 || code !== 0);
       codes.push(code);
       ws.close();
     }

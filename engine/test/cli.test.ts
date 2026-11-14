@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
 import readline from 'node:readline';
 import fs from 'node:fs';
@@ -46,7 +46,7 @@ describe('main', () => {
     readline.createInterface({ input: x.stdout }).on('line', (l) => lines.push(l));
     const run = main(['--stdio', '--host', '127.0.0.1', '--port', '0'], x);
     x.stdin.write(JSON.stringify({ id: 1, method: 'engine.hello', params: { sdk: 'ts', sdkVersion: '0', protocolVersion: 1 } }) + '\n');
-    await new Promise((r) => setTimeout(r, 100));
+    await vi.waitFor(() => expect(lines).toHaveLength(1), { timeout: 4_000 });
     x.stdin.end();
     await expect(run).resolves.toBe(0);
     expect(lines.map((l) => JSON.parse(l))).toEqual([{ id: 1, result: { engineVersion: VERSION, protocolVersion: 1 } }]);
@@ -68,7 +68,7 @@ describe('main', () => {
     send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } });
     send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-    await new Promise((r) => setTimeout(r, 300));
+    await vi.waitFor(() => expect(lines.some((l) => l.id === 2)).toBe(true), { timeout: 4_000 });
     x.stdin.end();
     await expect(run).resolves.toBe(0);
     expect(lines.find((l) => l.id === 1).result.serverInfo).toMatchObject({ name: 'unstuck', version: VERSION });
@@ -109,7 +109,8 @@ describe('main', () => {
 });
 
 const bin = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'unstuck-engine');
-describe.skipIf(!fs.existsSync(bin))('compiled binary', () => {
+// Starting a ~115 MB binary can take seconds on a loaded machine, so these tests get more time than the default.
+describe.skipIf(!fs.existsSync(bin))('compiled binary', { timeout: 20_000 }, () => {
   it('--version works', async () => {
     const out = await new Promise<string>((resolve) => {
       let s = '';
@@ -125,7 +126,8 @@ describe.skipIf(!fs.existsSync(bin))('compiled binary', () => {
     const lines: string[] = [];
     readline.createInterface({ input: p.stdout }).on('line', (l) => lines.push(l));
     p.stdin.write(JSON.stringify({ id: 1, method: 'engine.hello', params: { sdk: 'ts', sdkVersion: '0', protocolVersion: 1 } }) + '\n');
-    await new Promise((r) => setTimeout(r, 500));
+    // The compiled binary's start-up time depends on the machine's load: wait for its answer, not a fixed time.
+    await vi.waitFor(() => expect(lines).toHaveLength(1), { timeout: 15_000 });
     const t0 = Date.now();
     p.stdin.end();
     const code = await new Promise<number | null>((r) => p.on('close', r));
@@ -138,7 +140,7 @@ describe.skipIf(!fs.existsSync(bin))('compiled binary', () => {
     const p = spawn(bin, ['--stdio'], { stdio: ['pipe', 'pipe', 'pipe'] });
     let err = '';
     p.stderr.on('data', (d) => (err += d));
-    await new Promise((r) => setTimeout(r, 500));
+    await vi.waitFor(() => expect(err).toMatch(/127\.0\.0\.1:\d+/), { timeout: 15_000 });
     const port = /127\.0\.0\.1:(\d+)/.exec(err)?.[1];
     const res = await fetch(`http://127.0.0.1:${port}/s/unknown`);
     expect(res.status).toBe(404);

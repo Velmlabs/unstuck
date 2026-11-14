@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
 import readline from 'node:readline';
 import { createRpcPeer, Methods, PROTOCOL_VERSION, type RpcPeer } from '@velmlabs/unstuck-protocol';
@@ -73,14 +73,14 @@ describe('runStdioHost', () => {
     const links: any[] = [];
     h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
     const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'x' });
-    await new Promise((r) => setTimeout(r, 50));
+    // Wait for each step itself, not a fixed time: on a loaded machine a step can take longer than any guess.
+    await vi.waitFor(() => expect(links).toHaveLength(1));
     const viewer = h.transport.connect(links[0].url);
     viewer.push({ t: 'hello', token: new URLSearchParams(new URL(links[0].url).hash.slice(1)).get('t') });
-    await new Promise((r) => setTimeout(r, 50));
+    await vi.waitFor(() => expect(page.methods().filter((m) => m === 'Page.startScreencast').length).toBe(2)); // probe + stream
     h.sdk.notify(Methods.pagePopup, { pageId: 'p1', popupPageId: 'pop1' });
     h.sdk.notify(Methods.pagePopup, { pageId: 'unknown', popupPageId: 'pop2' });
-    await new Promise((r) => setTimeout(r, 50));
-    expect(popup.methods().filter((m) => m === 'Page.startScreencast').length).toBe(2); // probe + stream
+    await vi.waitFor(() => expect(popup.methods().filter((m) => m === 'Page.startScreencast').length).toBe(2)); // probe + stream
     viewer.push({ t: 'done' });
     await expect(result).resolves.toMatchObject({ status: 'resolved' });
     h.input.end();

@@ -3,13 +3,9 @@ import { FakeCdp, FakeTransport, type FakeViewer } from '../src/testing';
 import { createEngine, type LinkInfo } from '../src/engine';
 import { MemoryEventLog } from '../src/events';
 import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import { settle } from './settle';
 
 const frame = { data: 'AQID', sessionId: 1, metadata: { deviceWidth: 1280, deviceHeight: 720 } };
-const realSetTimeout = globalThis.setTimeout;
-/** Let crypto.subtle (thread pool) and promise chains finish without advancing fake time. */
-async function settle() {
-  for (let i = 0; i < 10; i++) await new Promise((r) => realSetTimeout(r, 3));
-}
 
 function setup(opts: { timeoutS?: number } = {}) {
   return setupWith(() => {}, opts);

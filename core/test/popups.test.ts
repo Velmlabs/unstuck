@@ -2,11 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakeCdp, FakePopups, FakeTransport } from '../src/testing';
 import { createEngine, type LinkInfo } from '../src/engine';
 import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import { settle } from './settle';
 
-const realSetTimeout = globalThis.setTimeout;
-async function settle() {
-  for (let i = 0; i < 10; i++) await new Promise((r) => realSetTimeout(r, 3));
-}
 const frame = (w: number) => ({ data: 'AQID', sessionId: 1, metadata: { deviceWidth: w, deviceHeight: 100 } });
 const mouse = { t: 'mouse', action: 'down', x: 1, y: 1, button: 'left', clickCount: 1, modifiers: 0 } as const;
 const realClicks = (c: FakeCdp) => c.calls.filter((x) => x.method === 'Input.dispatchMouseEvent' && (x.params as { type: string }).type === 'mousePressed').length;

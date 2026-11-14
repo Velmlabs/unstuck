@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { newE2eKey, importE2eKey, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
 import { FakeViewer } from '../src/testing';
 import { sealConnection } from '../src/session/sealed';
+import { settle } from './settle';
 
 const enc = (s: string) => new TextEncoder().encode(s);
 const dec = (b: Uint8Array) => new TextDecoder().decode(b);
-const tick = () => new Promise((r) => setTimeout(r, 20));
 
 async function setup() {
   const key = await importE2eKey(newE2eKey());
@@ -13,7 +13,7 @@ async function setup() {
   const conn = sealConnection(raw, key, 'S1');
   const got: (string | Uint8Array)[] = [];
   conn.onMessage((m) => got.push(m));
-  await tick();
+  await settle();
   // The first thing on the wire is the challenge carrying this connection's nonce.
   const challenge = await openMsg(key, 'S1', 'e2v', '', raw.sent[0] as Uint8Array);
   const n = JSON.parse(dec(challenge!.plain)).n as string;
@@ -35,7 +35,7 @@ describe('sealConnection', () => {
     const t = await setup();
     t.raw.push(await t.sealIn(enc('{"t":"ping"}')));
     t.raw.push(await t.sealIn(new Uint8Array([1, 2, 3])));
-    await tick();
+    await settle();
     expect(t.got).toEqual(['{"t":"ping"}', new Uint8Array([1, 2, 3])]);
   });
 
@@ -43,7 +43,7 @@ describe('sealConnection', () => {
     const t = await setup();
     t.conn.send(new Uint8Array(200_000).fill(1));
     t.conn.send('{"t":"pong"}');
-    await tick();
+    await settle();
     expect(t.raw.sent).toHaveLength(3);
     const a = await t.openOut(1);
     const b = await t.openOut(2);
@@ -57,7 +57,7 @@ describe('sealConnection', () => {
     const click = await t.sealIn(enc('{"t":"done"}'));
     t.raw.push(click);
     t.raw.push(click);
-    await tick();
+    await settle();
     expect(t.got).toEqual(['{"t":"done"}']);
     expect(t.raw.closed?.code).toBe(1008);
   });
@@ -71,7 +71,7 @@ describe('sealConnection', () => {
     const got3: unknown[] = [];
     conn3.onMessage((m) => got3.push(m));
     fresh.push(recorded);
-    await tick();
+    await settle();
     expect(got3).toEqual([]);
     expect(fresh.closed?.code).toBe(1008);
   });
@@ -81,7 +81,7 @@ describe('sealConnection', () => {
     t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 5));
     t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 9));
     t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 7));
-    await tick();
+    await settle();
     expect(t.got).toHaveLength(2);
     expect(t.raw.closed?.code).toBe(1008);
   });
@@ -90,7 +90,7 @@ describe('sealConnection', () => {
     const t = await setup();
     t.conn.send('{"t":"error","code":"token_invalid","message":"x"}');
     t.conn.close(1008, 'token_invalid');
-    await tick();
+    await settle();
     expect(t.raw.sent).toHaveLength(2);
     expect(t.raw.closed?.code).toBe(1008);
   });
@@ -100,7 +100,7 @@ describe('sealConnection', () => {
     t.raw.bufferedAmount = 10;
     t.conn.send(new Uint8Array(1000));
     expect(t.conn.bufferedAmount).toBeGreaterThanOrEqual(1010);
-    await tick();
+    await settle();
     expect(t.conn.bufferedAmount).toBe(10);
   });
 
@@ -111,7 +111,7 @@ describe('sealConnection', () => {
     t.conn.close(1000);
     t.conn.send('{"t":"x"}');
     t.raw.push(late);
-    await tick();
+    await settle();
     expect(t.raw.sent).toHaveLength(1); // just the challenge
     expect(t.got).toEqual([]);
   });
@@ -119,7 +119,7 @@ describe('sealConnection', () => {
   it('a text message from the wire is treated as bytes and must still open', async () => {
     const t = await setup();
     t.raw.push('{"t":"hello"}');
-    await tick();
+    await settle();
     expect(t.raw.closed?.code).toBe(1008);
   });
 
@@ -129,7 +129,7 @@ describe('sealConnection', () => {
     t.conn.onClose(() => closed++);
     t.raw.push(await t.sealIn(enc('{"t":"ping"}')));
     t.raw.close(1006);
-    await tick();
+    await settle();
     expect(closed).toBe(1);
     expect(t.got).toEqual([]);
   });

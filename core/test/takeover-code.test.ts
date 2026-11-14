@@ -3,11 +3,8 @@ import { FakeCdp, FakeTransport } from '../src/testing';
 import { createEngine, type LinkInfo } from '../src/engine';
 import { MAX_CODE_ATTEMPTS } from '../src/session/takeover';
 import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import { settle } from './settle';
 
-const realSetTimeout = globalThis.setTimeout;
-async function settle() {
-  for (let i = 0; i < 10; i++) await new Promise((r) => realSetTimeout(r, 3));
-}
 
 function setup(requireCode: boolean | undefined, engineDefault?: boolean) {
   const transport = new FakeTransport();
