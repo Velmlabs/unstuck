@@ -16,6 +16,7 @@ const FIXTURES: Record<string, Buffer> = {
   '/popup-opener': fs.readFileSync(path.join(here, 'fixtures/popup-opener.html')),
   '/popup': fs.readFileSync(path.join(here, 'fixtures/popup.html')),
   '/drag': fs.readFileSync(path.join(here, 'fixtures/drag-puzzles.html')),
+  '/otp': fs.readFileSync(path.join(here, 'fixtures/otp.html')),
 };
 
 let server: http.Server;
@@ -247,3 +248,78 @@ describe('drag CAPTCHAs (sliders, drag-the-piece, drag and drop)', () => {
   }, 90_000);
 });
 
+
+describe('native typing on a simulated phone', () => {
+  const bridgeState = (human: any) =>
+    human.evaluate(() => {
+      const b = document.querySelector('[data-testid="keyboard-bridge"]') as HTMLInputElement;
+      const r = b.getBoundingClientRect();
+      return { focused: document.activeElement === b, inputMode: b.inputMode, autocomplete: b.getAttribute('autocomplete'), rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
+    });
+  /** Taps an agent-page element on the phone until the bridge has focus (the field map arrives with the first frames). */
+  async function tapToType(human: any, page: any, selector: string) {
+    const at = await canvasPointFor(human, await centerOf(page, selector));
+    await expect
+      .poll(async () => {
+        await human.touchscreen.tap(at.x, at.y);
+        return (await bridgeState(human)).focused;
+      }, { timeout: 15_000 })
+      .toBe(true);
+    return at;
+  }
+
+  it('a tap opens the number pad over the code field; whole codes, held Backspace, Shift, Tab and Return reach the page; a covered field does not open the keyboard', async () => {
+    const { page, unstuck, result, link } = await startTakeover({ path: '/otp' });
+    const { ctx, human } = await openHuman(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+
+    // The single code field: the number pad with the SMS code suggestion, the bridge over the field.
+    const at = await tapToType(human, page, '#single');
+    const s1 = await bridgeState(human);
+    expect([s1.inputMode, s1.autocomplete]).toEqual(['numeric', 'one-time-code']);
+    expect(at.x).toBeGreaterThanOrEqual(s1.rect.x);
+    expect(at.x).toBeLessThanOrEqual(s1.rect.x + s1.rect.w);
+    expect(at.y).toBeGreaterThanOrEqual(s1.rect.y);
+    expect(at.y).toBeLessThanOrEqual(s1.rect.y + s1.rect.h);
+    // A code arriving in one piece (the SMS suggestion) lands whole.
+    await human.keyboard.insertText('482913');
+    await expect.poll(() => page.inputValue('#single'), { timeout: 10_000 }).toBe('482913');
+    // A held Backspace (repeating key presses) empties it.
+    for (let i = 0; i < 7; i++) await human.keyboard.down('Backspace');
+    await human.keyboard.up('Backspace');
+    await expect.poll(() => page.inputValue('#single'), { timeout: 10_000 }).toBe('');
+    // Return/Go submits the real form.
+    await human.keyboard.insertText('48');
+    await human.keyboard.press('Enter');
+    await expect.poll(() => page.evaluate('window.submitted || 0'), { timeout: 10_000 }).toBe(1);
+
+    // Six drawn boxes with one invisible input over them, and six one-digit boxes that move focus.
+    await tapToType(human, page, '#overlay');
+    await human.keyboard.insertText('482913');
+    await expect.poll(() => page.inputValue('#overlay'), { timeout: 10_000 }).toBe('482913');
+    await tapToType(human, page, '#split input:first-child');
+    await human.keyboard.insertText('482913');
+    await expect.poll(() => page.evaluate('window.splitValue()'), { timeout: 10_000 }).toBe('482913');
+
+    // Shift+letter arrives as a real key press with Shift; Tab moves the page's focus and the keyboard stays open.
+    await tapToType(human, page, '#email');
+    expect((await bridgeState(human)).inputMode).toBe('email');
+    await human.keyboard.press('Shift+A');
+    await expect.poll(() => page.inputValue('#email'), { timeout: 10_000 }).toBe('A');
+    expect(await page.evaluate("window.keyEvents.some((e) => e.key === 'A' && e.shiftKey && e.target === 'email')")).toBe(true);
+    await human.keyboard.press('Tab');
+    await expect.poll(() => page.evaluate('document.activeElement.id'), { timeout: 10_000 }).toBe('next');
+    expect((await bridgeState(human)).focused).toBe(true);
+
+    // A tap on the cookie banner over a field doesn't open the keyboard (and closes the open one).
+    const covered = await canvasPointFor(human, await centerOf(page, '#covered'));
+    await human.touchscreen.tap(covered.x, covered.y);
+    await expect.poll(async () => (await bridgeState(human)).focused, { timeout: 5_000 }).toBe(false);
+
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await ctx.close();
+    await unstuck.close();
+    await page.close();
+  }, 120_000);
+});

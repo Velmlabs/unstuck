@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Two-step verification (test fixture)</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px system-ui, sans-serif; background: #f8fafc; color: #1f2328; }
+  form, section { position: absolute; left: 40px; width: 520px; }
+  input { font-size: 18px; padding: 8px; border: 1px solid #94a3b8; border-radius: 6px; }
+  #f { top: 30px; }
+  #single { width: 240px; height: 44px; }
+  #overlay-wrap { top: 120px; height: 52px; }
+  #overlay-wrap .boxes { display: flex; gap: 8px; }
+  #overlay-wrap .boxes span { width: 44px; height: 52px; border: 1px solid #94a3b8; border-radius: 6px; display: grid; place-items: center; font-size: 22px; }
+  #overlay { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+  #split { top: 200px; display: flex; gap: 8px; }
+  #split input { width: 44px; height: 52px; text-align: center; }
+  #mail { top: 290px; display: flex; gap: 12px; }
+  #mail input { width: 240px; height: 44px; }
+  #covered-wrap { top: 640px; }
+  #covered { width: 240px; height: 40px; }
+  #banner { position: fixed; left: 0; right: 0; bottom: 0; height: 120px; background: #0f172a; color: #fff; padding: 20px; }
+</style>
+</head>
+<body>
+  <form id="f" onsubmit="event.preventDefault(); window.submitted = (window.submitted || 0) + 1;">
+    <input id="single" autocomplete="one-time-code" inputmode="numeric" maxlength="6" aria-label="Code">
+  </form>
+  <section id="overlay-wrap">
+    <div class="boxes"><span></span><span></span><span></span><span></span><span></span><span></span></div>
+    <input id="overlay" autocomplete="one-time-code" inputmode="numeric" maxlength="6" aria-label="Code (boxes)">
+  </section>
+  <section id="split">
+    <input maxlength="1" inputmode="numeric" aria-label="Digit 1"><input maxlength="1" inputmode="numeric" aria-label="Digit 2"><input maxlength="1" inputmode="numeric" aria-label="Digit 3"><input maxlength="1" inputmode="numeric" aria-label="Digit 4"><input maxlength="1" inputmode="numeric" aria-label="Digit 5"><input maxlength="1" inputmode="numeric" aria-label="Digit 6">
+  </section>
+  <section id="mail">
+    <input id="email" type="email" aria-label="Email"><input id="next" aria-label="Next field">
+  </section>
+  <section id="covered-wrap"><input id="covered" aria-label="Covered field"></section>
+  <div id="banner">We use cookies. <button type="button">OK</button></div>
+<script>
+  window.keyEvents = [];
+  addEventListener('keydown', (e) => window.keyEvents.push({ key: e.key, shiftKey: e.shiftKey, target: e.target.id || e.target.getAttribute('aria-label') }), true);
+  // The six drawn boxes show what is typed in the invisible input over them.
+  const overlay = document.getElementById('overlay');
+  overlay.addEventListener('input', () => document.querySelectorAll('#overlay-wrap span').forEach((s, i) => (s.textContent = overlay.value[i] || '')));
+  // Six one-digit boxes that move focus forward as each digit is typed.
+  const split = [...document.querySelectorAll('#split input')];
+  split.forEach((el, i) => el.addEventListener('input', () => { if (el.value && split[i + 1]) split[i + 1].focus(); }));
+  window.splitValue = () => split.map((el) => el.value).join('');
+</script>
+</body>
+</html>
