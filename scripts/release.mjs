@@ -15,8 +15,13 @@ import { npmState, pypiState, sha1, sha256, writeManifest } from './release/mani
 import { buildWheel } from './release/build-wheels.mjs';
 import { tarballProblems, wheelProblems } from './release/checks.mjs';
 import { PLATFORMS } from './release/platforms.mjs';
+import { scrubbedEnv } from './release/env.mjs';
 import { adhocSign, ensureRcodesign } from './release/rcodesign.mjs';
 import { stageLauncher, stagePlatform } from './release/stage.mjs';
+
+// The dry run needs no credentials, and it runs third-party code (npm install, Bun, uv, the packages under test).
+// Drop every token/secret from this process first, so nothing it starts can inherit one (e.g. NPM_TOKEN, PYPI_TOKEN).
+for (const k of Object.keys(process.env)) if (!(k in scrubbedEnv())) delete process.env[k];
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
@@ -141,7 +146,7 @@ const scratch = [app];
 process.on('exit', () => scratch.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
 sh('npm', ['init', '-y'], { cwd: app, stdio: 'ignore' });
 sh('npm', ['pkg', 'set', 'type=module'], { cwd: app, stdio: 'ignore' });
-sh('npm', ['install', '--no-audit', '--no-fund', ...hostTarballs, 'playwright@1.63.0', 'tsx@4'], { cwd: app, stdio: 'ignore', env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } });
+sh('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', ...hostTarballs, 'playwright@1.63.0', 'tsx@4.23.15'], { cwd: app, stdio: 'ignore', env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } });
 fs.copyFileSync(path.join(root, 'examples/playwright-ts/index.ts'), path.join(app, 'index.ts'));
 const tsStatus = await takeover('npx', ['tsx', 'index.ts', siteUrl], app, noEngineOverride);
 if (tsStatus !== 'resolved') throw new Error(`TypeScript takeover: ${tsStatus}`);

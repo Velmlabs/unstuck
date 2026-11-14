@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { buildEngine, checkBinaryType, EXPECTED_TYPE, macosInfo } from './build-engines.mjs';
+import { buildEngine, checkBinaryType, EXPECTED_TYPE, macosInfo, BUN_VERSION, checkBunVersion } from './build-engines.mjs';
 import { PLATFORMS } from './platforms.mjs';
 import { adhocSign, ensureRcodesign } from './rcodesign.mjs';
 const madeDirs = [];
@@ -36,6 +36,12 @@ function signatureLayout(bytes) {
 }
 
 describe('engine builds', () => {
+  it('builds only with the pinned Bun (its runtime ships inside every engine)', () => {
+    expect(BUN_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(() => checkBunVersion(`${BUN_VERSION}\n`)).not.toThrow();
+    expect(() => checkBunVersion('0.0.1')).toThrow(`engines must be built with Bun ${BUN_VERSION}, found 0.0.1`);
+    expect(() => checkBunVersion()).not.toThrow(); // the Bun on this machine
+  });
   it('knows the executable type each platform must produce', () => {
     expect(EXPECTED_TYPE).toEqual({
       'darwin-arm64': /^Mach-O 64-bit arm64 executable/,

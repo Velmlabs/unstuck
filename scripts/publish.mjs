@@ -9,20 +9,24 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { npmState, pypiState, sha1, sha256, verifyManifest } from './release/manifest.mjs';
 import { PLATFORMS } from './release/platforms.mjs';
+import { publishCredentials, scrubbedEnv } from './release/env.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
 const VERSION = '0.1.4';
-const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts });
+// Every command gets a credential-free environment unless it is given exactly the one secret it needs.
+const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', env: scrubbedEnv(), ...opts });
 
 if (sh('git', ['status', '--porcelain', '--', '.', ':!release']).trim()) throw new Error('uncommitted changes: commit, run the dry run, then publish');
 const files = verifyManifest(OUT, sh('git', ['rev-parse', 'HEAD']).trim()).map((f) => path.join(OUT, f));
-for (const t of ['NPM_TOKEN', 'PYPI_TOKEN']) if (!process.env[t]) throw new Error(`${t} is not set`);
+const creds = publishCredentials();
+console.log(`credentials: ${creds.mode === 'trusted' ? 'GitHub OIDC (trusted publishing, provenance)' : 'NPM_TOKEN / PYPI_TOKEN'}`);
 
 const npmrc = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'npmrc-')), '.npmrc');
 fs.writeFileSync(npmrc, '//registry.npmjs.org/:_authToken=${NPM_TOKEN}\n', { mode: 0o600 }); // npm expands it; the value never lands on disk
-const npmEnv = { ...process.env, NPM_CONFIG_USERCONFIG: npmrc };
-console.log(`npm account: ${sh('npm', ['whoami'], { env: npmEnv }).trim() ? 'ok' : '?'}`);
+process.on('exit', () => fs.rmSync(path.dirname(npmrc), { recursive: true, force: true })); // pass or fail
+const npmEnv = creds.mode === 'token' ? { ...creds.npmEnv, NPM_CONFIG_USERCONFIG: npmrc } : creds.npmEnv;
+if (creds.mode === 'token') console.log(`npm account: ${sh('npm', ['whoami'], { env: npmEnv }).trim() ? 'ok' : '?'}`);
 
 console.log('\n▸ PyPI');
 const wheels = files.filter((f) => f.endsWith('.whl'));
@@ -34,7 +38,7 @@ for (const w of wheels) {
   else toUpload.push(w);
 }
 // uv reads the token from UV_PUBLISH_TOKEN; it is never on the command line or printed.
-if (toUpload.length) sh('uv', ['publish', ...toUpload], { env: { ...process.env, UV_PUBLISH_TOKEN: process.env.PYPI_TOKEN }, stdio: ['ignore', 'inherit', 'inherit'] });
+if (toUpload.length) sh('uv', ['publish', ...creds.uvArgs, ...toUpload], { env: creds.uvEnv, stdio: ['ignore', 'inherit', 'inherit'] });
 
 console.log('\n▸ npm');
 const byName = Object.fromEntries(files.filter((f) => f.endsWith('.tgz')).map((f) => [JSON.parse(sh('tar', ['-xzOf', f, 'package/package.json'])).name, f]));
@@ -47,8 +51,7 @@ for (const name of order) {
     console.log(`already there: ${name}@${VERSION}`);
     continue;
   }
-  sh('npm', ['publish', tgz, '--access', 'public'], { env: npmEnv, stdio: ['ignore', 'ignore', 'inherit'] });
+  sh('npm', ['publish', tgz, '--access', 'public', ...creds.npmArgs], { env: npmEnv, stdio: ['ignore', 'ignore', 'inherit'] });
   console.log(`published ${name}@${VERSION}`);
 }
-fs.rmSync(path.dirname(npmrc), { recursive: true, force: true });
 console.log(`\n✓ ${VERSION} is on npm and PyPI`);

@@ -1,0 +1,72 @@
+# Publishes a release with trusted publishing: no npm or PyPI tokens are stored anywhere. npm and PyPI accept GitHub's
+# short-lived OIDC token from the `publish` job, and npm attaches signed provenance (which commit and workflow built it).
+#
+# One-time setup (repository owner):
+#   - npmjs.com → each @velmlabs package → Settings → Trusted publishing → GitHub Actions:
+#       organization/user Velmlabs, repository unstuck, workflow release.yml, environment release
+#   - pypi.org → project unstuck → Publishing → add a trusted publisher with the same four values
+#   - GitHub → repository Settings → Environments → create `release` with required reviewers
+#
+# Run: Actions → Release → Run workflow (on main, after bumping the version and committing).
+name: Release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  dry-run:
+    # Builds every artifact and proves it from a clean install. It has no credentials of any kind.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@7088e561eb65bb68695d245aa206f005ef30921d # v4.1.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+        with:
+          bun-version: 1.4.4
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm build && pnpm test
+      - run: pnpm release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release
+          path: release/
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    # Publishes exactly the files the dry run recorded (SHA-256 checked against release/dry-run-passed.json).
+    needs: dry-run
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@11.6.2 # trusted publishing needs npm 11.5.1+
+      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release
+          path: release/
+      - run: node scripts/publish.mjs

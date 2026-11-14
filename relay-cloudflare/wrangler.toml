@@ -1,6 +1,6 @@
 # Self-host template: `pnpm --filter @velmlabs/unstuck-relay-cloudflare deploy`.
 # Set agent keys with: wrangler secret put AGENT_KEYS   (comma-separated)
-name = "unstuck-relay"
+name = "unstuck-relay-selfhost" # your own Worker; deliberately not the name of the hosted relay
 main = "src/index.ts"
 compatibility_date = "2026-11-01"
 compatibility_flags = ["nodejs_compat"]

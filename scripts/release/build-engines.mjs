@@ -15,6 +15,15 @@ export const EXPECTED_TYPE = {
   'win32-x64': /^PE32\+ executable \(console\) x86-64/,
 };
 
+/** The Bun whose runtime is compiled into every engine binary: releases are built with exactly this one. */
+export const BUN_VERSION = '1.4.4';
+
+/** Throws unless `actual` (default: the `bun` on PATH) is BUN_VERSION. */
+export function checkBunVersion(actual = execFileSync('bun', ['--version'], { encoding: 'utf8' })) {
+  const v = actual.trim();
+  if (v !== BUN_VERSION) throw new Error(`engines must be built with Bun ${BUN_VERSION}, found ${v}`);
+}
+
 /** Builds the viewer and embeds it into the engine sources (once, before compiling any target). */
 export function embedViewer() {
   execFileSync('pnpm', ['--filter', '@velmlabs/unstuck-viewer', 'build'], { cwd: root, stdio: 'ignore' });
@@ -25,6 +34,7 @@ export function embedViewer() {
 export function buildEngine(platform, out) {
   const file = path.join(out, platform.id, platform.exe);
   fs.mkdirSync(path.dirname(file), { recursive: true });
+  checkBunVersion();
   execFileSync('bun', ['build', path.join(root, 'engine/src/bin.ts'), '--compile', '--minify', `--target=${platform.bun}`, '--outfile', file], { cwd: root, stdio: 'ignore' });
   return file;
 }

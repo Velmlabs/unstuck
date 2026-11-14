@@ -12,3 +12,7 @@ __pycache__/
 .coverage
 *.egg-info/
 /release/
+.env
+.env.*
+.dev.vars
+.dev.vars.*
