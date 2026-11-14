@@ -49,6 +49,15 @@ export type AgentToRelay =
 
 const C = Type.Integer({ minimum: 1, maximum: 0xffffffff });
 const strict = { additionalProperties: false } as const;
+/**
+ * A close code a server socket can send: 1000–1003, 1007–1014 or 3000–4999. The engine uses 1008 and 1013, so
+ * the browser-only rule (1000 or 3000–4999) would be too strict; 1004–1006 and 1015 are reserved and throw.
+ */
+const CloseCode = Type.Union([
+  Type.Integer({ minimum: 1000, maximum: 1003 }),
+  Type.Integer({ minimum: 1007, maximum: 1014 }),
+  Type.Integer({ minimum: 3000, maximum: 4999 }),
+]);
 const RelayToAgentSchema = Type.Union([
   Type.Object({ t: Type.Literal('open'), c: C }, strict),
   Type.Object({ t: Type.Literal('close'), c: C }, strict),
@@ -57,7 +66,7 @@ const RelayToAgentSchema = Type.Union([
 ]);
 const AgentToRelaySchema = Type.Union([
   Type.Object({ t: Type.Literal('hello'), expiresAt: Type.Number(), secret: Type.String({ minLength: 1, maxLength: 128 }) }, strict),
-  Type.Object({ t: Type.Literal('close'), c: C, code: Type.Integer() }, strict),
+  Type.Object({ t: Type.Literal('close'), c: C, code: CloseCode }, strict),
   Type.Object({ t: Type.Literal('pong') }, strict),
   Type.Object({ t: Type.Literal('end') }, strict),
   Type.Object({ t: Type.Literal('event'), name: Type.String({ maxLength: 64 }) }, strict),
