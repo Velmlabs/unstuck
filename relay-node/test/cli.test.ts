@@ -43,5 +43,13 @@ describe('unstuck-relay CLI', () => {
     expect(o.out.join('')).toContain('listening on http://0.0.0.0:');
     await r.close();
   });
-});
 
+  it('UNSTUCK_TRUST_PROXY takes a hop count; UNSTUCK_HSTS=1 turns on HSTS', async () => {
+    const o = io();
+    const r = await main(['--port', '0', '--host', '127.0.0.1'], { UNSTUCK_AGENT_KEYS: 'k', UNSTUCK_TRUST_PROXY: '2', UNSTUCK_HSTS: '1' }, o);
+    if (typeof r === 'number') throw new Error('did not start');
+    expect((await fetch(`http://127.0.0.1:${r.port}/healthz`)).headers.get('strict-transport-security')).toBe('max-age=31536000');
+    await r.close();
+    expect(await main(['--port', '0'], { UNSTUCK_AGENT_KEYS: 'k', UNSTUCK_TRUST_PROXY: 'yes' }, io())).toBe(2);
+  });
+});
