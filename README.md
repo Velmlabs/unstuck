@@ -116,6 +116,7 @@ Run your own relay on Node or Docker (`relay-node/`) or on Cloudflare Workers (`
 - Each link carries a single-use token and a fresh encryption key in the URL fragment, which never reaches a server or log.
 - The screen, taps and keystrokes are encrypted end to end (AES-GCM) between your agent's engine and the person's browser. A relay, Unstuck Cloud included, only sees ciphertext.
 - One person at a time; an optional 6-digit code means a forwarded link alone isn't enough.
+- The person can only use the page they were handed. The tab stays on the page's own site (example.com and its subdomains), so the agent browser's other logins are out of reach: links to other sites don't open, new tabs and windows can't be opened, and downloads are blocked. If the flow needs another site, such as a Google sign-in or a bank's 3-D Secure page, list it: `allowedSites: ['accounts.google.com']` (Python: `allowed_sites=[...]`, MCP: `allowed_sites`).
 - The audit log records states and input counts, never what was typed.
 
 ## Develop

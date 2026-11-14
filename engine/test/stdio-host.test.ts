@@ -63,6 +63,31 @@ describe('runStdioHost', () => {
     await h.done;
   });
 
+  it('passes the agent\'s allowedSites to the page lock: a listed site is let through, another is stopped', async () => {
+    const h = start();
+    const cdp = new FakeCdp();
+    cdp.respond('Page.getFrameTree', () => ({ frameTree: { frame: { id: 'MAIN', url: 'https://shop.example.com/' } } }));
+    h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
+    h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'x', allowedSites: ['accounts.google.com'] });
+    await new Promise((r) => setTimeout(r, 50));
+    const paused = (requestId: string, url: string) =>
+      h.sdk.notify(Methods.cdpEvent, { pageId: 'p1', method: 'Fetch.requestPaused', params: { requestId, frameId: 'MAIN', request: { url } } });
+    paused('r1', 'https://accounts.google.com/signin');
+    paused('r2', 'https://mail.google.com/');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(cdp.calls.filter((c) => c.method === 'Fetch.continueRequest' || c.method === 'Fetch.failRequest').map((c) => c.method)).toEqual(['Fetch.continueRequest', 'Fetch.failRequest']);
+    const viewer = h.transport.connect(links[0].url);
+    viewer.push({ t: 'hello', token: new URLSearchParams(new URL(links[0].url).hash.slice(1)).get('t') });
+    await new Promise((r) => setTimeout(r, 50));
+    viewer.push({ t: 'done' });
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    h.input.end();
+    await h.done;
+  });
+
   it('page.popup moves the stream to the popup the SDK attached (Review Focus 4)', async () => {
     const h = start();
     const page = new FakeCdp();
@@ -125,5 +150,15 @@ describe('runStdioHost', () => {
     await h.sdk.request(Methods.shutdown, {});
     await h.done;
     for (const l of h.raw) expect(() => JSON.parse(l)).not.toThrow();
+  });
+});
+
+describe('hostnames', () => {
+  it('keeps plausible hostnames only, at most 20', async () => {
+    const { hostnames } = await import('../src/stdio-host');
+    expect(hostnames(['accounts.google.com', '*.okta.com', 'localhost', 'https://x.com', 'a b', 7, '', 'x'.repeat(300)])).toEqual(['accounts.google.com', '*.okta.com', 'localhost']);
+    expect(hostnames('example.com')).toEqual([]);
+    expect(hostnames(undefined)).toEqual([]);
+    expect(hostnames(Array.from({ length: 30 }, (_, i) => `s${i}.com`))).toHaveLength(20);
   });
 });

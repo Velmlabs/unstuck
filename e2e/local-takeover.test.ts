@@ -21,16 +21,28 @@ const FIXTURES: Record<string, Buffer> = {
 
 let server: http.Server;
 let site: string;
+let port = 0;
+/** Requests the page lock must stop before they ever leave the agent's browser. */
+let secretHits = 0;
 let agentBrowser: any;
 let humanBrowser: any;
 
 beforeAll(async () => {
   server = http.createServer((req, res) => {
-    const body = FIXTURES[new URL(req.url ?? '/', 'http://x').pathname];
+    const pathname = new URL(req.url ?? '/', 'http://x').pathname;
+    if (pathname === '/secret') secretHits++;
+    if (pathname === '/links' || pathname === '/next') {
+      const big = 'style="display:block;margin:40px;padding:40px;font-size:40px"';
+      return void res.writeHead(200, { 'content-type': 'text/html' }).end(
+        `<!doctype html><title>${pathname}</title><a id="away" ${big} href="http://localhost:${port}/secret">Your inbox</a><a id="same" ${big} href="/next">Next step</a>`,
+      );
+    }
+    const body = FIXTURES[pathname];
     res.writeHead(body ? 200 : 404, { 'content-type': 'text/html; charset=utf-8' }).end(body ?? 'not found');
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
-  site = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
+  port = (server.address() as AddressInfo).port;
+  site = `http://127.0.0.1:${port}/`;
   agentBrowser = await chromium.launch();
   humanBrowser = await chromium.launch();
 });
@@ -173,6 +185,27 @@ describe('local takeover end to end', () => {
     await unstuck.close();
     await page.close();
   });
+
+  it('page lock: a tap on a link to another site never leaves the agent\'s browser; same-site links still work', async () => {
+    const { page, unstuck, result, link } = await startTakeover({ path: '/links' });
+    const { ctx, human } = await openHuman(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+    const tapOn = async (selector: string) => {
+      const p = await canvasPointFor(human, await centerOf(page, selector));
+      await human.touchscreen.tap(p.x, p.y);
+    };
+    await tapOn('#away');
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(secretHits).toBe(0);
+    expect(page.url()).toBe(site + 'links');
+    await tapOn('#same');
+    await expect.poll(() => page.url(), { timeout: 10_000 }).toBe(site + 'next');
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await ctx.close();
+    await unstuck.close();
+    await page.close();
+  }, 60_000);
 
   it("Can't solve with a reason → cancelled with that reason", async () => {
     const { page, unstuck, result, link } = await startTakeover();

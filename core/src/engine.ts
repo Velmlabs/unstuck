@@ -28,6 +28,8 @@ export interface TakeoverCallOptions {
   onLink?: LinkHandler;
   /** Ask the human for a 6-digit code delivered with the link. */
   requireCode?: boolean;
+  /** Sites besides the page's own the human may navigate to (e.g. an SSO or 3-D Secure provider). */
+  allowedSites?: string[];
 }
 
 export interface Engine {
@@ -59,6 +61,7 @@ export function createEngine(opts: EngineOptions): Engine {
         onLink: call.onLink ?? opts.onLink,
         popups: call.popups,
         requireCode: call.requireCode ?? opts.requireCode,
+        ...(call.allowedSites ? { allowedSites: call.allowedSites } : {}),
       });
       running.add(session);
       try {

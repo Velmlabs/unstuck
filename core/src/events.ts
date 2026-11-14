@@ -1,4 +1,4 @@
-export type UnstuckEventType = 'created' | 'published' | 'link' | 'viewer_joined' | 'viewer_left' | 'viewer_rejected' | 'status' | 'finished';
+export type UnstuckEventType = 'created' | 'published' | 'link' | 'viewer_joined' | 'viewer_left' | 'viewer_rejected' | 'status' | 'finished' | 'navigation_blocked';
 
 /** Structured audit event. Never contains screenshots, typed text or secrets: only counts and states. */
 export interface UnstuckEvent {

@@ -48,7 +48,7 @@ describe('MCP server', () => {
     expect(TOOL_NAME).toBe('request_human_takeover');
     const tool = tools.find((t) => t.name === TOOL_NAME)!;
     expect(tool.inputSchema.required).toEqual(['reason']);
-    expect(Object.keys(tool.inputSchema.properties!)).toEqual(['reason', 'cdp_url', 'target_id', 'timeout_s']);
+    expect(Object.keys(tool.inputSchema.properties!)).toEqual(['reason', 'cdp_url', 'target_id', 'timeout_s', 'allowed_sites']);
     await server.close();
   });
 

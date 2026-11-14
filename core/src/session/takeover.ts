@@ -21,6 +21,7 @@ import { applyInput } from '../stream/input';
 import { scanFields, focusedField } from '../stream/fields';
 import { browserPlatformIsMac, translateShortcut } from '../stream/shortcuts';
 import { createFieldFeed } from './field-feed';
+import { lockPage, safeInput, type PageLock } from './page-lock';
 import { createLatestSender } from '../stream/latest';
 import { nextStatus, isTerminal, type SessionEvent } from './status';
 import { newSessionId, signToken, verifyToken } from './tokens';
@@ -59,6 +60,8 @@ interface Target {
   cdp: CdpClient;
   caps: Capabilities;
   off: () => void;
+  /** Keeps the target on its site while the human controls it. */
+  lock?: PageLock;
 }
 
 export interface TakeoverOptions {
@@ -72,6 +75,8 @@ export interface TakeoverOptions {
   popups?: PopupSource;
   /** Ask the human for a 6-digit code delivered with the link. */
   requireCode?: boolean;
+  /** Sites besides the page's own that the human may navigate the page to. */
+  allowedSites?: string[];
 }
 
 export interface RunningTakeover {
@@ -122,6 +127,18 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let wrongCodes = 0;
   let lastFrame: Uint8Array | null = null;
   let caps: Capabilities = { screencast: true, insertText: true, input: true };
+  /** The page's site and the agent-listed sites; popups may visit these too. */
+  let pageSites: readonly string[] = [];
+  /** A navigation the page lock stopped: logged by host only (a URL can carry secrets). */
+  const onBlocked = (url: string) => {
+    let host = '';
+    try {
+      host = new URL(url).hostname;
+    } catch {
+      // not a URL: logged without a host
+    }
+    emit('navigation_blocked', { host });
+  };
   /** Stack of controllable targets: [page, ...open popups]; the last one is shown to the human. */
   const targets: Target[] = [];
   const active = (): Target => targets[targets.length - 1] ?? { cdp, caps, off: () => {} };
@@ -176,6 +193,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     offPopups();
     fieldFeed.stop();
     for (const t of targets) t.off();
+    const locks = targets.map((t) => t.lock);
     const viewer = holder;
     holder = null;
     if (viewer) {
@@ -185,6 +203,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     const durationS = Math.round(now() - startedAt) / 1000;
     void (async () => {
       await stopStream();
+      // Unlocking talks to the page, which may never answer (SDK gone, page closed): bounded like stopping the stream.
+      let unlockTimer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([Promise.all(locks.map((l) => l?.stop())), new Promise<void>((r) => (unlockTimer = setTimeout(r, STOP_TIMEOUT_MS)))]);
+      clearTimeout(unlockTimer);
       if (published) await transport.unpublish(sessionId).catch(() => {});
       emit('finished', { status: final, durationS, inputCount, ...(detail ? { detail } : {}) });
       const fallbacks = [!caps.screencast && 'screenshots', !caps.insertText && 'per-key typing'].filter(Boolean).join(', ');
@@ -261,7 +283,14 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     });
     const popupCaps = await probeCapabilities(popup);
     if (gone || !popupCaps.input || isTerminal(status)) return void off();
-    entry = { cdp: popup, caps: popupCaps, off };
+    // Locked like the page (its site, the listed sites, and the site the popup itself opens): a popup that can't be
+    // locked is never shown to the human.
+    const lock = await lockPage(popup, { allowedSites: [...(opts.allowedSites ?? []), ...pageSites], adoptFirstSite: true, onBlocked }).catch(() => null);
+    if (!lock || gone || isTerminal(status)) {
+      void lock?.stop();
+      return void off();
+    }
+    entry = { cdp: popup, caps: popupCaps, off, lock };
     targets.push(entry);
     await switchStream();
   }
@@ -272,6 +301,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     const wasActive = i === targets.length - 1;
     targets.splice(i, 1);
     entry.off();
+    void entry.lock?.stop();
     if (wasActive) void switchStream();
   }
 
@@ -356,20 +386,23 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
         return finish('resolved');
       case 'cant_solve':
         return finish('cancelled', msg.reason || 'cant_solve');
-      default:
+      default: {
+        const safe = safeInput(msg);
+        if (!safe) return;
         inputCount++;
         inputChain = inputChain.then(async () => {
           const target = active();
           try {
             // Shortcuts follow the agent browser's system (Cmd+A from a Mac reaches a Linux browser as Ctrl+A).
-            const msgs = msg.t === 'key' ? translateShortcut(msg, await browserPlatformIsMac(target.cdp)) : [msg];
+            const msgs = safe.t === 'key' ? translateShortcut(safe, await browserPlatformIsMac(target.cdp)) : [safe];
             for (const m of msgs) await applyInput(target.cdp, m, target.caps);
           } catch (e) {
             return onTargetError(target, e as Error);
           }
           // After the input has landed, so a tap's new focus and a scroll's new positions are what gets scanned.
-          fieldFeed.onInput(msg);
+          fieldFeed.onInput(safe);
         });
+      }
     }
   }
 
@@ -416,7 +449,14 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     emit('created', { screencast: caps.screencast, insertText: caps.insertText, input: caps.input });
     if (isTerminal(status)) return; // the page closed while probing
     if (!caps.input) return finish('failed', 'browser does not support input');
-    targets.push({ cdp, caps, off: () => {} });
+    try {
+      const lock = await lockPage(cdp, { allowedSites: opts.allowedSites ?? [], onBlocked });
+      pageSites = lock.sites;
+      targets.push({ cdp, caps, off: () => {}, lock });
+    } catch {
+      return finish('failed', 'page_lock_unavailable'); // never hand out a page that isn't locked
+    }
+    if (isTerminal(status)) return;
     if (opts.popups) offPopups = opts.popups.onPopup((popup) => void addPopup(popup));
     try {
       const rawE2e = newE2eKey();

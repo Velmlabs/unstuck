@@ -70,6 +70,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
         timeoutS: p.timeoutS,
         site: p.site,
         requireCode: p.requireCode,
+        allowedSites: hostnames(p.allowedSites),
         onLink: (info) => peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId }),
         popups: {
           onPopup(cb) {
@@ -92,4 +93,12 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
   rl.on('line', (line) => peer.receive(line));
   rl.on('close', () => void finish());
   return done;
+}
+
+/** Keeps only plausible hostnames (an optional leading "*." is accepted), at most 20. */
+export function hostnames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((h): h is string => typeof h === 'string' && /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.?$/i.test(h) && h.length <= 253)
+    .slice(0, 20);
 }

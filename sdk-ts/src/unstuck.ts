@@ -63,7 +63,19 @@ export class Unstuck {
    * Pauses your agent until a human finishes. Awaiting this IS the pause: don't drive the page meanwhile.
    * Resolves with the outcome; rejects only with UnstuckEngineError if the engine can't run.
    */
-  async takeover(page: unknown, opts: { reason: string; timeoutS?: number; requireCode?: boolean }): Promise<TakeoverResult> {
+  async takeover(
+    page: unknown,
+    opts: {
+      reason: string;
+      timeoutS?: number;
+      requireCode?: boolean;
+      /**
+       * The human can only navigate the page within its own site (example.com and its subdomains). List any other
+       * sites the flow needs, e.g. ['accounts.google.com'] for a Google sign-in or a 3-D Secure provider.
+       */
+      allowedSites?: string[];
+    },
+  ): Promise<TakeoverResult> {
     const pageClosed: TakeoverResult = { status: 'failed', sessionId: '', url: '', durationS: 0, detail: 'page_closed' };
     let attached: AttachedPage;
     try {
@@ -114,6 +126,7 @@ export class Unstuck {
         timeoutS: opts.timeoutS ?? this.opts.timeoutS,
         site: siteOf(attached.url()),
         ...(requireCode !== undefined ? { requireCode } : {}),
+        ...(opts.allowedSites?.length ? { allowedSites: opts.allowedSites } : {}),
       };
       const died = engine.exited.then((code): never => {
         throw new UnstuckEngineError(`engine exited with code ${code}`);

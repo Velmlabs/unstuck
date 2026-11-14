@@ -3,6 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { createEngine, type EventLog, type Transport } from '@velmlabs/unstuck-core';
 import { connectCdp } from './direct-cdp';
+import { hostnames } from './stdio-host';
 import { VERSION } from './version';
 
 export const TOOL_NAME = 'request_human_takeover';
@@ -50,9 +51,14 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
         cdp_url: z.string().optional().describe('Browser DevTools endpoint (http://host:port, host:port or ws://…). Defaults to UNSTUCK_CDP_URL.'),
         target_id: z.string().optional().describe('CDP target id of the tab to take over. Defaults to the most recent page.'),
         timeout_s: z.number().int().min(10).max(3600).optional().describe('Seconds before the takeover gives up (default 600).'),
+        allowed_sites: z
+          .array(z.string())
+          .max(20)
+          .optional()
+          .describe("The human can only navigate within the page's own site. Other sites the flow needs, e.g. [\"accounts.google.com\"]."),
       },
     },
-    async ({ reason, cdp_url, target_id, timeout_s }, extra) => {
+    async ({ reason, cdp_url, target_id, timeout_s, allowed_sites }, extra) => {
       const url = cdp_url ?? opts.env.UNSTUCK_CDP_URL;
       if (!url) return text('No browser to take over: pass cdp_url or set UNSTUCK_CDP_URL', true);
       let cdp;
@@ -73,6 +79,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           reason,
           timeoutS: timeout_s,
           site,
+          allowedSites: hostnames(allowed_sites),
           popups: cdp.popups,
           onLink: ({ url: link, code }) => {
             const line = `Unstuck: a human is needed (${reason}) → ${link}${code ? ` (code ${code})` : ''}`;

@@ -53,6 +53,8 @@ export interface TakeoverParams {
   site?: string;
   /** Ask the human for a 6-digit code delivered with the link (relay spec §5.8). */
   requireCode?: boolean;
+  /** Sites besides the page's own the human may navigate to, e.g. ["accounts.google.com"] (page lock). */
+  allowedSites?: string[];
 }
 export interface CdpSendParams {
   pageId: string;
