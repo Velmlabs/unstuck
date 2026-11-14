@@ -18,8 +18,8 @@ _PAGE_CLOSED = TakeoverResult(status="failed", session_id="", url="", duration_s
 
 
 def _default_on_link(link: TakeoverLink) -> None:
-    code = f" (code {link.code})" if link.code else ""
-    print(f"Unstuck: a human is needed ({link.reason}) → {link.url}{code}", file=sys.stderr, flush=True)
+    # Never prints a 6-digit code: require_code needs its own on_link, so the code travels apart from the link.
+    print(f"Unstuck: a human is needed ({link.reason}) → {link.url}", file=sys.stderr, flush=True)
 
 
 def _site_of(url: str) -> str | None:
@@ -73,11 +73,16 @@ class Unstuck:
         require_code: bool | None = None,
         allowed_sites: list[str] | None = None,
     ) -> TakeoverResult:
-        """Returns the outcome; raises only UnstuckEngineError when the engine can't run.
+        """Returns the outcome; raises only UnstuckEngineError when the engine can't run (and ValueError for misuse).
 
         The human can only navigate the page within its own site (example.com and its subdomains); list any other
         sites the flow needs in ``allowed_sites``, e.g. ``["accounts.google.com"]``.
         """
+        if (self._require_code if require_code is None else require_code) and self._on_link is _default_on_link:
+            raise ValueError(
+                "require_code needs an on_link handler that sends the 6-digit code by a different channel than the link "
+                "(printed together, the code protects nothing)"
+            )
         try:
             attached = await attach_page(page)
         except PageClosedError:

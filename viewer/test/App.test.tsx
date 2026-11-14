@@ -51,6 +51,16 @@ beforeEach(() => {
 });
 afterEach(() => cleanup());
 
+describe('the link secret kept for reloads', () => {
+  it('is dropped from this tab when the takeover ends', () => {
+    sessionStorage.setItem('unstuck:link:SESSION', '#t=TOK');
+    setup();
+    goLive();
+    act(() => handlers.onState('resolved'));
+    expect(sessionStorage.getItem('unstuck:link:SESSION')).toBeNull();
+  });
+});
+
 describe('coming back to the page', () => {
   afterEach(() => vi.unstubAllGlobals());
   it('reconnects at once when the page is visible again or the network returns', () => {

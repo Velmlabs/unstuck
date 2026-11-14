@@ -20,9 +20,15 @@ export interface McpServerOptions {
 }
 
 /** Opens a URL with the desktop's default browser, detached. */
+/** The desktop opener for a link: the URL is always one argument, never parsed by a shell. */
+export function openerFor(platform: NodeJS.Platform, url: string): [string, string[]] {
+  if (platform === 'darwin') return ['open', [url]];
+  if (platform === 'win32') return ['rundll32', ['url.dll,FileProtocolHandler', url]]; // not cmd /c start: & splits it
+  return ['xdg-open', [url]];
+}
+
 export function openInBrowser(url: string): void {
-  const [cmd, args] =
-    process.platform === 'darwin' ? ['open', [url]] : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : ['xdg-open', [url]];
+  const [cmd, args] = openerFor(process.platform, url);
   try {
     spawn(cmd, args, { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   } catch {

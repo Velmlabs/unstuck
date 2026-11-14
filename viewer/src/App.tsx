@@ -7,7 +7,7 @@ import { attachBridge, configureBridge } from './bridge';
 import { bridgeBox, fieldBox, hitField, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { clampToPage, toPagePoint } from './mapping';
-import { parseFragment, sessionIdFromPath, wsUrlFor } from './url';
+import { forgetFragment, parseFragment, sessionIdFromPath, wsUrlFor } from './url';
 
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string };
@@ -61,6 +61,14 @@ const resumeStore = {
     }
   },
   set(sessionId: string, value: string | null): void {
+    // The takeover is over: the link's secret kept for reloads in this tab goes too.
+    if (value === null) {
+      try {
+        forgetFragment(sessionId, sessionStorage);
+      } catch {
+        // sessionStorage itself blocked
+      }
+    }
     try {
       if (value === null) localStorage.removeItem(this.key(sessionId));
       else localStorage.setItem(this.key(sessionId), value);

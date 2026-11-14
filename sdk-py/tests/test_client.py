@@ -281,3 +281,14 @@ def test_review_focus_1_agent_process_exits_cleanly(mode, expected):
     assert proc.stdout.strip() == expected
     assert "Task was destroyed but it is pending" not in proc.stderr
     assert "Exception ignored" not in proc.stderr
+
+
+async def test_require_code_needs_an_on_link_handler(browser):
+    page = await browser.new_page()
+    async with Unstuck(engine_path=str(ENGINE), require_code=True) as u:
+        with pytest.raises(ValueError, match="require_code needs an on_link handler"):
+            await u.takeover(page, reason="x")
+    async with Unstuck(engine_path=str(ENGINE)) as u:
+        with pytest.raises(ValueError, match="require_code needs an on_link handler"):
+            await u.takeover(page, reason="x", require_code=True)
+    await page.close()

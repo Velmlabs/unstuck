@@ -39,3 +39,12 @@ describe('scanFields / focusedField (CDP edge cases)', () => {
     expect(await scanFields(odd)).toEqual([]);
   });
 });
+
+describe('scanFields: the engine enforces the field map limits itself', () => {
+  it('keeps at most 30 fields even if the page script returns more (a hostile page can patch Array.prototype.slice)', async () => {
+    const cdp = new FakeCdp();
+    const many = Array.from({ length: 50 }, (_, i) => ({ x: i, y: 0, w: 10, h: 10, kind: 'text' }));
+    cdp.respond('Runtime.evaluate', () => ({ result: { value: many } }));
+    expect(await scanFields(cdp)).toHaveLength(30);
+  });
+});

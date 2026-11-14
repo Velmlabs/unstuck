@@ -176,3 +176,13 @@ describe('openInBrowser', () => {
     expect(() => openInBrowser('http://127.0.0.1:1/s/x')).not.toThrow();
   });
 });
+
+describe('openerFor', () => {
+  const url = 'http://127.0.0.1:5000/s/ABC#t=x.y&k=z';
+  it('passes the link as one argument, never through a shell (cmd.exe would split it at &)', async () => {
+    const { openerFor } = await import('../src/mcp');
+    expect(openerFor('darwin', url)).toEqual(['open', [url]]);
+    expect(openerFor('linux', url)).toEqual(['xdg-open', [url]]);
+    expect(openerFor('win32', url)).toEqual(['rundll32', ['url.dll,FileProtocolHandler', url]]);
+  });
+});

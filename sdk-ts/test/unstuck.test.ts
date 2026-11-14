@@ -73,6 +73,17 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     await u.close();
   });
 
+  it('requireCode needs an onLink that delivers the code separately: the default handler would print both together', async () => {
+    const page = await browser.newPage();
+    const unstuck = new Unstuck({ enginePath: ENGINE, requireCode: true });
+    await expect(unstuck.takeover(page, { reason: 'x' })).rejects.toThrow(/requireCode needs an onLink handler/);
+    const plain = new Unstuck({ enginePath: ENGINE });
+    await expect(plain.takeover(page, { reason: 'x', requireCode: true })).rejects.toThrow(/requireCode needs an onLink handler/);
+    await unstuck.close();
+    await plain.close();
+    await page.close();
+  });
+
   it('requireCode: onLink gets a 6-digit code that is not in the URL', async () => {
     const page = await browser.newPage();
     await page.setContent('<p>code</p>');

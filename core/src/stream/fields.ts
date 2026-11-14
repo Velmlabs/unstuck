@@ -105,9 +105,13 @@ async function evaluate(cdp: CdpClient, expression: string): Promise<unknown> {
 }
 
 /** The typable fields visible on the page, nearest the centre first (at most 30). Never throws: [] on any error. */
+/** The most fields the viewer accepts (protocol: fields maxItems). */
+const MAX_FIELDS = 30;
+
 export async function scanFields(cdp: CdpClient): Promise<Field[]> {
   const v = await evaluate(cdp, SCAN_SOURCE);
-  return Array.isArray(v) ? v.filter(isField).map(({ x, y, w, h, kind }) => ({ x, y, w, h, kind })) : [];
+  // Capped here too: the page script runs in the page's own world, where a hostile page can patch what it uses.
+  return Array.isArray(v) ? v.filter(isField).slice(0, MAX_FIELDS).map(({ x, y, w, h, kind }) => ({ x, y, w, h, kind })) : [];
 }
 
 /** The focused field with its box (never its value), or null. Never throws. */

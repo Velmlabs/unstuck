@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFragment, sessionIdFromPath, wsUrlFor } from '../src/url';
+import { parseFragment, sessionIdFromPath, wsUrlFor, takeFragment, forgetFragment } from '../src/url';
 
 describe('url helpers', () => {
   const K = 'A'.repeat(43);
@@ -24,5 +24,41 @@ describe('url helpers', () => {
   it('wsUrlFor maps http(s) to ws(s)', () => {
     expect(wsUrlFor('http://127.0.0.1:5000', 'abc')).toBe('ws://127.0.0.1:5000/ws/abc');
     expect(wsUrlFor('https://box.example.com', 'abc')).toBe('wss://box.example.com/ws/abc');
+  });
+});
+
+describe('takeFragment: the link secret leaves the address bar', () => {
+  const mem = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v), removeItem: (k: string) => void m.delete(k), m };
+  };
+  it('keeps the fragment for this tab only and removes it from the URL (history, sync and screenshots never see it)', () => {
+    const store = mem();
+    const replaced: string[] = [];
+    // Like window.location: replaceState changes what loc.hash returns afterwards.
+    const loc = { hash: '#t=T&k=K', pathname: '/s/ABC', search: '' };
+    const hash = takeFragment(loc, store, { replaceState: (_s: unknown, _t: string, u: string) => void (replaced.push(u), (loc.hash = '')) });
+    expect(hash).toBe('#t=T&k=K');
+    expect(replaced).toEqual(['/s/ABC']);
+    expect(store.m.get('unstuck:link:ABC')).toBe('#t=T&k=K');
+  });
+  it('a reload in the same tab (no fragment any more) gets it back from the tab storage', () => {
+    const store = mem();
+    store.setItem('unstuck:link:ABC', '#t=T&k=K');
+    const replaced: string[] = [];
+    expect(takeFragment({ hash: '', pathname: '/s/ABC', search: '' }, store, { replaceState: () => void replaced.push('x') })).toBe('#t=T&k=K');
+    expect(replaced).toEqual([]);
+  });
+  it('no fragment and nothing stored: empty; storage or history that throws is survived', () => {
+    const broken = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); }, removeItem: () => {} };
+    expect(takeFragment({ hash: '', pathname: '/s/ABC', search: '' }, broken, { replaceState: () => {} })).toBe('');
+    expect(takeFragment({ hash: '#t=T&k=K', pathname: '/s/ABC', search: '?x=1' }, broken, { replaceState: () => { throw new Error('no'); } })).toBe('#t=T&k=K');
+  });
+  it('forgetFragment removes it when the takeover is over', () => {
+    const store = mem();
+    store.setItem('unstuck:link:ABC', '#t=T&k=K');
+    forgetFragment('ABC', store);
+    expect(store.m.size).toBe(0);
+    forgetFragment('ABC', { removeItem: () => { throw new Error('denied'); } });
   });
 });

@@ -36,7 +36,8 @@ export interface UnstuckOptions {
   requireCode?: boolean;
 }
 
-const defaultOnLink = (l: TakeoverLink) => process.stderr.write(`Unstuck: a human is needed (${l.reason}) → ${l.url}${l.code ? ` (code ${l.code})` : ''}\n`);
+// Never prints a 6-digit code: requireCode needs its own onLink, so the code travels apart from the link.
+const defaultOnLink = (l: TakeoverLink) => process.stderr.write(`Unstuck: a human is needed (${l.reason}) → ${l.url}\n`);
 
 /** Playwright and Puppeteer pages are event emitters that emit 'popup' with the new page. */
 function pageEvents(page: unknown): { on(e: string, cb: (p: unknown) => void): unknown; off?(e: string, cb: (p: unknown) => void): unknown } | null {
@@ -76,6 +77,8 @@ export class Unstuck {
       allowedSites?: string[];
     },
   ): Promise<TakeoverResult> {
+    if ((opts.requireCode ?? this.opts.requireCode) && !this.opts.onLink)
+      throw new TypeError('requireCode needs an onLink handler that sends the 6-digit code by a different channel than the link (printed together, the code protects nothing)');
     const pageClosed: TakeoverResult = { status: 'failed', sessionId: '', url: '', durationS: 0, detail: 'page_closed' };
     let attached: AttachedPage;
     try {
