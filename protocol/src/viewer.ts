@@ -49,17 +49,29 @@ export type ViewerInput = Extract<ViewerToEngine, { t: 'mouse' | 'wheel' | 'key'
 export const ViewerErrorCodes = ['token_invalid', 'token_used', 'expired', 'session_closed', 'bad_message', 'code_required', 'code_invalid'] as const;
 export type ViewerErrorCode = (typeof ViewerErrorCodes)[number];
 
+/** What kind of field the person can type into, so the viewer can open the matching keyboard (never its value). */
+export const FieldKinds = ['text', 'numeric', 'otp', 'email', 'password'] as const;
+export type FieldKind = (typeof FieldKinds)[number];
+const FieldKindSchema = Type.Union(FieldKinds.map((k) => Lit(k)));
+/** A typable field's box in CSS pixels of the streamed viewport (the same space as `mouse` messages). */
+export const FieldSchema = Type.Object({ x: Num, y: Num, w: Num, h: Num, kind: FieldKindSchema }, { additionalProperties: false });
+export type Field = Static<typeof FieldSchema>;
+
 export const EngineToViewerSchema = Type.Union([
   Type.Object({ t: Lit('ready'), reason: Type.String(), site: Type.String(), expiresAt: Num, resumeKey: Type.String() }),
   Type.Object({ t: Lit('state'), status: SessionStatusSchema }),
   Type.Object({ t: Lit('error'), code: Type.Union(ViewerErrorCodes.map((c) => Lit(c))), message: Type.String() }),
   Type.Object({ t: Lit('pong') }),
+  Type.Object({ t: Lit('fields'), fields: Type.Array(FieldSchema, { maxItems: 30 }) }),
+  Type.Object({ t: Lit('focus'), kind: Type.Union([FieldKindSchema, Type.Null()]) }),
 ]);
 export type EngineToViewer =
   | { t: 'ready'; reason: string; site: string; expiresAt: number; resumeKey: string }
   | { t: 'state'; status: SessionStatus }
   | { t: 'error'; code: ViewerErrorCode; message: string }
-  | { t: 'pong' };
+  | { t: 'pong' }
+  | { t: 'fields'; fields: Field[] }
+  | { t: 'focus'; kind: FieldKind | null };
 
 export function parseViewerMessage(raw: string): ViewerToEngine | null {
   let v: unknown;

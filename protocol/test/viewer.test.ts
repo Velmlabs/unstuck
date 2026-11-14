@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseViewerMessage, ViewerToEngineSchema, EngineToViewerSchema } from '../src/viewer';
+import { parseViewerMessage, ViewerToEngineSchema, EngineToViewerSchema, FieldKinds } from '../src/viewer';
 import { Value } from '@sinclair/typebox/value';
 
 describe('parseViewerMessage', () => {
@@ -59,5 +59,24 @@ describe('six-digit code', () => {
     const { ViewerErrorCodes } = await import('../src/viewer');
     expect(ViewerErrorCodes).toContain('code_required');
     expect(ViewerErrorCodes).toContain('code_invalid');
+  });
+});
+
+describe('native typing messages', () => {
+  const field = { x: 1, y: 2, w: 3, h: 4, kind: 'otp' as const };
+  it('accepts a field map and focus reports', () => {
+    expect(Value.Check(EngineToViewerSchema, { t: 'fields', fields: [field] })).toBe(true);
+    expect(Value.Check(EngineToViewerSchema, { t: 'fields', fields: [] })).toBe(true);
+    expect(Value.Check(EngineToViewerSchema, { t: 'focus', kind: null })).toBe(true);
+    expect(Value.Check(EngineToViewerSchema, { t: 'focus', kind: 'email' })).toBe(true);
+  });
+  it('rejects unknown kinds, extra keys (never a value) and more than 30 fields', () => {
+    expect(Value.Check(EngineToViewerSchema, { t: 'fields', fields: [{ ...field, kind: 'date' }] })).toBe(false);
+    expect(Value.Check(EngineToViewerSchema, { t: 'fields', fields: [{ ...field, value: '482913' }] })).toBe(false);
+    expect(Value.Check(EngineToViewerSchema, { t: 'fields', fields: Array.from({ length: 31 }, () => field) })).toBe(false);
+    expect(Value.Check(EngineToViewerSchema, { t: 'focus', kind: 'date' })).toBe(false);
+  });
+  it('lists the five field kinds', () => {
+    expect(FieldKinds).toEqual(['text', 'numeric', 'otp', 'email', 'password']);
   });
 });
