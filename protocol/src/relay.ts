@@ -10,6 +10,11 @@ export const RELAY_LIMITS = {
   agentPayloadMax: 2_097_152,
   viewerPayloadMax: 65_536,
   viewersPerSession: 4,
+  /** Viewers that haven't been confirmed (see relay-core attachViewer) one client IP may hold in one session. */
+  unconfirmedViewersPerIp: 2,
+  /** Viewer → agent bytes one viewer connection may send per window. */
+  viewerBytesPerWindow: 2_097_152,
+  viewerByteWindowMs: 10_000,
   idleMs: 120_000,
   heartbeatMs: 30_000,
   graceMs: 60_000,
@@ -18,6 +23,8 @@ export const RELAY_LIMITS = {
   backpressureBytes: 4_194_304,
   viewerUpgradesPerMinPerIp: 30,
   agentUpgradesPerMinPerKey: 20,
+  /** Agent upgrades per client IP per minute, counted on refused authorizations only (key brute force). */
+  agentAuthFailuresPerMinPerIp: 10,
 } as const;
 
 export const RELAY_CLOSE = {
@@ -25,6 +32,8 @@ export const RELAY_CLOSE = {
   replaced: 4409,
   badMessage: 1003,
   tooBig: 1009,
+  policy: 1008,
+  tryAgainLater: 1013,
   /** A refused agent: 4000 + the HTTP status (4401, 4402, 4403, 4429). Clients can't read upgrade statuses. */
   refused: (status: number) => 4000 + status,
 } as const;
