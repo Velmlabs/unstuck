@@ -92,7 +92,7 @@ The relay multiplexes every viewer connection of a session onto that session's o
 
 **Text frames (JSON control), agent → relay**
 - `{"t":"hello","expiresAt":ms,"secret":"<base64url>"}`: the first message; it registers the session. The relay caps expiry at 1 hour. `secret` is 128 random bits the engine makes per session; the relay stores its SHA-256. **A reconnect replaces the agent socket only if it presents the same secret** (and the same key). Anything else gets close code 4409. Knowing the path, or sharing an agent key, isn't enough to hijack a session.
-- `{"t":"close","c":N,"code":1008}`: close one viewer.
+- `{"t":"close","c":N,"code":1008}`: close one viewer. `code` must be one a server socket can send (1000–1003, 1007–1014 or 3000–4999); anything else is dropped as an unknown message. The relay forgets the viewer before closing it, so a failing close can't leak its slot.
 - `{"t":"pong"}`
 - `{"t":"end"}`: the takeover is over. The relay closes every viewer and forgets the session.
 - `{"t":"event","name":"viewer_joined"}`: informational, passed to `onEvent`.
@@ -122,10 +122,15 @@ The relay never parses payloads. Anything else on either socket, such as unknown
 **Limits** (constants in relay-core, overridable per host)
 - Agent → viewer payload: 2 MB maximum. Viewer → agent: 64 KB maximum.
 - At most 4 viewer connections at once per session. The engine already admits only one human; the rest are refused attempts.
+- **Slot squatting:** anyone who knows a session id can open `/ws/<id>`, so a slot isn't held just by connecting. A viewer is **confirmed** once the agent has sent it at least two payloads: the engine's first payload on every connection is its sealed challenge, and it sends nothing more until a `hello` sealed with the link's key, so only someone holding the link gets confirmed. When all 4 slots are taken, a new viewer evicts the **oldest unconfirmed** one (close 1013); if all 4 are confirmed it's refused with 1013. One client IP holds at most **2 unconfirmed viewers** per session: its next one evicts its own oldest. Confirmed viewers are never evicted. On Cloudflare the confirmed flag and IP live in the socket's hibernation attachment.
+- **Viewer → agent:** if the agent socket's buffered amount exceeds 4 MB, the sending viewer is closed with 1013; a viewer that sends more than 2 MiB in 10 s is closed with 1008. Node refuses viewer frames over 64 KB in `ws` itself, before buffering them.
 - A 120 s idle timeout per socket. Heartbeats every 30 s: the relay pings the agent, and the viewer already pings the engine through the relay.
 - Rate limits, with a host-provided hook so Cloud can replace them:
   - per IP, 30 viewer upgrades a minute;
-  - per agent key, 20 agent upgrades a minute.
+  - per agent key, 20 agent upgrades a minute;
+  - per IP, against key guessing: on Node, 10 refused agent authorizations a minute (an IP over that is refused with 4429 before `authorize` runs); on Cloudflare, 60 agent upgrades a minute (`AGENT_IP_LIMIT`; the binding can't count only failures).
+
+  Behind a proxy, Node takes the client IP from `X-Forwarded-For` only with `UNSTUCK_TRUST_PROXY=N`, and then from the Nth entry from the **right** (the one the outermost trusted proxy appended); entries further left are client-controlled. Limiter maps are capped (oldest bucket evicted).
 
   Node keeps them in memory. On Cloudflare, each takeover is its own Durable Object, so the Worker checks them with the Workers Rate Limiting binding (`ratelimits` in `wrangler.toml`) before routing. That's per-location and approximate, which is fine for abuse control.
 - **Backpressure:** if a viewer socket's buffered amount exceeds 4 MB, the relay drops agent → viewer payloads of **4 KB or more** for that viewer and still forwards smaller ones. Every payload is opaque, but JSON control messages (`ready`, `state`, `error`, `pong`) are well under 1 KB and screen frames are well over 4 KB, so size alone tells them apart. That leaks nothing the relay couldn't already see. The engine already sends newest-frame-only, so this only bites on very slow phones.
@@ -206,6 +211,8 @@ Rule: **nothing outlives its takeover.** The longest any relay state can live is
 - On registration the object sets an **alarm** for `expiresAt`. When the agent drops, the alarm moves to the end of the 60 s grace; when it reconnects, back to `expiresAt`.
 - **End of session** (`end`, alarm, or grace over): close every socket, fire `session_closed` once, then `storage.deleteAll()` and `deleteAlarm()`. An object with empty storage costs nothing and is gone for good.
 - **Backstop:** any request or alarm that finds a record past `expiresAt + 60 s` runs the same cleanup first.
+- **Never registered:** a session whose agent hasn't said `hello` within 30 s of connecting ends (relay-core, so on both hosts).
+- **Headers:** every Worker response carries `Strict-Transport-Security: max-age=31536000`; `/assets/` responses carry `X-Content-Type-Options: nosniff`. Page CSPs on both hosts include `base-uri 'none'; form-action 'none'`. Node sends HSTS only with `UNSTUCK_HSTS=1`.
 
 **Node**
 - Sessions live in a `Map`, with one timer each for expiry and grace. End of session closes the sockets, fires `session_closed` and deletes the entry and its timers.
@@ -259,7 +266,7 @@ Rule: **nothing outlives its takeover.** The longest any relay state can live is
 
 - **E2E in every mode, embedded included.** One path, one set of tests.
 - **The agent key goes in the WebSocket subprotocol**, not a header or the query string.
-- **`takeover_opened` uses the 64 KB-received threshold** rather than trusting an engine-reported event.
+- **`takeover_opened` uses a relay-observed threshold** (one agent → viewer payload of 4 KB or more, below) rather than trusting an engine-reported event.
 - **Self-host keys come from `UNSTUCK_AGENT_KEYS`**, and there's an explicit open mode.
 - **The relay client is in Apache `core`,** so agents never link AGPL code.
 - **Six-digit code lockout after 5 tries** leaves the takeover waiting rather than failed; resume needs no code.
