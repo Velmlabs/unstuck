@@ -23,6 +23,12 @@ describe('staging the engine packages', () => {
     expect(fs.readdirSync(path.join(dir, 'bin'))).toEqual(['unstuck-engine.exe']);
     expect(fs.statSync(path.join(dir, 'bin/unstuck-engine.exe')).mode & 0o111).not.toBe(0);
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).os).toEqual(['win32']);
-    expect(fs.readdirSync(dir).sort()).toEqual(['LICENSE', 'README.md', 'bin', 'package.json']);
+    // The binary embeds the AGPL viewer: both licences and the notice with the source offer ship with it.
+    expect(fs.readdirSync(dir).sort()).toEqual(['LICENSE', 'LICENSE-AGPL', 'NOTICE', 'README.md', 'bin', 'package.json']);
+    expect(fs.readFileSync(path.join(dir, 'LICENSE-AGPL'), 'utf8')).toContain('GNU AFFERO GENERAL PUBLIC LICENSE');
+    const notice = fs.readFileSync(path.join(dir, 'NOTICE'), 'utf8');
+    expect(notice).toContain('AGPL-3.0-only');
+    expect(notice).toContain('support@unstuck.sh');
+    expect(notice).toContain('0.1.0');
   });
 });

@@ -1,0 +1,11 @@
+Unstuck engine 0.1.0
+Copyright Velm Labs.
+
+The Unstuck engine is licensed under the Apache License 2.0 (SPDX: Apache-2.0; the text is in LICENSE).
+
+This binary also contains the Unstuck viewer, the page shown to the person who takes over a browser. The viewer is
+licensed under the GNU Affero General Public License v3.0 only (SPDX: AGPL-3.0-only; the text is in LICENSE-AGPL).
+
+Source code offer: Velm Labs will provide the complete corresponding source code of the viewer in this version, for at
+least three years from its release and at no more than the cost of providing it. Ask at support@unstuck.sh, naming the
+version (0.1.0).

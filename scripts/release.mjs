@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Publishing 0.1.0 (docs/superpowers/specs/2026-11-14-publish-design.md).
-//   node scripts/release.mjs             dry run: build everything into release/ and prove it works from a clean install
-//   node scripts/release.mjs --publish   the same dry run, then publish to npm (NPM_TOKEN) and PyPI (PYPI_TOKEN)
-// Tokens are never printed or written into the repo.
+//   pnpm release           dry run: build everything into release/, prove it works from a clean install, and record each
+//                          artifact's SHA-256 with the commit in release/dry-run-passed.json
+//   pnpm release:publish   publishes exactly those artifacts (scripts/publish.mjs)
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -10,7 +10,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { buildEngine, checkBinaryType, embedViewer } from './release/build-engines.mjs';
+import { buildEngine, checkBinaryType, embedViewer, macosInfo } from './release/build-engines.mjs';
+import { npmState, pypiState, sha1, sha256, writeManifest } from './release/manifest.mjs';
 import { buildWheel } from './release/build-wheels.mjs';
 import { tarballProblems, wheelProblems } from './release/checks.mjs';
 import { PLATFORMS } from './release/platforms.mjs';
@@ -24,7 +25,6 @@ const TS = [
   { dir: 'core', name: '@velmlabs/unstuck-core' },
   { dir: 'sdk-ts', name: '@velmlabs/unstuck' },
 ];
-const publish = process.argv.includes('--publish');
 const step = (s) => console.log(`\n▸ ${s}`);
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts });
 const host = PLATFORMS.find((p) => p.id === `${process.platform}-${process.arch}`);
@@ -48,6 +48,12 @@ const engines = {};
 for (const p of PLATFORMS) {
   engines[p.id] = buildEngine(p, path.join(OUT, 'engines'));
   checkBinaryType(engines[p.id], p);
+  if (p.os === 'darwin') {
+    // The wheel tag must not claim an older macOS than the binary runs on, and the signature must match its pages.
+    const mac = macosInfo(engines[p.id]);
+    if (mac.minos !== p.minMacos) throw new Error(`${p.id}: built for macOS ${mac.minos}, but tagged for ${p.minMacos}`);
+    if (mac.signature !== 'valid') throw new Error(`${p.id}: code signature is ${mac.signature}`);
+  }
   console.log(`${p.id}: ${(fs.statSync(engines[p.id]).size / 1048576).toFixed(0)} MB`);
 }
 
@@ -167,30 +173,29 @@ if (pyStatus !== 'resolved') throw new Error(`Python takeover: ${pyStatus}`);
 console.log('resolved (engine bundled in the wheel)');
 site.close();
 
-// ── 5. Not yet published? ────────────────────────────────────────────────────────────────────────────────────────────
-step(`registries: ${VERSION} must be free`);
-const taken = [];
-for (const name of Object.keys(tarballs)) if ((await fetch(`https://registry.npmjs.org/${name.replace('/', '%2F')}/${VERSION}`)).status !== 404) taken.push(`npm ${name}@${VERSION}`);
-if ((await fetch(`https://pypi.org/pypi/unstuck/${VERSION}/json`)).status !== 404) taken.push(`PyPI unstuck ${VERSION}`);
-if (taken.length) throw new Error(`already published: ${taken.join(', ')}`);
-console.log('free');
-
-console.log('\n✓ dry run passed');
-if (!publish) process.exit(0);
-
-// ── 6. Publish ───────────────────────────────────────────────────────────────────────────────────────────────────────
-// Both tokens are checked before anything is published, so a missing one can't leave a half-published release.
-for (const t of ['NPM_TOKEN', 'PYPI_TOKEN']) if (!process.env[t]) throw new Error(`${t} is not set`);
-const npmrc = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'npmrc-')), '.npmrc');
-fs.writeFileSync(npmrc, '//registry.npmjs.org/:_authToken=${NPM_TOKEN}\n', { mode: 0o600 }); // npm expands it; the value never lands on disk
-const order = ['@velmlabs/unstuck-protocol', '@velmlabs/unstuck-core', ...PLATFORMS.map((p) => `@velmlabs/unstuck-engine-${p.id}`), '@velmlabs/unstuck-engine', '@velmlabs/unstuck'];
-step('npm');
-for (const name of order) {
-  sh('npm', ['publish', tarballs[name], '--access', 'public'], { env: { ...process.env, NPM_CONFIG_USERCONFIG: npmrc }, stdio: ['ignore', 'ignore', 'inherit'] });
-  console.log(`published ${name}@${VERSION}`);
+// ── 5. Registries: free, or (resuming) already published with exactly these bytes ─────────────────────────────────
+step(`registries: ${VERSION}`);
+const clash = [];
+let resumed = 0;
+for (const [name, tgz] of Object.entries(tarballs)) {
+  const state = await npmState(name, VERSION, sha1(tgz));
+  if (state === 'different') clash.push(`npm ${name}@${VERSION} is already published with different contents`);
+  if (state === 'same') resumed++;
 }
-fs.rmSync(path.dirname(npmrc), { recursive: true, force: true });
-step('PyPI');
-// uv reads the token from UV_PUBLISH_TOKEN; it is never on the command line or printed.
-sh('uv', ['publish', ...wheels], { env: { ...process.env, UV_PUBLISH_TOKEN: process.env.PYPI_TOKEN }, stdio: ['ignore', 'inherit', 'inherit'] });
-console.log(`\n✓ published ${VERSION}`);
+for (const w of wheels) {
+  const state = await pypiState('unstuck', VERSION, path.basename(w), sha256(w));
+  if (state === 'different') clash.push(`PyPI ${path.basename(w)} is already published with different contents`);
+  if (state === 'same') resumed++;
+}
+if (clash.length) throw new Error(clash.join('\n'));
+console.log(resumed ? `free, except ${resumed} already published with these exact bytes (they'll be skipped)` : 'free');
+
+// ── 6. Record what passed ───────────────────────────────────────────────────────────────────────────────────────────
+const head = sh('git', ['rev-parse', 'HEAD']).trim();
+const dirty = sh('git', ['status', '--porcelain', '--', '.', ':!release']).trim();
+if (dirty) {
+  console.log('\n✓ dry run passed, but the working tree has uncommitted changes: commit them and run it again before publishing');
+  process.exit(0);
+}
+writeManifest(OUT, [...Object.values(tarballs), ...wheels].map((f) => path.relative(OUT, f)), head);
+console.log(`\n✓ dry run passed for ${head.slice(0, 7)}; publish these exact files with: pnpm release:publish`);

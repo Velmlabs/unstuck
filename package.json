@@ -13,7 +13,8 @@
     "check:runtime": "node scripts/check-runtime-agnostic.mjs protocol/src core/src viewer/src relay-core/src",
     "test:py": "cd sdk-py && uv run pytest --cov=unstuck -q",
     "e2e:examples": "vitest run --config e2e/vitest.examples.config.ts",
-    "release": "node scripts/release.mjs"
+    "release": "node scripts/release.mjs",
+    "release:publish": "node scripts/publish.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

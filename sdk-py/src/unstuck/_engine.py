@@ -32,7 +32,7 @@ def resolve_engine_path(engine_path: str | None, env: Mapping[str, str] = os.env
         return str(bundled)
     raise UnstuckEngineError(
         f"Unstuck engine not found. Tried: the engine_path argument, UNSTUCK_ENGINE_PATH, and the bundled binary {bundled}. "
-        "Install a platform wheel of unstuck or Set UNSTUCK_ENGINE_PATH to the unstuck-engine binary."
+        "Install a platform wheel of unstuck, or set UNSTUCK_ENGINE_PATH to the unstuck-engine binary."
     )
 
 

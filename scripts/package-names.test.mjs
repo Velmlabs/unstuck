@@ -18,6 +18,10 @@ describe('package names', () => {
     expect(offenders.filter((f) => f !== 'scripts/package-names.test.mjs' && f !== 'e2e/examples/harness.ts')).toEqual([]);
   });
 
+  it('workspace packages that are not published are private (no accidental pnpm -r publish)', () => {
+    for (const dir of ['engine', 'viewer', 'relay-core', 'relay-node', 'relay-cloudflare', 'e2e']) expect(JSON.parse(fs.readFileSync(`${dir}/package.json`, 'utf8')).private, dir).toBe(true);
+  });
+
   it('the published packages carry their new names', () => {
     const name = (dir) => JSON.parse(fs.readFileSync(`${dir}/package.json`, 'utf8')).name;
     expect([name('sdk-ts'), name('engine'), name('core'), name('protocol')]).toEqual(['@velmlabs/unstuck', '@velmlabs/unstuck-engine', '@velmlabs/unstuck-core', '@velmlabs/unstuck-protocol']);

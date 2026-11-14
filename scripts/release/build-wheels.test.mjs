@@ -24,6 +24,13 @@ describe('platform wheels', () => {
       expect(meta).toContain('Project-URL: Homepage, https://unstuck.sh/docs');
       expect(meta).toContain('Project-URL: Repository, https://github.com/velmlabs/unstuck');
       expect(meta).toContain('Author: Velm Labs');
+      expect(meta).toContain('License-Expression: Apache-2.0 AND AGPL-3.0-only');
+      for (const f of ['LICENSE', 'LICENSE-AGPL', 'NOTICE']) expect(files).toContain(`unstuck-0.1.0.dist-info/licenses/${f} 0o644`);
+      expect(files).toContain('unstuck/py.typed 0o644');
+      // A platform wheel isn't pure Python: installers must put it in platlib.
+      const wheelFile = py("import sys,zipfile\nz=zipfile.ZipFile(sys.argv[1])\nprint(z.read('unstuck-0.1.0.dist-info/WHEEL').decode())", whl);
+      expect(wheelFile).toContain('Root-Is-Purelib: false');
+      expect(wheelFile).toContain(`Tag: py3-none-${p.wheel}`);
     }
     expect(fs.existsSync('sdk-py/src/unstuck/_bin')).toBe(false); // the workspace is left clean
   }, 300_000);

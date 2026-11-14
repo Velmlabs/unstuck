@@ -37,6 +37,9 @@ describe('packed packages', () => {
       expect(pkg.main, dir).toBe('./dist/index.js');
       expect(pkg.types, dir).toBe('./dist/index.d.ts');
       expect(JSON.stringify(pkg.exports), dir).not.toContain('src/');
+      // A "default" condition, so require() (Node 22+) and CJS-mode TypeScript resolve it too.
+      expect(pkg.exports['.'], dir).toEqual({ types: './dist/index.d.ts', import: './dist/index.js', default: './dist/index.js' });
+      expect(pkg.engines, dir).toEqual({ node: '>=20' });
       expect(JSON.stringify(pkg.dependencies ?? {}), dir).not.toContain('workspace:');
       expect(pkg.repository?.url, dir).toBe('git+https://github.com/velmlabs/unstuck.git');
       expect(pkg.homepage, dir).toBe('https://unstuck.sh/docs');

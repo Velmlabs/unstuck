@@ -1,4 +1,8 @@
-# unstuck
+# @velmlabs/unstuck
+
+```bash
+npm install @velmlabs/unstuck
+```
 
 Human takeover for AI browser agents. When your agent hits a CAPTCHA, a login wall or a 2FA prompt, `unstuck.takeover(page)` pauses it, gives a human a link to the live browser, and resolves when they're done.
 
@@ -13,6 +17,8 @@ await unstuck.close();
 
 `result.status` is `resolved`, `timed_out`, `cancelled` (the human tapped "Can't solve") or `failed` (for example the page closed). `takeover()` only rejects with `UnstuckEngineError` when the engine binary can't run.
 
-Until platform packages ship, point the SDK at an engine binary with `UNSTUCK_ENGINE_PATH` or the `enginePath` option. See the repository README for the full quickstart.
+The engine comes with the package: npm installs the build for your computer (macOS 13+, Linux with glibc, Windows x64). To use another binary, set `UNSTUCK_ENGINE_PATH` or the `enginePath` option.
 
-License: Apache-2.0
+Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_…`. Tutorials for Playwright, Puppeteer, MCP, browser-use, Stagehand and any Chromium: https://unstuck.sh/docs
+
+License: Apache-2.0. The engine binary also contains the AGPL-3.0 viewer; see its package's NOTICE.

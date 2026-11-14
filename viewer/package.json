@@ -1,5 +1,6 @@
 {
   "name": "@velmlabs/unstuck-viewer",
+  "private": true,
   "version": "0.1.0",
   "description": "Unstuck takeover viewer: the page a human uses to control the agent's browser",
   "license": "AGPL-3.0-only",
