@@ -13,7 +13,7 @@ Success: on a clean machine, each of the three lines works, and a takeover runs 
 - npm scope `@velmlabs`; every package name carries `unstuck` (the org hosts other projects).
 - Per-platform engine packages (approach A): npm installs only the matching one; Python wheels bundle the engine.
 - Version `0.1.0` for everything.
-- The npm token is the environment variable `NPM_TOKEN` (granular, `@velmlabs` read/write, 2FA bypass); the PyPI token comes through the secure credential form (host `upload.pypi.org`, user `__token__`).
+- The npm token is the environment variable `NPM_TOKEN` (granular, `@velmlabs` read/write, 2FA bypass); the PyPI token is the environment variable `PYPI_TOKEN` (the sandbox reaches package registries directly, so the secure credential form can't inject one).
 - `velmlabs/unstuck` stays **private** for now; package metadata still points at it.
 - A dry run (pack, install in a clean folder, real takeover) passes before anything is published.
 

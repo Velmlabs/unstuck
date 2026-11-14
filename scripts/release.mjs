@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Publishing 0.1.0 (docs/superpowers/specs/2026-11-14-publish-design.md).
 //   node scripts/release.mjs             dry run: build everything into release/ and prove it works from a clean install
-//   node scripts/release.mjs --publish   the same dry run, then publish to npm (NPM_TOKEN) and PyPI (secure credential)
+//   node scripts/release.mjs --publish   the same dry run, then publish to npm (NPM_TOKEN) and PyPI (PYPI_TOKEN)
 // Tokens are never printed or written into the repo.
 import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -179,7 +179,8 @@ console.log('\n✓ dry run passed');
 if (!publish) process.exit(0);
 
 // ── 6. Publish ───────────────────────────────────────────────────────────────────────────────────────────────────────
-if (!process.env.NPM_TOKEN) throw new Error('NPM_TOKEN is not set');
+// Both tokens are checked before anything is published, so a missing one can't leave a half-published release.
+for (const t of ['NPM_TOKEN', 'PYPI_TOKEN']) if (!process.env[t]) throw new Error(`${t} is not set`);
 const npmrc = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'npmrc-')), '.npmrc');
 fs.writeFileSync(npmrc, '//registry.npmjs.org/:_authToken=${NPM_TOKEN}\n', { mode: 0o600 }); // npm expands it; the value never lands on disk
 const order = ['@velmlabs/unstuck-protocol', '@velmlabs/unstuck-core', ...PLATFORMS.map((p) => `@velmlabs/unstuck-engine-${p.id}`), '@velmlabs/unstuck-engine', '@velmlabs/unstuck'];
@@ -190,6 +191,6 @@ for (const name of order) {
 }
 fs.rmSync(path.dirname(npmrc), { recursive: true, force: true });
 step('PyPI');
-// The proxy adds the real credential for upload.pypi.org; uv needs some value to send.
-sh('uv', ['publish', '--username', '__token__', '--password', 'injected-by-proxy', ...wheels], { stdio: ['ignore', 'inherit', 'inherit'] });
+// uv reads the token from UV_PUBLISH_TOKEN; it is never on the command line or printed.
+sh('uv', ['publish', ...wheels], { env: { ...process.env, UV_PUBLISH_TOKEN: process.env.PYPI_TOKEN }, stdio: ['ignore', 'inherit', 'inherit'] });
 console.log(`\n✓ published ${VERSION}`);
