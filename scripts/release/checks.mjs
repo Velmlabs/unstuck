@@ -1,4 +1,4 @@
-// What each published artifact may contain (publishing 0.1.0): nothing but what's listed, so no sources, tests,
+// What each published artifact may contain (publishing 0.1.1): nothing but what's listed, so no sources, tests,
 // source maps or secrets ship. Each function returns a list of problems; empty means the contents are right.
 import { PLATFORMS } from './platforms.mjs';
 

@@ -1,4 +1,4 @@
-// The engine builds and the npm manifests of the packages generated for them (publishing 0.1.0).
+// The engine builds and the npm manifests of the packages generated for them (publishing 0.1.1).
 export const PLATFORMS = [
   // macOS 13: Bun's binaries are built for it (LC_BUILD_VERSION minos 13.0), so the wheel tag must not claim older.
   { id: 'darwin-arm64', bun: 'bun-darwin-arm64', os: 'darwin', cpu: 'arm64', wheel: 'macosx_13_0_arm64', exe: 'unstuck-engine', minMacos: '13.0' },
