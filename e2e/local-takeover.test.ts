@@ -300,6 +300,14 @@ describe('native typing on a simulated phone', () => {
     await tapToType(human, page, '#split input:first-child');
     await human.keyboard.insertText('482913');
     await expect.poll(() => page.evaluate('window.splitValue()'), { timeout: 10_000 }).toBe('482913');
+    // A mistake in six one-digit boxes: Backspace in an empty box jumps back and erases, as real widgets do.
+    await page.evaluate("document.querySelectorAll('#split input').forEach((el) => (el.value = ''))");
+    await tapToType(human, page, '#split input:first-child');
+    await human.keyboard.type('KRES');
+    await expect.poll(() => page.evaluate('window.splitValue()'), { timeout: 10_000 }).toBe('KRES');
+    await human.keyboard.press('Backspace');
+    await human.keyboard.press('Backspace');
+    await expect.poll(() => page.evaluate('window.splitValue()'), { timeout: 10_000 }).toBe('KR');
 
     // Shift+letter arrives as a real key press with Shift; Tab moves the page's focus and the keyboard stays open.
     await tapToType(human, page, '#email');

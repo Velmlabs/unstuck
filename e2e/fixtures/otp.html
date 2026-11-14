@@ -47,7 +47,17 @@
   overlay.addEventListener('input', () => document.querySelectorAll('#overlay-wrap span').forEach((s, i) => (s.textContent = overlay.value[i] || '')));
   // Six one-digit boxes that move focus forward as each digit is typed.
   const split = [...document.querySelectorAll('#split input')];
-  split.forEach((el, i) => el.addEventListener('input', () => { if (el.value && split[i + 1]) split[i + 1].focus(); }));
+  split.forEach((el, i) => {
+    el.addEventListener('input', () => { if (el.value && split[i + 1]) split[i + 1].focus(); });
+    // As real code widgets do: Backspace in an empty box goes back and erases the previous digit.
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Backspace' && !el.value && split[i - 1]) {
+        e.preventDefault();
+        split[i - 1].value = '';
+        split[i - 1].focus();
+      }
+    });
+  });
   window.splitValue = () => split.map((el) => el.value).join('');
 </script>
 </body>
