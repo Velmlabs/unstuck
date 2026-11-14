@@ -12,7 +12,7 @@ import { PLATFORMS } from './release/platforms.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
-const VERSION = '0.1.3';
+const VERSION = '0.1.4';
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts });
 
 if (sh('git', ['status', '--porcelain', '--', '.', ':!release']).trim()) throw new Error('uncommitted changes: commit, run the dry run, then publish');
