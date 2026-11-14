@@ -94,6 +94,28 @@ describe('attachPage', () => {
     expect(session.detach).toHaveBeenCalled();
   });
 
+  it('a session that fails to open: page closed meanwhile → PageClosedError; otherwise the error itself', async () => {
+    let closed = false;
+    const page = { createCDPSession: async () => { throw new Error('boom'); }, isClosed: () => closed, on: () => {} };
+    await expect(attachPage(page)).rejects.toThrow('boom');
+    const closing = { createCDPSession: async () => { closed = true; throw new Error('Target closed'); }, isClosed: () => closed, on: () => {} };
+    closed = false;
+    await expect(attachPage(closing)).rejects.toBeInstanceOf(PageClosedError);
+  });
+
+  it('a crash followed by close reports once, with the first reason; a page without url() reports an empty one', async () => {
+    const pageListeners: Record<string, () => void> = {};
+    const session = { send: vi.fn(), on: () => {}, detach: vi.fn(async () => {}) };
+    const page = { createCDPSession: async () => session, on: (e: string, cb: () => void) => void (pageListeners[e] = cb) };
+    const a = await attachPage(page);
+    const got = vi.fn();
+    a.onClose(got);
+    pageListeners.crash!();
+    pageListeners.close!();
+    expect(got.mock.calls).toEqual([['page crashed']]);
+    expect(a.url()).toBe('');
+  });
+
   it('rejects objects that are not pages', async () => {
     await expect(attachPage({})).rejects.toThrow(new TypeError('Unsupported page object: pass a Playwright or Puppeteer Page'));
     await expect(attachPage(null)).rejects.toThrow(TypeError);

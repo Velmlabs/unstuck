@@ -329,6 +329,34 @@ describe('edge cases', () => {
 });
 
 
+describe('robustness', () => {
+  it('a request whose target cannot be parsed gets a 500, and the relay keeps serving', async () => {
+    const r = await relay();
+    const net = await import('node:net');
+    const reply = await new Promise<string>((resolve) => {
+      const sock = net.connect(r.port, '127.0.0.1', () => sock.write('GET http://[bad HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'));
+      let out = '';
+      sock.on('data', (d) => (out += d));
+      sock.on('end', () => resolve(out));
+      sock.on('error', () => resolve(out));
+    });
+    expect(reply).toMatch(/^HTTP\/1\.1 (500|400)/);
+    expect((await fetch(`${r.http}/healthz`)).status).toBe(200);
+  });
+
+  it('an agent offering a key but not the relay protocol is not upgraded', async () => {
+    const r = await relay();
+    const ws = new WebSocket(`${r.url}/agent/ABCDEFGHIJKLMNOPQRSTUV`, ['key.K']);
+    const outcome = await new Promise<string>((resolve) => {
+      ws.onopen = () => resolve(`open:${ws.protocol}`);
+      ws.onerror = () => resolve('error');
+      ws.onclose = (e) => resolve(`close:${e.code}`);
+    });
+    expect(outcome).not.toBe('open:unstuck-relay.1');
+    ws.close();
+  });
+});
+
 describe('security fixes', () => {
   it('finding 2: viewers that never said hello cannot keep a human out', async () => {
     const r = await relay();

@@ -34,6 +34,29 @@ describe('Unstuck', () => {
     await human.close();
   });
 
+  it('allowedSites reaches the engine: the page stays put on an off-site link but may go to a listed site', async () => {
+    const page = await browser.newPage();
+    await page.goto('data:text/html,<p>x</p>').catch(() => {});
+    const links: { url: string }[] = [];
+    const unstuck = new Unstuck({ enginePath: ENGINE, onLink: (l) => links.push(l) });
+    // Two takeovers on one client: the second reuses the running engine.
+    for (const allowedSites of [['example.org'], undefined]) {
+      const result = unstuck.takeover(page, { reason: 'x', timeoutS: 30, ...(allowedSites ? { allowedSites } : {}) });
+      await vi.waitFor(() => expect(links.length).toBeGreaterThan(0), { timeout: 10_000 });
+      const human = await browser.newPage();
+      await human.goto(links.shift()!.url);
+      await human.getByRole('button', { name: 'Done' }).click();
+      await expect(result).resolves.toMatchObject({ status: 'resolved' });
+      await human.close();
+    }
+    await unstuck.close();
+    await page.close();
+  });
+
+  it('close() on a client that never started an engine is a no-op', async () => {
+    await expect(new Unstuck({ enginePath: ENGINE }).close()).resolves.toBeUndefined();
+  });
+
   it('Review Focus 3: closing the page mid-takeover returns failed/page_closed quickly', async () => {
     const page = await browser.newPage();
     const unstuck = new Unstuck({ enginePath: ENGINE, onLink: () => {} });

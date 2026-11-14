@@ -18,7 +18,7 @@
     "@velmlabs/unstuck-protocol": "workspace:*",
     "pngjs": "^7.0.0",
     "ws": "^8.22.2",
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/pngjs": "^6.0.5",
