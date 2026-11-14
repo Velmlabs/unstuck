@@ -7,8 +7,14 @@ license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 keywords = ["ai", "agent", "browser", "captcha", "human-in-the-loop", "playwright", "cdp"]
-classifiers = ["Framework :: AsyncIO", "Programming Language :: Python :: 3"]
+classifiers = ["Framework :: AsyncIO", "Programming Language :: Python :: 3", "License :: OSI Approved :: Apache Software License"]
+authors = [{ name = "Velm Labs" }]
 dependencies = []
+
+[project.urls]
+Homepage = "https://unstuck.sh/docs"
+Repository = "https://github.com/velmlabs/unstuck"
+Issues = "https://github.com/velmlabs/unstuck/issues"
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "pytest-cov>=5", "playwright==1.63.0"]
