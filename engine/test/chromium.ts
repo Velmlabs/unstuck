@@ -33,6 +33,14 @@ export async function startChromium(): Promise<DebugChromium> {
     });
   });
   const port = Number(new URL(wsUrl).port);
+  // "DevTools listening" comes before the first tab exists; on a loaded machine a test could ask too early.
+  const ready = Date.now() + 15_000;
+  for (;;) {
+    const targets = (await fetch(`http://127.0.0.1:${port}/json/list`).then((r) => r.json()).catch(() => [])) as { type: string }[];
+    if (targets.some((t) => t.type === 'page')) break;
+    if (Date.now() > ready) throw new Error('chromium started without a tab');
+    await new Promise((r) => setTimeout(r, 50));
+  }
   return {
     port,
     wsUrl,

@@ -1,4 +1,4 @@
-import { RESUME_WINDOW_MS, decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Field, type FieldKind, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
+import { RESUME_WINDOW_MS, b64urlEncode, decodeFrame, padPlaintext, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Field, type FieldKind, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
 
 /** `closed`: gave up retrying; `ended`: the relay says the session no longer exists (no point retrying). */
 export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed' | 'ended';
@@ -76,13 +76,16 @@ export function connect(
   let nonce: string | null = null;
   let outSeq = 0;
   let lastIn = 0;
+  // Anti-replay: with an engine that announces v: 2, our random vn must come back in ready before we trust anything.
+  let vn: string | null = null;
+  let verified = true;
 
   /** Seals and sends in order on the socket that was open when the message was queued. */
   const write = (target: WebSocket, m: ViewerToEngine) => {
     if (nonce === null) return; // nothing goes out before the engine's challenge
     const conn = nonce;
     const seq = ++outSeq;
-    const plain = enc.encode(JSON.stringify(m));
+    const plain = padPlaintext(enc.encode(JSON.stringify(m))); // sizes must not tell which key or how much text
     outChain = outChain
       .then(async () => {
         const sealed = await codec.seal(conn, seq, plain);
@@ -91,9 +94,15 @@ export function connect(
       .catch(() => {});
   };
   const hello = (target: WebSocket, code?: string) =>
-    write(target, { t: 'hello', token, ...(resumeKey ? { resumeKey } : {}), ...(code ? { code } : {}) } as ViewerToEngine);
+    write(target, { t: 'hello', token, ...(resumeKey ? { resumeKey } : {}), ...(code ? { code } : {}), ...(vn ? { vn } : {}) } as ViewerToEngine);
 
-  const handle = (m: EngineToViewer) => {
+  const handle = (m: EngineToViewer, socket: WebSocket) => {
+    if (!verified) {
+      // Until our vn comes back, anything but an error may be a replay of an old connection.
+      if (m.t === 'ready' && m.vn === vn) verified = true;
+      else if (m.t === 'ready') return void socket.close();
+      else if (m.t !== 'error') return;
+    }
     if (m.t === 'ready') {
       resumeKey = m.resumeKey;
       attempt = 0;
@@ -118,6 +127,8 @@ export function connect(
     nonce = null;
     outSeq = 0;
     lastIn = 0;
+    vn = null;
+    verified = true;
     ws.onopen = () => {
       ping = setInterval(() => socket.readyState === 1 && write(socket, { t: 'ping' }), PING_MS);
     };
@@ -131,9 +142,13 @@ export function connect(
           const c = await codec.open('', bytes);
           if (!c || socket !== ws) return;
           try {
-            const m = JSON.parse(dec.decode(c.plain)) as { t?: string; n?: unknown };
+            const m = JSON.parse(dec.decode(c.plain)) as { t?: string; n?: unknown; v?: unknown };
             if (m.t !== 'challenge' || typeof m.n !== 'string') return;
             nonce = m.n;
+            if (m.v === 2) {
+              vn = b64urlEncode(crypto.getRandomValues(new Uint8Array(16)));
+              verified = false;
+            }
           } catch {
             return;
           }
@@ -144,6 +159,7 @@ export function connect(
         lastIn = msg.seq;
         const plain = msg.plain;
         if (!isJsonPlaintext(plain)) {
+          if (!verified) return;
           const f = decodeFrame(plain);
           if (f) h.onFrame(f);
           return;
@@ -154,7 +170,7 @@ export function connect(
         } catch {
           return;
         }
-        handle(m);
+        handle(m, socket);
       });
     };
     ws.onclose = () => {

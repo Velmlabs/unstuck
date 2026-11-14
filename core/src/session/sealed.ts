@@ -31,7 +31,8 @@ export function sealConnection(conn: ViewerConnection, key: CryptoKey, sessionId
       .catch(() => {}) // one failed step must not poison every later message
       .finally(() => void (pendingBytes -= plain.length));
   };
-  queue(enc.encode(JSON.stringify({ t: 'challenge', n: nonce })), true);
+  // v: 2 — this engine echoes the viewer's random value (hello.vn) in ready, so a viewer can tell a replayed stream.
+  queue(enc.encode(JSON.stringify({ t: 'challenge', n: nonce, v: 2 })), true);
 
   const kill = () => {
     dead = true;
@@ -54,7 +55,9 @@ export function sealConnection(conn: ViewerConnection, key: CryptoKey, sessionId
             if (dead) return;
             const m = await openMsg(key, sessionId, 'v2e', nonce, bytes);
             if (dead) return;
-            if (!m || m.seq <= lastIn) return kill(); // not ours, tampered, or a replay
+            // Not ours, tampered, replayed, or one skipped: a relay never drops viewer messages (it closes the viewer instead),
+            // so a gap means a message was withheld on purpose (e.g. one keystroke).
+            if (!m || m.seq !== lastIn + 1) return kill();
             lastIn = m.seq;
             h(isJsonPlaintext(m.plain) ? dec.decode(m.plain) : m.plain);
           })

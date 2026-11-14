@@ -76,14 +76,21 @@ describe('sealConnection', () => {
     expect(fresh.closed?.code).toBe(1008);
   });
 
-  it('gaps in sequence numbers are fine (a relay may drop frames), going backwards is not', async () => {
+  it('viewer messages must arrive with no gaps: a relay dropping a chosen keystroke kills the connection', async () => {
     const t = await setup();
+    t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 1));
+    t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 2));
+    t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 4));
     t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 5));
-    t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 9));
-    t.raw.push(await t.sealIn(enc('{"t":"ping"}'), 7));
     await settle();
     expect(t.got).toHaveLength(2);
     expect(t.raw.closed?.code).toBe(1008);
+  });
+
+  it('the challenge tells the viewer this engine echoes its freshness value (v: 2)', async () => {
+    const t = await setup();
+    const challenge = await openMsg(t.key, 'S1', 'e2v', '', t.raw.sent[0] as Uint8Array);
+    expect(JSON.parse(dec(challenge!.plain))).toEqual({ t: 'challenge', n: t.n, v: 2 });
   });
 
   it('send followed by close delivers the message before closing', async () => {

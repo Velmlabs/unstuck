@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseViewerMessage, ViewerToEngineSchema, EngineToViewerSchema, FieldKinds, RESUME_WINDOW_MS } from '../src/viewer';
+import { padPlaintext } from '../src/e2e';
 import { Value } from '@sinclair/typebox/value';
 
 describe('parseViewerMessage', () => {
@@ -96,5 +97,36 @@ describe('cant_solve reason', () => {
   it('is at most 200 characters (it reaches the agent, which may be an AI)', () => {
     expect(parseViewerMessage(JSON.stringify({ t: 'cant_solve', reason: 'x'.repeat(200) }))).toMatchObject({ t: 'cant_solve' });
     expect(parseViewerMessage(JSON.stringify({ t: 'cant_solve', reason: 'x'.repeat(201) }))).toBeNull();
+  });
+});
+
+describe('hello freshness value (vn)', () => {
+  it('a hello may carry the viewer\'s random value (base64url, 16–64 chars); anything else is refused', () => {
+    expect(parseViewerMessage(JSON.stringify({ t: 'hello', token: 'T', vn: 'A'.repeat(22) }))).toMatchObject({ vn: 'A'.repeat(22) });
+    expect(parseViewerMessage(JSON.stringify({ t: 'hello', token: 'T', vn: 'short' }))).toBeNull();
+    expect(parseViewerMessage(JSON.stringify({ t: 'hello', token: 'T', vn: 'A'.repeat(65) }))).toBeNull();
+    expect(parseViewerMessage(JSON.stringify({ t: 'hello', token: 'T', vn: '../../' + 'A'.repeat(20) }))).toBeNull();
+  });
+});
+
+describe('padPlaintext', () => {
+  const len = (n: number) => padPlaintext(new TextEncoder().encode('{' + 'x'.repeat(n - 1))).length;
+  it('pads JSON with trailing spaces to 256 bytes, then to the next power of two, so sizes hide what was typed', () => {
+    expect(len(1)).toBe(256);
+    expect(len(108)).toBe(256);
+    expect(len(110)).toBe(256);
+    expect(len(256)).toBe(256);
+    expect(len(257)).toBe(512);
+    expect(len(3000)).toBe(4096);
+  });
+  it('the result is still valid JSON for older peers (trailing whitespace)', () => {
+    const p = padPlaintext(new TextEncoder().encode('{"t":"text","text":"hunter2"}'));
+    expect(JSON.parse(new TextDecoder().decode(p))).toEqual({ t: 'text', text: 'hunter2' });
+    expect(p[0]).toBe(0x7b);
+  });
+  it('never pads past the viewer message limit', () => {
+    expect(len(40_000)).toBe(65_536);
+    expect(len(65_536)).toBe(65_536);
+    expect(len(70_000)).toBe(70_000);
   });
 });

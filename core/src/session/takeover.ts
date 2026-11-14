@@ -216,7 +216,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     })();
   }
 
-  async function attachViewer(conn: ViewerConnection): Promise<void> {
+  async function attachViewer(conn: ViewerConnection, vn?: string): Promise<void> {
     const previous = holder;
     holder = conn;
     leftAt = null;
@@ -226,7 +226,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     resumeKey = newSessionId();
     if (status === 'waiting') go('viewer_joined');
     emit('viewer_joined');
-    sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey });
+    sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey, ...(vn ? { vn } : {}) });
     sender = createLatestSender(conn);
     // Chrome only sends frames when the page repaints; a static CAPTCHA would leave a new viewer black.
     if (lastFrame) sender.push(lastFrame);
@@ -334,7 +334,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     }
   }
 
-  async function onHello(conn: ViewerConnection, token: string, offeredResumeKey?: string, offeredCode?: string): Promise<boolean> {
+  async function onHello(conn: ViewerConnection, token: string, offeredResumeKey?: string, offeredCode?: string, vn?: string): Promise<boolean> {
     const check = await verifyToken(key, token, now());
     if (isTerminal(status)) {
       reject(conn, 'session_closed');
@@ -373,7 +373,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       return false;
     }
     redeemed = true;
-    await attachViewer(conn);
+    await attachViewer(conn, vn);
     return true;
   }
 
@@ -435,7 +435,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       greeting = true;
       clearTimeout(helloTimer);
       helloTimers.delete(helloTimer);
-      void onHello(conn, msg.token, msg.resumeKey, msg.code).then((ok) => {
+      void onHello(conn, msg.token, msg.resumeKey, msg.code, msg.vn).then((ok) => {
         greeted = ok;
         greeting = false;
         for (const next of waiting.splice(0)) dispatch(next);

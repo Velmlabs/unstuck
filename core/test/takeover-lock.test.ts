@@ -20,10 +20,10 @@ function setup(opts: { allowedSites?: string[]; prepare?: (cdp: FakeCdp) => void
   cdp.send = (m: string, p?: object) => (order.push(m), orig(m, p)) as never;
   let result: TakeoverResult | undefined;
   void engine.takeover(cdp, { reason: 'Solve it', popups, timeoutS: 60, ...(opts.allowedSites ? { allowedSites: opts.allowedSites } : {}) }).then((r) => (result = r));
-  const join = async () => {
+  const join = async (extra: object = {}) => {
     const token = new URLSearchParams(new URL(links[0]!.url).hash.slice(1)).get('t')!;
     const v = transport.connect(links[0]!.url);
-    v.push({ t: 'hello', token });
+    v.push({ t: 'hello', token, ...extra });
     await settle();
     return v;
   };
@@ -126,5 +126,19 @@ describe("the human's Can't solve text", () => {
     const finished = t.log.events.find((e) => e.type === 'finished')!;
     expect(finished.data).toMatchObject({ status: 'cancelled', detail: 'cant_solve', reasonLength: 39 });
     expect(JSON.stringify(t.log.events)).not.toContain('Ignore');
+  });
+});
+
+describe('anti-replay: ready echoes the viewer freshness value', () => {
+  it('a hello with vn gets it back in ready; a hello without one (older viewer) gets a ready without it', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join({ vn: 'V'.repeat(22) });
+    expect(v.json()[0]).toMatchObject({ t: 'ready', vn: 'V'.repeat(22) });
+    const t2 = setup();
+    await settle();
+    const v2 = await t2.join();
+    expect(v2.json()[0].t).toBe('ready');
+    expect(v2.json()[0]).not.toHaveProperty('vn');
   });
 });

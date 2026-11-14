@@ -17,8 +17,9 @@ class FakeWs {
   send(b: Uint8Array) {
     this.sent.push(b);
   }
+  /** What was sent, without the trailing-space padding (padding has its own test). */
   texts(): string[] {
-    return this.sent.map((b) => new TextDecoder().decode(b));
+    return this.sent.map((b) => new TextDecoder().decode(b).trimEnd());
   }
   close() {
     this.readyState = 3;
@@ -383,5 +384,67 @@ describe('connect', () => {
     FakeWs.all[1]!.msg({ t: 'focus', kind: null });
     await flush();
     expect(old.onError).not.toHaveBeenCalled();
+  });
+});
+
+describe('anti-replay with engines that echo (challenge v: 2)', () => {
+  const v2 = (ws: FakeWs) => {
+    ws.readyState = 1;
+    ws.onopen?.();
+    ws.msg({ t: 'challenge', n: 'NONCE', v: 2 });
+  };
+  it('sends a fresh random vn in each hello', async () => {
+    const { } = make();
+    v2(FakeWs.all[0]!);
+    await flush();
+    const vn = FakeWs.all[0]!.hellos()[0].vn;
+    expect(vn).toMatch(/^[A-Za-z0-9_-]{22}$/);
+    FakeWs.all[0]!.drop();
+    vi.advanceTimersByTime(500);
+    v2(FakeWs.all[1]!);
+    await flush();
+    expect(FakeWs.all[1]!.hellos()[0].vn).not.toBe(vn);
+  });
+  it('a ready that does not echo our vn is a replay: not live, the socket is dropped, and earlier state is ignored', async () => {
+    const { h } = make();
+    const ws = FakeWs.all[0]!;
+    v2(ws);
+    await flush();
+    ws.msg({ t: 'state', status: 'resolved' }); // replayed from an old connection, before any ready
+    ws.msg({ ...ready, vn: 'OLD'.padEnd(22, 'x') });
+    await flush();
+    expect(h.onState).not.toHaveBeenCalled();
+    expect(h.onReady).not.toHaveBeenCalled();
+    expect(ws.readyState).toBe(3);
+  });
+  it('a ready that echoes our vn goes live', async () => {
+    const { h } = make();
+    const ws = FakeWs.all[0]!;
+    v2(ws);
+    await flush();
+    ws.msg({ ...ready, vn: ws.hellos()[0].vn });
+    await flush();
+    expect(h.onReady).toHaveBeenCalled();
+    ws.msg({ t: 'state', status: 'active' });
+    await flush();
+    expect(h.onState).toHaveBeenCalledWith('active');
+  });
+  it('an older engine (challenge without v) is accepted as before, with no vn in the hello', async () => {
+    const { h } = make();
+    FakeWs.all[0]!.open();
+    await flush();
+    expect(FakeWs.all[0]!.hellos()[0]).not.toHaveProperty('vn');
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    expect(h.onReady).toHaveBeenCalled();
+  });
+  it('pads what it sends to at least 256 bytes, so sizes do not tell keys or text lengths', async () => {
+    const { sock } = make();
+    FakeWs.all[0]!.open();
+    await flush();
+    sock.send({ t: 'text', text: 'hunter2' });
+    sock.send({ t: 'key', action: 'down', key: 'a', code: 'KeyA', text: 'a', modifiers: 0 });
+    await flush();
+    expect(FakeWs.all[0]!.sent.map((b) => b.length)).toEqual([256, 256, 256]);
   });
 });

@@ -11,7 +11,14 @@ const Lit = <T extends string>(v: T) => Type.Literal(v);
 
 export const ViewerToEngineSchema = Type.Union([
   Type.Object(
-    { t: Lit('hello'), token: Type.String(), resumeKey: Type.Optional(Type.String()), code: Type.Optional(Type.String({ pattern: '^[0-9]{6}$' })) },
+    {
+      t: Lit('hello'),
+      token: Type.String(),
+      resumeKey: Type.Optional(Type.String()),
+      code: Type.Optional(Type.String({ pattern: '^[0-9]{6}$' })),
+      /** The viewer's random value for this connection; engines that announce v: 2 echo it in ready (anti-replay). */
+      vn: Type.Optional(Type.String({ pattern: '^[A-Za-z0-9_-]{16,64}$' })),
+    },
     { additionalProperties: false },
   ),
   Type.Object(
@@ -58,7 +65,7 @@ export const FieldSchema = Type.Object({ x: Num, y: Num, w: Num, h: Num, kind: F
 export type Field = Static<typeof FieldSchema>;
 
 export const EngineToViewerSchema = Type.Union([
-  Type.Object({ t: Lit('ready'), reason: Type.String(), site: Type.String(), expiresAt: Num, resumeKey: Type.String() }),
+  Type.Object({ t: Lit('ready'), reason: Type.String(), site: Type.String(), expiresAt: Num, resumeKey: Type.String(), vn: Type.Optional(Type.String()) }),
   Type.Object({ t: Lit('state'), status: SessionStatusSchema }),
   Type.Object({ t: Lit('error'), code: Type.Union(ViewerErrorCodes.map((c) => Lit(c))), message: Type.String() }),
   Type.Object({ t: Lit('pong') }),
@@ -66,7 +73,7 @@ export const EngineToViewerSchema = Type.Union([
   Type.Object({ t: Lit('focus'), kind: Type.Union([FieldKindSchema, Type.Null()]), field: Type.Optional(FieldSchema) }),
 ]);
 export type EngineToViewer =
-  | { t: 'ready'; reason: string; site: string; expiresAt: number; resumeKey: string }
+  | { t: 'ready'; reason: string; site: string; expiresAt: number; resumeKey: string; vn?: string }
   | { t: 'state'; status: SessionStatus }
   | { t: 'error'; code: ViewerErrorCode; message: string }
   | { t: 'pong' }
