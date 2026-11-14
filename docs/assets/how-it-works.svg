@@ -1,0 +1,144 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 292" width="980" height="292" role="img" aria-labelledby="t d">
+  <title id="t">How Unstuck works</title>
+  <desc id="d">1. Your agent is blocked by a CAPTCHA. 2. Unstuck pauses it and sends you a link. 3. You solve the CAPTCHA on your phone, in the agent's live browser, and tap Done. 4. Your agent carries on where it stopped.</desc>
+  <style>
+    .card { fill: #ffffff; stroke: #d0d7de; }
+    .surface { fill: #f6f8fa; }
+    .line { stroke: #d0d7de; }
+    .ink { fill: #1f2328; }
+    .muted { fill: #59636e; }
+    .bar { fill: #d0d7de; }
+    .arrow { stroke: #8c959f; fill: none; }
+    .arrowhead { fill: #8c959f; }
+    .phone { fill: #1f2328; }
+    .screen { fill: #0f172a; }
+    @media (prefers-color-scheme: dark) {
+      .card { fill: #161b22; stroke: #30363d; }
+      .surface { fill: #0d1117; }
+      .line { stroke: #30363d; }
+      .ink { fill: #e6edf3; }
+      .muted { fill: #9198a1; }
+      .bar { fill: #30363d; }
+      .arrow { stroke: #6e7681; }
+      .arrowhead { fill: #6e7681; }
+      .phone { fill: #484f58; }
+    }
+    text { font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+    .mono { font-family: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace; }
+    .step { font-size: 15px; font-weight: 600; }
+    .sub { font-size: 13px; }
+    .small { font-size: 11px; }
+    .tiny { font-size: 9.5px; }
+  </style>
+
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path class="arrowhead" d="M0 0 L10 5 L0 10 z"/>
+    </marker>
+  </defs>
+
+  <!-- 1. The agent's browser, blocked by a CAPTCHA -->
+  <g transform="translate(10 20)">
+    <rect class="card" x="0" y="0" width="200" height="190" rx="10" stroke-width="1.5"/>
+    <rect class="surface" x="1" y="1" width="198" height="26" rx="9"/>
+    <circle cx="14" cy="14" r="4" fill="#ef4444"/>
+    <circle cx="27" cy="14" r="4" fill="#f59e0b"/>
+    <circle cx="40" cy="14" r="4" fill="#22c55e"/>
+    <rect class="card" x="54" y="7" width="136" height="14" rx="7" stroke-width="1"/>
+    <text class="muted tiny mono" x="62" y="17.5">tech-news.example</text>
+    <rect class="bar" x="16" y="40" width="120" height="7" rx="3.5"/>
+    <rect class="bar" x="16" y="53" width="168" height="7" rx="3.5"/>
+    <!-- the CAPTCHA box -->
+    <rect class="card" x="16" y="74" width="168" height="54" rx="6" stroke-width="1.5"/>
+    <rect x="28" y="90" width="22" height="22" rx="3" fill="none" stroke="#8c959f" stroke-width="2"/>
+    <text class="ink sub" x="60" y="106">I'm not a robot</text>
+    <!-- blocked badge -->
+    <rect x="16" y="142" width="96" height="24" rx="12" fill="#ef4444"/>
+    <text class="small" x="64" y="158" text-anchor="middle" fill="#000000" font-weight="600">Blocked</text>
+    <text class="muted small mono" x="122" y="158">crawler</text>
+  </g>
+
+  <!-- arrow 1 → 2 -->
+  <path class="arrow" d="M218 115 H262" stroke-width="2" marker-end="url(#head)"/>
+
+  <!-- 2. A link arrives on your phone -->
+  <g transform="translate(280 10)">
+    <rect class="phone" x="35" y="0" width="130" height="210" rx="22"/>
+    <rect class="screen" x="42" y="8" width="116" height="194" rx="16"/>
+    <rect x="80" y="14" width="40" height="6" rx="3" fill="#1b2336"/>
+    <!-- notification -->
+    <rect x="50" y="40" width="100" height="78" rx="10" fill="#1b2336"/>
+    <text x="60" y="58" font-size="9.5" fill="#94a3b8">Unstuck · now</text>
+    <text x="60" y="76" font-size="11" fill="#f8fafc" font-weight="600">Please solve</text>
+    <text x="60" y="90" font-size="11" fill="#f8fafc" font-weight="600">the CAPTCHA</text>
+    <text x="60" y="106" font-size="9.5" fill="#94a3b8">tech-news.example</text>
+    <rect x="50" y="128" width="100" height="30" rx="8" fill="#22c55e"/>
+    <text x="100" y="148" font-size="12" fill="#0f172a" font-weight="700" text-anchor="middle">Open link</text>
+  </g>
+
+  <!-- arrow 2 → 3 -->
+  <path class="arrow" d="M466 115 H510" stroke-width="2" marker-end="url(#head)"/>
+
+  <!-- 3. You solve it on the live page -->
+  <g transform="translate(528 10)">
+    <rect class="phone" x="35" y="0" width="130" height="210" rx="22"/>
+    <rect class="screen" x="42" y="8" width="116" height="194" rx="16"/>
+    <rect x="80" y="14" width="40" height="6" rx="3" fill="#1b2336"/>
+    <!-- live page -->
+    <rect x="48" y="28" width="104" height="104" rx="6" fill="#f8fafc"/>
+    <rect x="56" y="38" width="62" height="6" rx="3" fill="#cbd5e1"/>
+    <rect x="56" y="50" width="88" height="6" rx="3" fill="#cbd5e1"/>
+    <rect x="56" y="68" width="88" height="44" rx="5" fill="#ffffff" stroke="#cbd5e1" stroke-width="1.2"/>
+    <rect x="63" y="80" width="18" height="18" rx="3" fill="#22c55e"/>
+    <path d="M67 89 l4 4 l7 -8" stroke="#0f172a" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="86" y="93" font-size="7.5" fill="#1f2328">I'm not a robot</text>
+    <!-- a finger tap -->
+    <circle cx="72" cy="89" r="15" fill="none" stroke="#22c55e" stroke-width="1.5" opacity="0.55"/>
+    <!-- viewer buttons -->
+    <rect x="48" y="146" width="48" height="26" rx="7" fill="#272f42"/>
+    <text x="72" y="163" font-size="9" fill="#f8fafc" text-anchor="middle">Can't solve</text>
+    <rect x="102" y="146" width="50" height="26" rx="7" fill="#22c55e"/>
+    <text x="127" y="164" font-size="11" fill="#0f172a" font-weight="700" text-anchor="middle">Done</text>
+    <rect x="48" y="180" width="104" height="14" rx="7" fill="#1b2336"/>
+    <text x="100" y="190.5" font-size="8" fill="#94a3b8" text-anchor="middle">end-to-end encrypted</text>
+  </g>
+
+  <!-- arrow 3 → 4 -->
+  <path class="arrow" d="M714 115 H758" stroke-width="2" marker-end="url(#head)"/>
+
+  <!-- 4. The agent carries on -->
+  <g transform="translate(770 20)">
+    <rect class="card" x="0" y="0" width="200" height="190" rx="10" stroke-width="1.5"/>
+    <rect class="surface" x="1" y="1" width="198" height="26" rx="9"/>
+    <circle cx="14" cy="14" r="4" fill="#ef4444"/>
+    <circle cx="27" cy="14" r="4" fill="#f59e0b"/>
+    <circle cx="40" cy="14" r="4" fill="#22c55e"/>
+    <rect class="card" x="54" y="7" width="136" height="14" rx="7" stroke-width="1"/>
+    <text class="muted tiny mono" x="62" y="17.5">tech-news.example</text>
+    <!-- articles being collected -->
+    <rect class="bar" x="16" y="42" width="104" height="8" rx="4"/>
+    <rect class="bar" x="16" y="56" width="150" height="6" rx="3"/>
+    <rect class="bar" x="16" y="78" width="120" height="8" rx="4"/>
+    <rect class="bar" x="16" y="92" width="160" height="6" rx="3"/>
+    <rect class="bar" x="16" y="114" width="96" height="8" rx="4"/>
+    <rect class="bar" x="16" y="128" width="140" height="6" rx="3"/>
+    <rect x="16" y="142" width="104" height="24" rx="12" fill="#22c55e"/>
+    <text x="68" y="158" font-size="11" fill="#0f172a" font-weight="600" text-anchor="middle">Resolved</text>
+    <text class="muted small mono" x="128" y="158">crawler</text>
+  </g>
+
+  <!-- captions -->
+  <g>
+    <text class="ink step" x="110" y="252" text-anchor="middle">1. Your agent is blocked</text>
+    <text class="muted sub" x="110" y="272" text-anchor="middle">a CAPTCHA, a login, 2FA</text>
+
+    <text class="ink step" x="380" y="252" text-anchor="middle">2. You get a link</text>
+    <text class="muted sub" x="380" y="272" text-anchor="middle">Unstuck pauses the agent</text>
+
+    <text class="ink step" x="628" y="252" text-anchor="middle">3. You solve it, live</text>
+    <text class="muted sub" x="628" y="272" text-anchor="middle">tap and type, then Done</text>
+
+    <text class="ink step" x="870" y="252" text-anchor="middle">4. Your agent carries on</text>
+    <text class="muted sub" x="870" y="272" text-anchor="middle">same page, same session</text>
+  </g>
+</svg>

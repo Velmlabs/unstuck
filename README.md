@@ -2,22 +2,35 @@
 
 **Human takeover for AI browser agents.** When your agent gets stuck on a CAPTCHA, a login wall, a 2FA prompt or any page that needs a person, Unstuck pauses it, sends someone a link, lets them work the live browser from their phone, and hands control back.
 
-![The Unstuck viewer on a phone: the agent's live page with Keyboard, Can't solve and Done buttons](docs/screenshots/viewer-live-iphone13.png)
+<p align="center">
+  <img src="docs/assets/how-it-works.svg" alt="How Unstuck works: 1. your agent is blocked by a CAPTCHA, 2. you get a link on your phone, 3. you solve it live and tap Done, 4. your agent carries on in the same page and session" width="100%">
+</p>
 
-## Install
+## Why I built it
+
+I was playing with web scrapers, curious how far today's tools could go. One of mine only collected the newest tech news so I could post about it on social media. Sites kept flagging it as a robot anyway, and every CAPTCHA stopped it cold.
+
+Solving the CAPTCHA myself was fine; the problem was getting to it. So I built Unstuck: when the crawler hits a check it can't pass, it hands the live page to me, I approve it as the human I am, and the crawler carries on. A real person answers the check, so the site gets exactly what it asked for.
+
+## Get started: your agent meets a CAPTCHA
+
+### 1. Install
 
 ```bash
-npm install @velmlabs/unstuck     # TypeScript, Node.js 20+
-pip install unstuck               # Python 3.10+
+npm install @velmlabs/unstuck playwright     # TypeScript, Node.js 20+
+npx playwright install chromium
 ```
 
-The engine ships inside the package for macOS (Apple silicon and Intel), Linux and Windows, so there is nothing else to install. Unstuck drives Chromium-based browsers: [requirements](https://unstuck.sh/docs/requirements/).
+```bash
+pip install unstuck playwright               # Python 3.10+
+python -m playwright install chromium
+```
 
-New here? The [quickstart](https://unstuck.sh/docs/quickstart/) gets you to a first takeover in two minutes.
+The engine ships inside the package for macOS (Apple silicon and Intel), Linux and Windows, so there is nothing else to install. Unstuck drives Chromium-based browsers ([requirements](https://unstuck.sh/docs/requirements/)).
 
-## One call where your agent gets stuck
+### 2. Add one call where your agent gets stuck
 
-With Playwright (`npm install @velmlabs/unstuck playwright`):
+Your agent browses as usual. When it lands on a CAPTCHA, it asks for help and waits:
 
 ```ts
 import { chromium } from 'playwright';
@@ -25,16 +38,56 @@ import { Unstuck } from '@velmlabs/unstuck';
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
-await page.goto('https://www.google.com/recaptcha/api2/demo');
+await page.goto('https://www.google.com/recaptcha/api2/demo'); // a page with a CAPTCHA
 
 const unstuck = new Unstuck({ onLink: ({ url }) => console.log('Open this link:', url) });
 const result = await unstuck.takeover(page, { reason: 'Please solve the CAPTCHA' });
-console.log(result.status); // 'resolved' | 'cancelled' | 'timed_out' | 'failed'
+
+if (result.status === 'resolved') {
+  // The CAPTCHA is solved: carry on in the same page, with the same cookies and session.
+}
 ```
 
-The person opens the link, sees your agent's live page, taps and types into it, then taps **Done**. `takeover()` returns, and your agent carries on in the same page with the same cookies and session.
+<details><summary>The same in Python</summary>
 
-By default the link opens on the agent's own machine. To open it on a phone, from anywhere, see [Local or Unstuck Cloud](#local-or-unstuck-cloud).
+```python
+async with Unstuck(on_link=lambda link: print("Open this link:", link.url)) as unstuck:
+    result = await unstuck.takeover(page, reason="Please solve the CAPTCHA")
+if result.status == "resolved":
+    ...  # carry on in the same page
+```
+
+</details>
+
+`takeover()` returns `resolved`, `cancelled` (the person tapped **Can't solve**), `timed_out` or `failed`.
+
+### 3. Solve it from your phone
+
+Run your agent and open the printed link. You see the agent's live page: tap the checkbox, pick the images, type a code, then tap **Done**. The agent picks up where it stopped.
+
+By default the link opens only on the machine your agent runs on. To get it on your phone, from anywhere, create a free API key at [unstuck.sh](https://unstuck.sh) (100 takeovers a month) and set it:
+
+```bash
+export UNSTUCK_API_KEY=uk_live_…
+```
+
+Nothing else in your code changes. The whole quickstart, with every option: [unstuck.sh/docs/quickstart](https://unstuck.sh/docs/quickstart/).
+
+<p align="center">
+  <img src="docs/screenshots/viewer-live-iphone13.png" alt="The Unstuck viewer on a phone: the agent's live page with Keyboard, Can't solve and Done buttons" width="260">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/viewer-done-iphone13.png" alt="The viewer after Done: control is back with the agent" width="260">
+</p>
+
+### Using Claude Code, Cursor or another AI agent?
+
+Give it a `request_human_takeover` tool. Start Chrome with a debugging port, then add Unstuck as an MCP server:
+
+```bash
+claude mcp add unstuck -e UNSTUCK_CDP_URL=http://127.0.0.1:9222 -- npx -y @velmlabs/unstuck-engine --mcp --open
+```
+
+Tell your agent: *"If you hit a CAPTCHA or a login, call request_human_takeover with the reason."* Setup for Claude Desktop and Cursor: [unstuck.sh/docs/mcp](https://unstuck.sh/docs/mcp/).
 
 ## Works with
 
@@ -47,14 +100,6 @@ By default the link opens on the agent's own machine. To open it on a phone, fro
 | Any Chromium over CDP, Selenium, hosted browsers | [unstuck.sh/docs/any-browser](https://unstuck.sh/docs/any-browser) | [`examples/cdp`](examples/cdp), [`examples/selenium`](examples/selenium) |
 
 Full docs: **https://unstuck.sh/docs**
-
-## MCP in one line
-
-```bash
-claude mcp add unstuck -e UNSTUCK_CDP_URL=http://127.0.0.1:9222 -- npx -y @velmlabs/unstuck-engine --mcp --open
-```
-
-Your agent gets a `request_human_takeover` tool that attaches to the Chrome on port 9222.
 
 ## Local or Unstuck Cloud
 
