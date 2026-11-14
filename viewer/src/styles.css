@@ -158,10 +158,9 @@ body {
 /* Where the person is typing: drawn by Unstuck over the mirror, never part of the page. */
 .focus-ring {
   position: absolute;
-  box-sizing: border-box;
-  border: 2px solid var(--color-accent);
-  border-radius: 6px;
-  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+  /* drawn just outside the field's edge, so it never covers or doubles the page's own border */
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--color-accent), 0 0 0 5px rgba(34, 197, 94, 0.3);
   pointer-events: none;
   transition: left 120ms ease, top 120ms ease, width 120ms ease, height 120ms ease;
 }

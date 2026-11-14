@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bridgeBox, hitField, liftOffset } from '../src/fields';
+import { bridgeBox, fieldBox, hitField, liftOffset } from '../src/fields';
 
 const otp = { x: 100, y: 200, w: 300, h: 40, kind: 'otp' as const };
 const email = { x: 100, y: 300, w: 300, h: 40, kind: 'email' as const };
@@ -37,5 +37,17 @@ describe('liftOffset', () => {
     expect(liftOffset({ top: 100, height: 40 }, 500, 60)).toBe(0);
     expect(liftOffset({ top: 450, height: 40 }, 400, 60)).toBe(60 + 450 + 40 - (400 - 12));
     expect(liftOffset({ top: 0, height: 40 }, 0, 0)).toBe(0); // no viewport information: leave it
+  });
+});
+
+describe('fieldBox (the outline)', () => {
+  const canvas = { left: 0, top: 50, width: 640, height: 360 };
+  const page = { width: 1280, height: 720 };
+  it('is the field exactly, with no minimum size (a 44×52 code box on a half-size mirror is 22×26)', () => {
+    expect(fieldBox({ x: 40, y: 200, w: 44, h: 52, kind: 'numeric' }, canvas, page)).toEqual({ left: 20, top: 150, width: 22, height: 26 });
+  });
+  it('matches the typing box for a field that is already large enough', () => {
+    expect(fieldBox(otp, canvas, page)).toEqual({ left: 50, top: 150, width: 150, height: 20 });
+    expect(bridgeBox(otp, canvas, page)).toEqual({ left: 50, top: 150, width: 150, height: 32 });
   });
 });

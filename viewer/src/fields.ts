@@ -22,20 +22,26 @@ export function hitField(fields: Field[], p: { x: number; y: number }): Field | 
   return fields.find((f) => p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h) ?? null;
 }
 
-/**
- * Where the bridge goes, in CSS px relative to the mirror's container: over the field (scaled from page px, following
- * the letterbox), or over the bottom strip of the mirror when there is no field.
- */
-export function bridgeBox(field: Field | null, canvas: Rect, page: Size): Box {
-  if (!field) return { left: canvas.left, top: canvas.top + canvas.height - STRIP_H, width: canvas.width, height: STRIP_H };
+/** Where a field sits over the mirror, in CSS px relative to the mirror's container, exactly (the focus outline). */
+export function fieldBox(field: Field, canvas: Rect, page: Size): Box {
   const fit = fitContain(canvas, page);
   const k = fit.width / page.width || 0;
   return {
     left: Math.round(canvas.left + fit.left + field.x * k),
     top: Math.round(canvas.top + fit.top + field.y * k),
-    width: Math.max(MIN_W, Math.round(field.w * k)),
-    height: Math.max(MIN_H, Math.round(field.h * k)),
+    width: Math.round(field.w * k),
+    height: Math.round(field.h * k),
   };
+}
+
+/**
+ * Where the bridge goes: over the field, at least MIN_W×MIN_H (iOS won't repeat a held Backspace in a tiny input),
+ * or over the bottom strip of the mirror when there is no field.
+ */
+export function bridgeBox(field: Field | null, canvas: Rect, page: Size): Box {
+  if (!field) return { left: canvas.left, top: canvas.top + canvas.height - STRIP_H, width: canvas.width, height: STRIP_H };
+  const box = fieldBox(field, canvas, page);
+  return { ...box, width: Math.max(MIN_W, box.width), height: Math.max(MIN_H, box.height) };
 }
 
 /** How many px to move the mirror up so `box` (relative to a container at `containerTop`) sits above the keyboard. */

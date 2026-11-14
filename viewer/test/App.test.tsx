@@ -476,6 +476,17 @@ describe('incomplete links and the six-digit code', () => {
       expect(boxOf(ring())).toEqual(['100px', '150px', '200px', '40px']);
     });
 
+    it('the outline fits a small field exactly, while the typing box keeps the size iOS needs', () => {
+      setup();
+      const canvas = goLive();
+      const box = { x: 100, y: 100, w: 44, h: 52, kind: 'numeric' as const }; // on the 640×360 canvas: 50,50 22×26
+      act(() => handlers.onFields?.([box]));
+      tap(canvas, 60, 60);
+      expect(boxOf(ring())).toEqual(['50px', '50px', '22px', '26px']);
+      const bridge = screen.getByTestId('keyboard-bridge') as HTMLInputElement;
+      expect([bridge.style.width, bridge.style.height]).toEqual(['44px', '32px']);
+    });
+
     it('the outline (and the typing box) follow the page when it moves focus to another field', () => {
       const { canvas, bridge } = live();
       tap(canvas, 150, 170);

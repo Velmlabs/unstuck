@@ -4,7 +4,7 @@ import { connect as defaultConnect, e2eCodec, type Codec, type ConnectionHandler
 import { importE2eKey } from '@velmlabs/unstuck-protocol';
 import { drawFrameOnCanvas } from './draw';
 import { attachBridge, configureBridge } from './bridge';
-import { bridgeBox, hitField, liftOffset, type Box } from './fields';
+import { bridgeBox, fieldBox, hitField, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { clampToPage, toPagePoint } from './mapping';
 import { parseFragment, sessionIdFromPath, wsUrlFor } from './url';
@@ -217,16 +217,18 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
     el.focus({ preventScroll: true }); // inside the tap's own handler, or iOS won't open the keyboard
     setChip(null);
-    setRing(field ? box : null);
+    setRing(field ? ringOver(field) : null);
     relift(); // the keyboard may already be open (another field was being typed into)
   };
   /** Where a field (or, for null, the mirror's bottom strip) sits over the mirror, in CSS px of the stage. */
-  const boxOver = (field: Field | null): Box => {
-    const c = canvasRef.current!;
-    const cr = c.getBoundingClientRect();
+  const canvasRect = () => {
+    const cr = canvasRef.current!.getBoundingClientRect();
     const sr = stageRef.current!.getBoundingClientRect();
-    return bridgeBox(field, { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height }, pageSize.current);
+    return { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height };
   };
+  const boxOver = (field: Field | null): Box => bridgeBox(field, canvasRect(), pageSize.current);
+  /** The outline: the field's exact box, with no minimum size. */
+  const ringOver = (field: Field): Box => fieldBox(field, canvasRect(), pageSize.current);
   /** Moves the outline and the typing box over the field the page now focuses, keeping the keyboard open. */
   const placeOver = (field: Field) => {
     const el = bridgeRef.current;
@@ -234,7 +236,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const box = boxOver(field);
     Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
     bridgeBoxRef.current = box;
-    setRing(box);
+    setRing(ringOver(field));
     relift();
   };
   /** Lifts the mirror so the tapped field sits above the keyboard (the visual viewport), or drops the lift. */
