@@ -63,7 +63,7 @@ export const EngineToViewerSchema = Type.Union([
   Type.Object({ t: Lit('error'), code: Type.Union(ViewerErrorCodes.map((c) => Lit(c))), message: Type.String() }),
   Type.Object({ t: Lit('pong') }),
   Type.Object({ t: Lit('fields'), fields: Type.Array(FieldSchema, { maxItems: 30 }) }),
-  Type.Object({ t: Lit('focus'), kind: Type.Union([FieldKindSchema, Type.Null()]) }),
+  Type.Object({ t: Lit('focus'), kind: Type.Union([FieldKindSchema, Type.Null()]), field: Type.Optional(FieldSchema) }),
 ]);
 export type EngineToViewer =
   | { t: 'ready'; reason: string; site: string; expiresAt: number; resumeKey: string }
@@ -71,7 +71,8 @@ export type EngineToViewer =
   | { t: 'error'; code: ViewerErrorCode; message: string }
   | { t: 'pong' }
   | { t: 'fields'; fields: Field[] }
-  | { t: 'focus'; kind: FieldKind | null };
+  /** `field`: where the focused field is (engine 0.1.3+), so the viewer can outline it; never its value. */
+  | { t: 'focus'; kind: FieldKind | null; field?: Field };
 
 export function parseViewerMessage(raw: string): ViewerToEngine | null {
   let v: unknown;

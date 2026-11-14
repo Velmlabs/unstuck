@@ -65,23 +65,28 @@ export const SCAN_SOURCE = `(() => {
   return found.sort((a, b) => d(a) - d(b)).slice(0, 30);
 })()`;
 
-/** In-page: the kind of the focused element (through shadow roots and same-origin frames), 'text' for a focused
- * cross-origin frame (a field there is the likely case), or null. */
+/** In-page: the focused field and its box (through shadow roots and same-origin frames, offset by each frame), a
+ * focused cross-origin frame as a text field with the frame's box (a field there is the likely case), or null. */
 export const FOCUS_SOURCE = `(() => {
   ${KIND_OF}
-  let el = document.activeElement;
+  const box = (r, kind, ox, oy) => ({ x: Math.round(r.left + ox), y: Math.round(r.top + oy), w: Math.round(r.width), h: Math.round(r.height), kind });
+  let el = document.activeElement, ox = 0, oy = 0;
   for (let i = 0; el && i < 20; i++) {
     if (el.shadowRoot && el.shadowRoot.activeElement) { el = el.shadowRoot.activeElement; continue; }
     if (el.tagName === 'IFRAME') {
       let doc = null;
       try { doc = el.contentDocument; } catch (e) { doc = null; }
-      if (!doc) return 'text';
+      const fr = el.getBoundingClientRect();
+      if (!doc) return box(fr, 'text', ox, oy);
+      ox += fr.left + el.clientLeft;
+      oy += fr.top + el.clientTop;
       el = doc.activeElement;
       continue;
     }
     break;
   }
-  return kindOf(el);
+  const kind = kindOf(el);
+  return kind ? box(el.getBoundingClientRect(), kind, ox, oy) : null;
 })()`;
 
 const isKind = (k: unknown): k is FieldKind => (FieldKinds as readonly unknown[]).includes(k);
@@ -105,8 +110,8 @@ export async function scanFields(cdp: CdpClient): Promise<Field[]> {
   return Array.isArray(v) ? v.filter(isField).map(({ x, y, w, h, kind }) => ({ x, y, w, h, kind })) : [];
 }
 
-/** What kind of field has focus now, or null. Never throws. */
-export async function focusedKind(cdp: CdpClient): Promise<FieldKind | null> {
+/** The focused field with its box (never its value), or null. Never throws. */
+export async function focusedField(cdp: CdpClient): Promise<Field | null> {
   const v = await evaluate(cdp, FOCUS_SOURCE);
-  return isKind(v) ? v : null;
+  return isField(v) ? { x: v.x, y: v.y, w: v.w, h: v.h, kind: v.kind } : null;
 }

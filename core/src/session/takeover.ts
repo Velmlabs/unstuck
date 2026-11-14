@@ -17,7 +17,7 @@ import { startScreencast } from '../stream/screencast';
 import { startScreenshotPolling } from '../stream/poll';
 import { probeCapabilities, type Capabilities } from '../capabilities';
 import { applyInput } from '../stream/input';
-import { scanFields, focusedKind } from '../stream/fields';
+import { scanFields, focusedField } from '../stream/fields';
 import { browserPlatformIsMac, translateShortcut } from '../stream/shortcuts';
 import { createFieldFeed } from './field-feed';
 import { createLatestSender } from '../stream/latest';
@@ -140,7 +140,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   /** Native typing: where the fields are on the shown page, and what took focus (never their values). */
   const fieldFeed = createFieldFeed({
     scan: () => scanFields(active().cdp),
-    focus: () => focusedKind(active().cdp),
+    focus: () => focusedField(active().cdp),
     send: (m) => void (holder && sendJson(holder, m)),
   });
   const go = (ev: SessionEvent) => {

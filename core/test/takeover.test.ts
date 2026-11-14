@@ -535,7 +535,7 @@ describe('messages that arrive while the hello is still being handled', () => {
   it('native typing: a joined viewer gets the field map after the first frame, and taps report focus', async () => {
     const otp = { x: 10, y: 20, w: 100, h: 40, kind: 'otp' };
     const t = setupWith((cdp) =>
-      cdp.respond('Runtime.evaluate', (p) => ({ result: { value: String((p as { expression: string }).expression).includes('activeElement') ? 'otp' : [otp] } })),
+      cdp.respond('Runtime.evaluate', (p) => ({ result: { value: String((p as { expression: string }).expression).includes('activeElement') ? otp : [otp] } })),
     );
     await settle();
     const v = await t.join();
@@ -546,7 +546,7 @@ describe('messages that arrive while the hello is still being handled', () => {
     v.push({ t: 'mouse', action: 'up', x: 15, y: 25, button: 'left', clickCount: 1, modifiers: 0 });
     v.push({ t: 'text', text: '4' });
     await settle();
-    expect(v.json()).toContainEqual({ t: 'focus', kind: 'otp' });
+    expect(v.json()).toContainEqual({ t: 'focus', kind: 'otp', field: otp });
     const order = t.cdp.calls.filter((c) => c.method.startsWith('Input.')).map((c) => c.method + ':' + ((c.params as { type?: string }).type ?? ''));
     // The first calls are the capability probe at start; the viewer's inputs follow, in order.
     expect(order.slice(-3)).toEqual(['Input.dispatchMouseEvent:mousePressed', 'Input.dispatchMouseEvent:mouseReleased', 'Input.insertText:']);

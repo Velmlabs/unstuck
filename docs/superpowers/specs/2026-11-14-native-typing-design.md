@@ -60,7 +60,7 @@ No change to viewer → engine messages: the engine validates `hello` strictly, 
   |---|---|---|---|
   | `otp` | `numeric` | `one-time-code` | `text` |
   | `numeric` | `numeric` | `off` | `text` |
-  | `email` | `email` | `off` | `email` |
+  | `email` | `email` | `off` | `text` (Safari can't set a caret in `type=email`) |
   | `password` | `text` | `off` | `password` |
   | `text` | `text` | `off` | `text` |
 
@@ -96,6 +96,10 @@ Every key the person presses must reach the agent's page, on soft keyboards (iPh
 - **The bridge is full size, over the tapped field.** Measured on an iPad (Safari 18.7, owner, hold-Backspace lab): iOS auto-repeats a held Backspace in a full-size input whether it is invisible by `opacity: 0` or by transparent text and caret, and stops after one delete in a 1×1 px input, on screen or off. Today's bridge is a 1×1 px off-screen input, so a held Backspace is broken in the current viewer. The bridge therefore sits exactly over the tapped field's rectangle in the mirror (minimum 44×32 CSS px), with transparent text, caret and background, no border, `pointer-events: none` (taps still reach the mirror), and `font-size: 16px` so iOS doesn't zoom on focus. With the Keyboard button or the "Type here" chip (no field rectangle known), it sits over the bottom of the mirror.
 - **A reserve of invisible characters** (64 × U+200B, caret at the end) replaces the single one: a plain Backspace is allowed to delete one for real (iOS repeats only while text changes), each deletion sends one Backspace, and the reserve is topped up when fewer than 16 are left.
 - Spike: https://unstuck-keyboard-spike.zeandcode.workers.dev (v5; lab at /hold) shows a checklist that lights up per key class; the owner's iPad results decide the iOS details.
+
+## Where the person is typing (owner, after the iPad check)
+
+Pages show focus very differently, and some (an invisible input over drawn code boxes) show none at all, so the viewer draws its own green outline around the field being typed into, in Unstuck's layer over the mirror (the page is never changed). The engine's `focus` report carries the focused field's box (`field`, optional; never its value), and focus is reported after typed keys as well as taps, so the outline and the bridge follow a widget that moves focus to its next box. The viewer counts taps and typed keys sent and acts only on the newest report. No outline without a known field (Keyboard button, chip) until a report with a box arrives.
 
 ## Goals, non-goals, anti-goals
 

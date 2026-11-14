@@ -466,6 +466,47 @@ describe('incomplete links and the six-digit code', () => {
       expect(sent).toEqual([{ t: 'text', text: 'hello there' }]);
     });
 
+    const ring = () => document.querySelector('[data-testid="focus-ring"]') as HTMLElement | null;
+    const boxOf = (el: HTMLElement | null) => el && [el.style.left, el.style.top, el.style.width, el.style.height];
+
+    it('a green outline marks the field being typed into, on the mirror', () => {
+      const { canvas } = live();
+      expect(ring()).toBeNull();
+      tap(canvas, 150, 170);
+      expect(boxOf(ring())).toEqual(['100px', '150px', '200px', '40px']);
+    });
+
+    it('the outline (and the typing box) follow the page when it moves focus to another field', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 150, 170);
+      act(() => handlers.onFocus?.('otp', otp)); // the report for the tap: same field
+      act(() => handlers.onFocus?.('text', text)); // typing moved focus to the next field
+      expect(boxOf(ring())).toEqual(['100px', '250px', '200px', '40px']);
+      expect(boxOf(bridge)).toEqual(['100px', '250px', '200px', '40px']);
+      expect(document.activeElement).toBe(bridge);
+    });
+
+    it('no outline once the keyboard closes; the Keyboard button shows one only when the page reports a field', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 150, 170);
+      act(() => bridge.blur());
+      expect(ring()).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /^keyboard$/i }));
+      expect(ring()).toBeNull();
+      act(() => handlers.onFocus?.('text', text));
+      expect(boxOf(ring())).toEqual(['100px', '250px', '200px', '40px']);
+    });
+
+    it('typing counts as an input that gets a focus report, so a report for a key press is not taken for a tap', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 150, 170);
+      act(() => void bridge.dispatchEvent(new KeyboardEvent('keydown', { key: '4', code: 'Digit4', bubbles: true, cancelable: true })));
+      act(() => handlers.onFocus?.(null)); // the late report for the tap
+      expect(document.activeElement).toBe(bridge); // the key press's report is still to come
+      act(() => handlers.onFocus?.('otp', otp));
+      expect(document.activeElement).toBe(bridge);
+    });
+
     it('Final: without a field map, a tap on the mirror keeps the keyboard opened with the Keyboard button', () => {
       setup();
       const canvas = goLive();

@@ -106,6 +106,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   /** Taps sent whose focus report hasn't arrived yet: only the newest tap's report may open or close anything. */
   const awaitingFocus = useRef(0);
   const [chip, setChip] = useState<FieldKind | null>(null);
+  /** The green outline around the field being typed into (Unstuck's own layer, never the page). */
+  const [ring, setRing] = useState<Box | null>(null);
   const sockRef = useRef<ViewerSocket | null>(null);
   const pageSize = useRef({ width: 0, height: 0 });
   const moveQueued = useRef(false);
@@ -114,7 +116,11 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const liveRef = useRef(live);
   liveRef.current = live && !asking;
 
-  const send = useCallback((m: ViewerToEngine) => sockRef.current?.send(m), []);
+  const send = useCallback((m: ViewerToEngine) => {
+    // The engine answers each tap and each typed key with a focus report: count them, so only the newest report acts.
+    if ((m.t === 'mouse' && m.action === 'up') || (m.t === 'key' && m.action === 'down') || m.t === 'text') awaitingFocus.current++;
+    sockRef.current?.send(m);
+  }, []);
 
   useEffect(() => {
     if (!link || !token || !sessionId) return;
@@ -122,15 +128,16 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const sock = connectFn(wsUrlFor(location.origin, sessionId), token, lazyCodec(link.key, sessionId), {
       onCodeRequest: (invalid) => setCodeAsk({ invalid }),
       onFields: (fields) => void (fieldsRef.current = fields),
-      onFocus: (kind) => {
+      onFocus: (kind, field) => {
         awaitingFocus.current = Math.max(0, awaitingFocus.current - 1);
-        if (awaitingFocus.current > 0) return; // a report for an earlier tap: a newer one is on its way
+        if (awaitingFocus.current > 0) return; // a report for an earlier input: a newer one is on its way
         const typing = document.activeElement === bridgeRef.current;
         if (kind === null) {
           setChip(null);
           // The map said "field" but the page didn't take focus there: no keyboard over a non-field.
           if (typing && mappedTap.current) closeBridge();
         } else if (!typing) setChip(kind);
+        else if (field) placeOver(field); // the page moved focus (e.g. to a code widget's next box): follow it
       },
       onReady: (r) => {
         setCodeAsk(null);
@@ -202,9 +209,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const c = canvasRef.current;
     const stage = stageRef.current;
     if (!el || !c || !stage) return;
-    const cr = c.getBoundingClientRect();
-    const sr = stage.getBoundingClientRect();
-    const box = bridgeBox(field, { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height }, pageSize.current);
+    const box = boxOver(field);
     configureBridge(el, kind);
     bridgeKind.current = kind;
     bridgeBoxRef.current = field ? box : null; // only a tapped field is kept in view above the keyboard
@@ -212,7 +217,25 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
     el.focus({ preventScroll: true }); // inside the tap's own handler, or iOS won't open the keyboard
     setChip(null);
+    setRing(field ? box : null);
     relift(); // the keyboard may already be open (another field was being typed into)
+  };
+  /** Where a field (or, for null, the mirror's bottom strip) sits over the mirror, in CSS px of the stage. */
+  const boxOver = (field: Field | null): Box => {
+    const c = canvasRef.current!;
+    const cr = c.getBoundingClientRect();
+    const sr = stageRef.current!.getBoundingClientRect();
+    return bridgeBox(field, { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height }, pageSize.current);
+  };
+  /** Moves the outline and the typing box over the field the page now focuses, keeping the keyboard open. */
+  const placeOver = (field: Field) => {
+    const el = bridgeRef.current;
+    if (!el || !canvasRef.current || !stageRef.current) return;
+    const box = boxOver(field);
+    Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
+    bridgeBoxRef.current = box;
+    setRing(box);
+    relift();
   };
   /** Lifts the mirror so the tapped field sits above the keyboard (the visual viewport), or drops the lift. */
   const relift = () => {
@@ -270,7 +293,6 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     pressed.current = null;
     e.preventDefault();
     send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers: modifiersOf(e) });
-    awaitingFocus.current++;
   };
 
   const cancel = (e: PointerEvent) => {
@@ -329,7 +351,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     if (!el || !form) return;
     configureBridge(el, 'text');
     const detach = attachBridge(el, form, { send, kind: () => bridgeKind.current });
-    const unlift = () => void (stageRef.current && (stageRef.current.style.transform = ''));
+    const unlift = () => {
+      if (stageRef.current) stageRef.current.style.transform = '';
+      setRing(null);
+    };
     el.addEventListener('blur', unlift);
     return () => {
       detach();
@@ -390,6 +415,14 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
             </svg>
           </button>
         </div>
+        {ring ? (
+          <div
+            data-testid="focus-ring"
+            class="focus-ring"
+            aria-hidden="true"
+            style={{ left: `${ring.left}px`, top: `${ring.top}px`, width: `${ring.width}px`, height: `${ring.height}px` }}
+          />
+        ) : null}
         <form ref={formRef} class="keyboard-form" action="#">
           <input ref={bridgeRef} data-testid="keyboard-bridge" class="keyboard-bridge" aria-label="Type into the agent's page" />
         </form>

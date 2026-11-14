@@ -155,6 +155,17 @@ body {
   pointer-events: none;
 }
 
+/* Where the person is typing: drawn by Unstuck over the mirror, never part of the page. */
+.focus-ring {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid var(--color-accent);
+  border-radius: 6px;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3);
+  pointer-events: none;
+  transition: left 120ms ease, top 120ms ease, width 120ms ease, height 120ms ease;
+}
+
 .type-here {
   position: absolute;
   left: 50%;

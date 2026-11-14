@@ -1,7 +1,7 @@
 // Keeps the viewer's field map current: scans on frames (at most every 500 ms), right after inputs that can move or
 // focus things (tap, scroll, key), and when the shown target changes; reports focus after taps. Sends a map only when
 // it changed, re-sends it every 5 s in case one was dropped, and never sends an empty map nobody needs.
-import type { EngineToViewer, Field, FieldKind, ViewerInput } from '@velmlabs/unstuck-protocol';
+import type { EngineToViewer, Field, ViewerInput } from '@velmlabs/unstuck-protocol';
 
 export interface FieldFeed {
   onFrame(): void;
@@ -14,7 +14,7 @@ export interface FieldFeed {
 const FRAME_INTERVAL_MS = 500;
 const RESEND_MS = 5000;
 
-export function createFieldFeed(deps: { scan: () => Promise<Field[]>; focus: () => Promise<FieldKind | null>; send: (m: EngineToViewer) => void }): FieldFeed {
+export function createFieldFeed(deps: { scan: () => Promise<Field[]>; focus: () => Promise<Field | null>; send: (m: EngineToViewer) => void }): FieldFeed {
   let stopped = false;
   let lastScanAt = -Infinity;
   let last: Field[] = [];
@@ -77,12 +77,14 @@ export function createFieldFeed(deps: { scan: () => Promise<Field[]>; focus: () 
     onInput(msg) {
       if (stopped) return;
       const tap = msg.t === 'mouse' && msg.action === 'up';
-      if (!(tap || msg.t === 'wheel' || (msg.t === 'key' && msg.action === 'down') || msg.t === 'text')) return;
+      const typed = (msg.t === 'key' && msg.action === 'down') || msg.t === 'text';
+      if (!(tap || typed || msg.t === 'wheel')) return;
       request(true);
-      if (tap)
+      // After taps and typing: what has focus now, and where (a widget may move focus to its next box as you type).
+      if (tap || typed)
         deps
           .focus()
-          .then((kind) => void (stopped || deps.send({ t: 'focus', kind })))
+          .then((field) => void (stopped || deps.send(field ? { t: 'focus', kind: field.kind, field } : { t: 'focus', kind: null })))
           .catch(() => {});
     },
     onTargetChanged() {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRequire } from 'node:module';
 import type { CdpClient } from '../src/cdp';
-import { scanFields, focusedKind } from '../src/stream/fields';
+import { scanFields, focusedField } from '../src/stream/fields';
 
 // A real Chromium page driven through real CDP, so the in-page scanner is tested where it runs.
 // Minimal local types (as sdk-ts/test/helpers.ts does): playwright is a test-only tool here, not a dependency.
@@ -114,14 +114,20 @@ describe('scanFields (in a real page)', () => {
   });
 });
 
-describe('focusedKind (in a real page)', () => {
-  it('reports the focused field kind, null for none, and text for a focused cross-origin frame', async () => {
-    await show(`<input id=e type=email><button id=b>b</button><iframe id=x sandbox="allow-scripts" srcdoc="<input>"></iframe>`);
+describe('focusedField (in a real page)', () => {
+  it('reports the focused field with its box, null for none, and a focused cross-origin frame as a text field', async () => {
+    await show(`<input id=e type=email style="position:absolute;left:10px;top:20px;width:200px;height:30px">
+      <iframe id=x sandbox="allow-scripts" srcdoc="<input>" style="position:absolute;left:10px;top:100px;width:300px;height:80px;border:0"></iframe>
+      <iframe id=same srcdoc="<body style='margin:0'><input id=in type=tel style='box-sizing:border-box;position:absolute;left:5px;top:6px;width:50px;height:20px'></body>" style="position:absolute;left:200px;top:300px;width:150px;height:100px;border:0"></iframe>`);
     await page.focus('#e');
-    expect(await focusedKind(cdp)).toBe('email');
+    expect(await focusedField(cdp)).toEqual({ x: 10, y: 20, w: 200, h: 30, kind: 'email' });
     await page.evaluate(() => (document.activeElement as HTMLElement).blur());
-    expect(await focusedKind(cdp)).toBe(null);
+    expect(await focusedField(cdp)).toBe(null);
     await page.evaluate(() => document.getElementById('x')!.focus());
-    expect(await focusedKind(cdp)).toBe('text');
+    expect(await focusedField(cdp)).toEqual({ x: 10, y: 100, w: 300, h: 80, kind: 'text' });
+    await page.waitForFunction(() => (document.getElementById('same') as HTMLIFrameElement).contentDocument?.getElementById('in'));
+    await page.focus('#e'); // focus back in the top page first: a cross-origin frame keeps focus from scripts
+    await page.evaluate(() => ((document.getElementById('same') as HTMLIFrameElement).contentDocument!.getElementById('in') as HTMLElement).focus());
+    expect(await focusedField(cdp)).toEqual({ x: 205, y: 306, w: 50, h: 20, kind: 'numeric' });
   });
 });

@@ -13,8 +13,8 @@ export interface ConnectionHandlers {
   onCodeRequest?(invalid: boolean): void;
   /** Native typing: where the typable fields are on the page (engine 0.1.3+). */
   onFields?(fields: Field[]): void;
-  /** Native typing: what took focus after the last tap. */
-  onFocus?(kind: FieldKind | null): void;
+  /** Native typing: what has focus after a tap or a key, and where it is (engine 0.1.3+). */
+  onFocus?(kind: FieldKind | null, field?: Field): void;
 }
 
 /**
@@ -100,7 +100,7 @@ export function connect(
       if (FATAL.has(m.code)) stopped = true;
       h.onError(m.code, m.message);
     } else if (m.t === 'fields') h.onFields?.(m.fields);
-    else if (m.t === 'focus') h.onFocus?.(m.kind);
+    else if (m.t === 'focus') h.onFocus?.(m.kind, m.field);
   };
 
   const open = () => {

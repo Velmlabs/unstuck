@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { EngineToViewer, Field, FieldKind, ViewerInput } from '@velmlabs/unstuck-protocol';
+import type { EngineToViewer, Field, ViewerInput } from '@velmlabs/unstuck-protocol';
 import { createFieldFeed } from '../src/session/field-feed';
 
 const otp: Field = { x: 10, y: 20, w: 100, h: 40, kind: 'otp' };
@@ -12,7 +12,7 @@ const flush = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve();
 };
 
-function setup(fields: Field[] = [otp], focus: FieldKind | null = 'otp') {
+function setup(fields: Field[] = [otp], focus: Field | null = otp) {
   const sent: EngineToViewer[] = [];
   let map = fields;
   const scan = vi.fn(async () => map);
@@ -67,11 +67,11 @@ describe('field feed', () => {
   });
 
   it('a mouse up also reports what took focus', async () => {
-    const t = setup([otp], 'email');
+    const t = setup([otp], email);
     t.feed.onInput(up);
     await flush();
     expect(t.focusFn).toHaveBeenCalledTimes(1);
-    expect(t.sent).toContainEqual({ t: 'focus', kind: 'email' });
+    expect(t.sent).toContainEqual({ t: 'focus', kind: 'email', field: email });
     const n = setup([otp], null);
     n.feed.onInput(up);
     await flush();
@@ -153,5 +153,14 @@ describe('field feed', () => {
     release();
     await flush();
     expect(t.sent.filter((m) => m.t === 'fields')).toHaveLength(2);
+  });
+
+  it('typing also reports focus, so the outline follows a widget that moves focus to the next box', async () => {
+    const t = setup([otp], email);
+    t.feed.onInput(key);
+    t.feed.onInput({ t: 'text', text: '4' });
+    t.feed.onInput(wheel); // a scroll moves nothing's focus
+    await flush();
+    expect(t.focusFn).toHaveBeenCalledTimes(2);
   });
 });

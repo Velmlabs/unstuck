@@ -298,6 +298,14 @@ describe('native typing on a simulated phone', () => {
     await human.keyboard.insertText('482913');
     await expect.poll(() => page.inputValue('#overlay'), { timeout: 10_000 }).toBe('482913');
     await tapToType(human, page, '#split input:first-child');
+    // The green outline marks the box being typed into, and moves when the page moves focus to the next box.
+    const ringX = () => human.evaluate(() => document.querySelector('[data-testid="focus-ring"]')?.getBoundingClientRect().x ?? null);
+    const firstX = await ringX();
+    expect(firstX).not.toBeNull();
+    await human.keyboard.type('4');
+    await expect.poll(ringX, { timeout: 10_000 }).toBeGreaterThan(firstX);
+    await page.evaluate("document.querySelectorAll('#split input').forEach((el) => (el.value = ''))");
+    await tapToType(human, page, '#split input:first-child');
     await human.keyboard.insertText('482913');
     await expect.poll(() => page.evaluate('window.splitValue()'), { timeout: 10_000 }).toBe('482913');
     // A mistake in six one-digit boxes: Backspace in an empty box jumps back and erases, as real widgets do.

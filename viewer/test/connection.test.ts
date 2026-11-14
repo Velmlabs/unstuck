@@ -302,7 +302,7 @@ describe('connect', () => {
     FakeWs.all[0]!.msg({ t: 'focus', kind: 'email' });
     await flush();
     expect(h.onFields).toHaveBeenCalledWith([{ x: 1, y: 2, w: 3, h: 4, kind: 'otp' }]);
-    expect(h.onFocus).toHaveBeenCalledWith('email');
+    expect(h.onFocus).toHaveBeenCalledWith('email', undefined);
     const old = handlers(); // no onFields/onFocus
     connect('ws://x/ws/abc', 'TOK', plain, old, { WebSocketImpl: FakeWs as never });
     FakeWs.all[1]!.open();
