@@ -10,6 +10,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   test:
+    # Private repos have limited Actions minutes: run only once the repository is public (skipped jobs cost nothing).
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:

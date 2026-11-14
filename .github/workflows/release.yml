@@ -8,6 +8,8 @@
 #   - GitHub → repository Settings → Environments → create `release` with required reviewers
 #
 # Run: Actions → Release → Run workflow (on main, after bumping the version and committing).
+# Until the repository is public, its jobs are skipped: release from a developer machine with pnpm release /
+# pnpm release:publish (NPM_TOKEN and PYPI_TOKEN set only for the publish step).
 name: Release
 on:
   workflow_dispatch:
@@ -19,6 +21,8 @@ concurrency:
 jobs:
   dry-run:
     # Builds every artifact and proves it from a clean install. It has no credentials of any kind.
+    # Private repos have limited Actions minutes: run only once the repository is public (skipped jobs cost nothing).
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
@@ -49,6 +53,7 @@ jobs:
   publish:
     # Publishes exactly the files the dry run recorded (SHA-256 checked against release/dry-run-passed.json).
     needs: dry-run
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: release
