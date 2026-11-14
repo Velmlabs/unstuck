@@ -2,7 +2,7 @@ import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import type { Transport, ViewerConnection } from '@unstuck/core';
+import type { Transport, ViewerConnection } from '@velmlabs/unstuck-core';
 
 export type AssetMap = Record<string, { type: string; body: string /* base64 */ }>;
 

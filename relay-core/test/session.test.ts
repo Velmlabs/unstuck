@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { encodeEnvelope, decodeEnvelope, RELAY_LIMITS } from '@unstuck/protocol';
+import { encodeEnvelope, decodeEnvelope, RELAY_LIMITS } from '@velmlabs/unstuck-protocol';
 import { RelaySession, newRecord } from '../src/session';
 import type { RelayEvent } from '../src/hooks';
 import { FakeSocket } from './helpers';

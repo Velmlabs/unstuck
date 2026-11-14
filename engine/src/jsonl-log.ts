@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import type { EventLog, UnstuckEvent } from '@unstuck/core';
+import type { EventLog, UnstuckEvent } from '@velmlabs/unstuck-core';
 
 export function defaultLogPath(env: Record<string, string | undefined> = process.env): string {
   return env.UNSTUCK_LOG || path.join(os.homedir(), '.unstuck', 'events.jsonl');

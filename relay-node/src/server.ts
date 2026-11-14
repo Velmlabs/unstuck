@@ -4,8 +4,8 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { KEY_SUBPROTOCOL_PREFIX, RELAY_CLOSE, RELAY_LIMITS, RELAY_SUBPROTOCOL, SESSION_ID_RE } from '@unstuck/protocol';
-import { createRateLimiter, hashKey, newRecord, RelaySession, type Authorize, type OnEvent, type RelaySocket } from '@unstuck/relay-core';
+import { KEY_SUBPROTOCOL_PREFIX, RELAY_CLOSE, RELAY_LIMITS, RELAY_SUBPROTOCOL, SESSION_ID_RE } from '@velmlabs/unstuck-protocol';
+import { createRateLimiter, hashKey, newRecord, RelaySession, type Authorize, type OnEvent, type RelaySocket } from '@velmlabs/unstuck-relay-core';
 
 export interface NodeRelayOptions {
   port?: number;

@@ -9,7 +9,7 @@ import {
   type TakeoverResult,
   type TakeoverStatus,
   type ViewerErrorCode,
-} from '@unstuck/protocol';
+} from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
 import type { EventLog } from '../events';
 import type { Transport, ViewerConnection } from '../transport';

@@ -1,6 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
-import { RELAY_CLOSE, RELAY_SUBPROTOCOL } from '@unstuck/protocol';
-import { newRecord, RelaySession, type OnEvent, type RelaySocket, type SessionRecord } from '@unstuck/relay-core';
+import { RELAY_CLOSE, RELAY_SUBPROTOCOL } from '@velmlabs/unstuck-protocol';
+import { newRecord, RelaySession, type OnEvent, type RelaySocket, type SessionRecord } from '@velmlabs/unstuck-relay-core';
 
 /** Per-socket state that survives hibernation. */
 type Attachment = { role: 'agent'; active: boolean } | { role: 'viewer'; c: number };

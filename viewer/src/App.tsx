@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
-import type { Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@unstuck/protocol';
+import type { Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@velmlabs/unstuck-protocol';
 import { connect as defaultConnect, e2eCodec, type Codec, type ConnectionHandlers, type Phase, type ViewerSocket } from './connection';
-import { importE2eKey } from '@unstuck/protocol';
+import { importE2eKey } from '@velmlabs/unstuck-protocol';
 import { drawFrameOnCanvas } from './draw';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { clampToPage, toPagePoint } from './mapping';

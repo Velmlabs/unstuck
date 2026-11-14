@@ -1,4 +1,4 @@
-import type { ViewerInput } from '@unstuck/protocol';
+import type { ViewerInput } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
 import type { Capabilities } from '../capabilities';
 

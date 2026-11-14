@@ -3,7 +3,7 @@
 Human takeover for AI browser agents. When your agent hits a CAPTCHA, a login wall or a 2FA prompt, `unstuck.takeover(page)` pauses it, gives a human a link to the live browser, and resolves when they're done.
 
 ```ts
-import { Unstuck } from 'unstuck';
+import { Unstuck } from '@velmlabs/unstuck';
 
 const unstuck = new Unstuck({ onLink: ({ url, reason }) => console.log(`${reason}: ${url}`) });
 const result = await unstuck.takeover(page, { reason: 'Solve the CAPTCHA' }); // Playwright or Puppeteer page

@@ -88,7 +88,7 @@ describe('connectCdp against real Chromium (Review Focus 3)', () => {
     const { targetId } = await b.browser.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
     await b.close();
     const cdp = await connectCdp(`127.0.0.1:${chrome.port}`, { targetId });
-    const seen: import('@unstuck/core').CdpClient[] = [];
+    const seen: import('@velmlabs/unstuck-core').CdpClient[] = [];
     const off = cdp.popups.onPopup((p) => seen.push(p));
     await cdp.send('Runtime.evaluate', { expression: "window.open('about:blank#popup', '_blank')", userGesture: true });
     await vi.waitFor(() => expect(seen).toHaveLength(1), { timeout: 5000 });

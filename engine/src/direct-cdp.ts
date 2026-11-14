@@ -1,5 +1,5 @@
 import { WebSocket } from 'ws';
-import type { CdpClient, PopupSource } from '@unstuck/core';
+import type { CdpClient, PopupSource } from '@velmlabs/unstuck-core';
 
 /** Browser-level CDP access (no session), e.g. for Target.* discovery. */
 export interface BrowserCdp {

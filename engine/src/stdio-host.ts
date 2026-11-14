@@ -7,8 +7,8 @@ import {
   type PagePopupParams,
   type HelloResult,
   type TakeoverParams,
-} from '@unstuck/protocol';
-import { createEngine, type CdpClient, type EventLog, type Transport } from '@unstuck/core';
+} from '@velmlabs/unstuck-protocol';
+import { createEngine, type CdpClient, type EventLog, type Transport } from '@velmlabs/unstuck-core';
 import { createTunneledCdp } from './tunnel';
 
 export interface StdioHostOptions {

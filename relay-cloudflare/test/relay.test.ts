@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { env, exports } from 'cloudflare:workers';
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
-import { createEngine, createRelayTransport, type LinkInfo } from '@unstuck/core';
-import { FakeCdp } from '@unstuck/core/testing';
+import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
+import { FakeCdp } from '@velmlabs/unstuck-core/testing';
 import { probe } from './fixtures/worker';
 import { FetchWs, viewerFor, waitFor } from './helpers';
 

@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import net from 'node:net';
 import http from 'node:http';
 import { WebSocket } from 'ws';
-import type { ViewerConnection } from '@unstuck/core';
+import type { ViewerConnection } from '@velmlabs/unstuck-core';
 import { createEmbeddedTransport, EXPIRED_HTML_MARKER, type AssetMap } from '../src/embedded';
 
 const ASSETS: AssetMap = {

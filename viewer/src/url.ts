@@ -1,4 +1,4 @@
-import { b64urlDecode } from '@unstuck/protocol';
+import { b64urlDecode } from '@velmlabs/unstuck-protocol';
 
 export type Fragment = { token: string; key: Uint8Array } | { error: 'incomplete' };
 

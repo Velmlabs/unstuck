@@ -1,7 +1,7 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PNG } from 'pngjs';
-import { probeCapabilities, type Capabilities, type CdpClient } from '@unstuck/core';
+import { probeCapabilities, type Capabilities, type CdpClient } from '@velmlabs/unstuck-core';
 import { connectCdp, type DirectCdp } from './direct-cdp';
 
 export interface DoctorReport {

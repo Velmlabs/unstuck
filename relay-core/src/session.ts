@@ -1,4 +1,4 @@
-import { decodeEnvelope, encodeEnvelope, parseAgentToRelay, RELAY_CLOSE, RELAY_LIMITS } from '@unstuck/protocol';
+import { decodeEnvelope, encodeEnvelope, parseAgentToRelay, RELAY_CLOSE, RELAY_LIMITS } from '@velmlabs/unstuck-protocol';
 import type { OnEvent, RelayEvent } from './hooks';
 import { hashKey, sameHash } from './keys';
 

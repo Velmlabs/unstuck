@@ -1,5 +1,5 @@
 {
-  "name": "unstuck",
+  "name": "@velmlabs/unstuck",
   "version": "0.1.0",
   "description": "Human takeover for AI browser agents: when your agent gets stuck, a human takes over the live browser and hands it back.",
   "license": "Apache-2.0",
@@ -9,5 +9,5 @@
   "exports": { ".": "./src/index.ts" },
   "keywords": ["ai", "agent", "browser", "captcha", "human-in-the-loop", "playwright", "puppeteer", "cdp"],
   "scripts": { "build": "tsc -p tsconfig.json --noEmit", "test": "vitest run --coverage" },
-  "dependencies": { "@unstuck/protocol": "workspace:*" }
+  "dependencies": { "@velmlabs/unstuck-protocol": "workspace:*" }
 }

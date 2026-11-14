@@ -1,5 +1,5 @@
 {
-  "name": "@unstuck/viewer",
+  "name": "@velmlabs/unstuck-viewer",
   "version": "0.1.0",
   "description": "Unstuck takeover viewer: the page a human uses to control the agent's browser",
   "license": "AGPL-3.0-only",
@@ -9,7 +9,7 @@
     "test": "vitest run --coverage"
   },
   "dependencies": {
-    "@unstuck/protocol": "workspace:*",
+    "@velmlabs/unstuck-protocol": "workspace:*",
     "preact": "^10.29.8"
   },
   "devDependencies": {

@@ -1,4 +1,4 @@
-import type { RelayEvent } from '@unstuck/relay-core';
+import type { RelayEvent } from '@velmlabs/unstuck-relay-core';
 import { createRelayWorker } from '../../src/worker';
 
 /** Test-only hooks: the events the relay reports, a controllable clock, and an override for authorize. */

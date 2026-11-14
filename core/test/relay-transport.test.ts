@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { decodeEnvelope, encodeEnvelope } from '@unstuck/protocol';
+import { decodeEnvelope, encodeEnvelope } from '@velmlabs/unstuck-protocol';
 import { createRelayTransport, RelayError } from '../src/relay-transport';
 import { createEngine, type LinkInfo } from '../src/engine';
 import { FakeCdp } from '../src/testing';

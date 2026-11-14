@@ -1,4 +1,4 @@
-import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@unstuck/protocol';
+import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
 import type { Transport, ViewerConnection } from '../transport';
 
 /** A fake human's browser tab connected to the session. */

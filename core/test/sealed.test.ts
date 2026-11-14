@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { newE2eKey, importE2eKey, openMsg, sealMsg } from '@unstuck/protocol';
+import { newE2eKey, importE2eKey, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
 import { FakeViewer } from '../src/testing';
 import { sealConnection } from '../src/session/sealed';
 

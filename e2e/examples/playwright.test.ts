@@ -27,7 +27,7 @@ describe('Playwright examples', () => {
     for (const f of ['playwright-ts/index.ts', 'playwright-py/main.py']) assertShownFile(example(f));
     expect(fs.readFileSync(example('playwright-ts/index.ts'), 'utf8')).toContain("import { Unstuck } from '@velmlabs/unstuck';");
     const pkg = JSON.parse(fs.readFileSync(example('playwright-ts/package.json'), 'utf8'));
-    expect(pkg.dependencies['@velmlabs/unstuck']).toBe('workspace:unstuck@*');
+    expect(pkg.dependencies['@velmlabs/unstuck']).toBe('workspace:*');
     expect(pkg.dependencies.unstuck).toBeUndefined();
   });
 });

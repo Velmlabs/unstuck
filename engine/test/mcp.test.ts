@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
-import { FakeTransport } from '@unstuck/core/testing';
+import { FakeTransport } from '@velmlabs/unstuck-core/testing';
 import { createMcpServer, openInBrowser, TOOL_NAME } from '../src/mcp';
 import { createEmbeddedTransport, type AssetMap } from '../src/embedded';
 import { ASSETS } from '../src/assets.gen';
@@ -81,7 +81,7 @@ describe('MCP server', () => {
   }, 30_000);
 
   it('a relay refusal comes back as the tool result detail (relay_quota_exceeded)', async () => {
-    const { RelayError } = await import('@unstuck/core');
+    const { RelayError } = await import('@velmlabs/unstuck-core');
     const refusing = new FakeTransport();
     refusing.publish = async () => Promise.reject(new RelayError('relay_quota_exceeded', 4402));
     const { client, server } = await connect({ transport: refusing });

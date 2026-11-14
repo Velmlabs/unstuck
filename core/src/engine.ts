@@ -1,4 +1,4 @@
-import type { TakeoverResult } from '@unstuck/protocol';
+import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from './cdp';
 import type { EventLog } from './events';
 import type { Transport } from './transport';

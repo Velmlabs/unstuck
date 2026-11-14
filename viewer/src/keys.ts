@@ -1,4 +1,4 @@
-import type { ViewerToEngine } from '@unstuck/protocol';
+import type { ViewerToEngine } from '@velmlabs/unstuck-protocol';
 
 type Mods = Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>;
 

@@ -1,5 +1,5 @@
 {
-  "name": "@unstuck/relay",
+  "name": "@velmlabs/unstuck-relay",
   "version": "0.0.0",
   "description": "Self-hostable Unstuck relay for Node (and Docker): agents and humans meet here, end-to-end encrypted",
   "license": "AGPL-3.0-only",
@@ -10,13 +10,13 @@
   "bin": { "unstuck-relay": "./src/bin.ts" },
   "scripts": { "build": "tsc -p tsconfig.json --noEmit", "test": "vitest run --coverage", "start": "tsx src/bin.ts" },
   "dependencies": {
-    "@unstuck/protocol": "workspace:*",
-    "@unstuck/relay-core": "workspace:*",
-    "@unstuck/viewer": "workspace:*",
+    "@velmlabs/unstuck-protocol": "workspace:*",
+    "@velmlabs/unstuck-relay-core": "workspace:*",
+    "@velmlabs/unstuck-viewer": "workspace:*",
     "ws": "^8.22.2"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",
-    "@unstuck/core": "workspace:*"
+    "@velmlabs/unstuck-core": "workspace:*"
   }
 }

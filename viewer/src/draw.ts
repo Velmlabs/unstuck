@@ -1,4 +1,4 @@
-import type { Frame } from '@unstuck/protocol';
+import type { Frame } from '@velmlabs/unstuck-protocol';
 
 const state = new WeakMap<HTMLCanvasElement, { busy: boolean; pending: Frame | null }>();
 

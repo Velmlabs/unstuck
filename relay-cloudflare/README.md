@@ -1,4 +1,4 @@
-# @unstuck/relay-cloudflare
+# @velmlabs/unstuck-relay-cloudflare
 
 The Unstuck relay on Cloudflare Workers (AGPL-3.0): one Durable Object per takeover, WebSocket hibernation, and the viewer served as static assets. Everything between the agent's engine and the human's browser is end-to-end encrypted; the relay forwards bytes it can't read.
 
@@ -23,7 +23,7 @@ Point agents at it with `UNSTUCK_RELAY_URL=wss://<your-worker>.workers.dev` and 
 `createRelayWorker()` is the whole public API. A host can replace the key check and receive usage events:
 
 ```ts
-import { createRelayWorker } from '@unstuck/relay-cloudflare';
+import { createRelayWorker } from '@velmlabs/unstuck-relay-cloudflare';
 
 const relay = createRelayWorker({
   authorize: async (key, { sessionId, ip }, env) => ({ ok: true, account: 'acct_123' }), // or { ok: false, status: 401 | 402 | 403 | 429, error }

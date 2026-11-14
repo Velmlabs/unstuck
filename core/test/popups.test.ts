@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakeCdp, FakePopups, FakeTransport } from '../src/testing';
 import { createEngine, type LinkInfo } from '../src/engine';
-import type { TakeoverResult } from '@unstuck/protocol';
+import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
 
 const realSetTimeout = globalThis.setTimeout;
 async function settle() {

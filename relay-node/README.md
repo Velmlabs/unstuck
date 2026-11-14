@@ -1,4 +1,4 @@
-# @unstuck/relay
+# @velmlabs/unstuck-relay
 
 Self-hosted Unstuck relay for Node and Docker (AGPL-3.0). Your agents and the humans who help them both connect *out* to it; it pairs them and forwards bytes it can't read, because everything is end-to-end encrypted between the agent's engine and the human's browser.
 
@@ -31,8 +31,8 @@ Nothing on disk. Each takeover lives in memory for at most its expiry (capped at
 ## Embedding
 
 ```ts
-import { createNodeRelay } from '@unstuck/relay';
-import { createKeyAuthorizer } from '@unstuck/relay-core';
+import { createNodeRelay } from '@velmlabs/unstuck-relay';
+import { createKeyAuthorizer } from '@velmlabs/unstuck-relay-core';
 
 await createNodeRelay({ port: 8787, viewerDir, authorize: createKeyAuthorizer({ keys: ['…'] }), onEvent: console.log });
 ```

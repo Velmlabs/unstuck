@@ -1,4 +1,4 @@
-# Self-host template: `pnpm --filter @unstuck/relay-cloudflare deploy`.
+# Self-host template: `pnpm --filter @velmlabs/unstuck-relay-cloudflare deploy`.
 # Set agent keys with: wrangler secret put AGENT_KEYS   (comma-separated)
 name = "unstuck-relay"
 main = "src/index.ts"

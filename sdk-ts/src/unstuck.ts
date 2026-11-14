@@ -6,7 +6,7 @@ import {
   type TakeoverLinkParams,
   type TakeoverParams,
   type TakeoverResult,
-} from '@unstuck/protocol';
+} from '@velmlabs/unstuck-protocol';
 import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
 import { UnstuckEngineError } from './errors';

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { parseArgs } from 'node:util';
-import { createKeyAuthorizer } from '@unstuck/relay-core';
+import { createKeyAuthorizer } from '@velmlabs/unstuck-relay-core';
 import { createNodeRelay, type NodeRelay } from './server';
 
 const USAGE = `Usage: unstuck-relay [--port 8787] [--host 0.0.0.0]
@@ -14,7 +14,7 @@ Environment:
 `;
 const OPEN_WARNING = 'relay is OPEN: anyone can register sessions (UNSTUCK_RELAY_OPEN=1); use UNSTUCK_AGENT_KEYS in production';
 
-export const defaultViewerDir = () => path.join(path.dirname(createRequire(import.meta.url).resolve('@unstuck/viewer/package.json')), 'dist');
+export const defaultViewerDir = () => path.join(path.dirname(createRequire(import.meta.url).resolve('@velmlabs/unstuck-viewer/package.json')), 'dist');
 
 /** Returns an exit code, or the running relay. */
 export async function main(argv: string[], env: Record<string, string | undefined>, io: { stderr: { write(s: string): unknown } }): Promise<number | NodeRelay> {

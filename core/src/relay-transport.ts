@@ -6,7 +6,7 @@ import {
   parseRelayToAgent,
   RELAY_CLOSE,
   RELAY_SUBPROTOCOL,
-} from '@unstuck/protocol';
+} from '@velmlabs/unstuck-protocol';
 import type { Transport, ViewerConnection } from './transport';
 
 export type RelayErrorDetail = 'relay_unauthorized' | 'relay_quota_exceeded' | 'relay_rate_limited' | 'relay_unreachable';

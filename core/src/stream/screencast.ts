@@ -1,4 +1,4 @@
-import type { Frame } from '@unstuck/protocol';
+import type { Frame } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
 
 export interface ScreencastOptions {

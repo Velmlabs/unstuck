@@ -1,5 +1,5 @@
-import { KEY_SUBPROTOCOL_PREFIX, RELAY_CLOSE, SESSION_ID_RE } from '@unstuck/protocol';
-import { createKeyAuthorizer, hashKey, type Authorize, type RelayEvent } from '@unstuck/relay-core';
+import { KEY_SUBPROTOCOL_PREFIX, RELAY_CLOSE, SESSION_ID_RE } from '@velmlabs/unstuck-protocol';
+import { createKeyAuthorizer, hashKey, type Authorize, type RelayEvent } from '@velmlabs/unstuck-relay-core';
 import { H_ACCOUNT, H_KEY_HASH, H_SESSION, makeRelaySessionDO, upgradeResponse } from './durable-object';
 
 export interface RelayEnv {

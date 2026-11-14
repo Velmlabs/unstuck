@@ -17,14 +17,14 @@ pnpm install
 ```
 
 ```bash
-pnpm --filter @unstuck/engine build
+pnpm --filter @velmlabs/unstuck-engine build
 ```
 
 2. Add one call where your agent gets stuck:
 
 ```ts
 import { chromium } from 'playwright';
-import { Unstuck } from 'unstuck';
+import { Unstuck } from '@velmlabs/unstuck';
 
 const browser = await chromium.launch();
 const page = await browser.newPage();
@@ -109,7 +109,7 @@ By default the link points at a small server on the agent's own machine. Agents 
 | Unstuck Cloud (`relay.unstuck.sh`) | `UNSTUCK_API_KEY=uk_live_…` |
 | Your own relay | `UNSTUCK_RELAY_URL=wss://relay.example.com` and `UNSTUCK_AGENT_KEY=…` |
 
-The SDKs also take the relay as options (`new Unstuck({ relay, agentKey })`, `Unstuck(relay=..., agent_key=...)`), and on Workers, where there's no engine binary, use the engine in-process: `createEngine({ transport: createRelayTransport({ url, agentKey }) })` from `@unstuck/core`.
+The SDKs also take the relay as options (`new Unstuck({ relay, agentKey })`, `Unstuck(relay=..., agent_key=...)`), and on Workers, where there's no engine binary, use the engine in-process: `createEngine({ transport: createRelayTransport({ url, agentKey }) })` from `@velmlabs/unstuck-core`.
 
 Run your own relay on Node or Docker (`relay-node/`) or on Cloudflare with one Durable Object per takeover (`relay-cloudflare/`).
 

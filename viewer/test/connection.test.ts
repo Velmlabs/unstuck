@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { encodeFrame, importE2eKey, newE2eKey, openMsg, sealMsg } from '@unstuck/protocol';
+import { encodeFrame, importE2eKey, newE2eKey, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
 import { connect, e2eCodec, type Codec, type ConnectionHandlers } from '../src/connection';
 
 class FakeWs {

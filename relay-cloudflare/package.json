@@ -1,5 +1,5 @@
 {
-  "name": "@unstuck/relay-cloudflare",
+  "name": "@velmlabs/unstuck-relay-cloudflare",
   "version": "0.0.0",
   "description": "Unstuck relay on Cloudflare Workers: one Durable Object per takeover, end-to-end encrypted",
   "license": "AGPL-3.0-only",
@@ -15,14 +15,14 @@
     "deploy": "node scripts/copy-viewer.mjs && wrangler deploy"
   },
   "dependencies": {
-    "@unstuck/protocol": "workspace:*",
-    "@unstuck/relay-core": "workspace:*"
+    "@velmlabs/unstuck-protocol": "workspace:*",
+    "@velmlabs/unstuck-relay-core": "workspace:*"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.1",
     "@cloudflare/workers-types": "^5.20261112.1",
-    "@unstuck/core": "workspace:*",
-    "@unstuck/viewer": "workspace:*",
+    "@velmlabs/unstuck-core": "workspace:*",
+    "@velmlabs/unstuck-viewer": "workspace:*",
     "@vitest/coverage-istanbul": "^4.1.12",
     "vitest": "^4.1.12",
     "wrangler": "^4.161.0"

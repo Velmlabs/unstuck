@@ -6,7 +6,7 @@
     "start": "tsx index.ts"
   },
   "dependencies": {
-    "@velmlabs/unstuck": "workspace:unstuck@*",
+    "@velmlabs/unstuck": "workspace:*",
     "playwright": "1.63.0"
   }
 }

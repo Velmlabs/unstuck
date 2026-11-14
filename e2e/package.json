@@ -6,9 +6,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "unstuck": "workspace:*",
-    "@unstuck/core": "workspace:*",
-    "@unstuck/relay": "workspace:*",
-    "@unstuck/relay-core": "workspace:*"
+    "@velmlabs/unstuck": "workspace:*",
+    "@velmlabs/unstuck-core": "workspace:*",
+    "@velmlabs/unstuck-relay": "workspace:*",
+    "@velmlabs/unstuck-relay-core": "workspace:*",
+    "@velmlabs/unstuck-viewer": "workspace:*"
   }
 }

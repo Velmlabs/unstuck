@@ -2,13 +2,13 @@ import { describe, it, expect, afterEach } from 'vitest';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { createEngine, createRelayTransport, type LinkInfo } from '@unstuck/core';
-import { FakeCdp } from '@unstuck/core/testing';
-import { createKeyAuthorizer, type RelayEvent } from '@unstuck/relay-core';
+import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
+import { FakeCdp } from '@velmlabs/unstuck-core/testing';
+import { createKeyAuthorizer, type RelayEvent } from '@velmlabs/unstuck-relay-core';
 import { createNodeRelay } from '../src/server';
 import { viewerFor, waitFor } from './helpers';
 
-const viewerDir = path.join(path.dirname(createRequire(import.meta.url).resolve('@unstuck/viewer/package.json')), 'dist');
+const viewerDir = path.join(path.dirname(createRequire(import.meta.url).resolve('@velmlabs/unstuck-viewer/package.json')), 'dist');
 const frame = { data: Buffer.alloc(30_000, 7).toString('base64'), sessionId: 1, metadata: { deviceWidth: 1280, deviceHeight: 720 } };
 let stop: (() => Promise<void>)[] = [];
 afterEach(async () => {

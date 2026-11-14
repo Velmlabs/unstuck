@@ -1,20 +1,20 @@
 {
-  "name": "@unstuck/engine",
+  "name": "@velmlabs/unstuck-engine",
   "version": "0.1.0",
-  "description": "Unstuck engine: Node host for @unstuck/core (stdio bridge, embedded server, CLI, binary)",
+  "description": "Unstuck engine: Node host for @velmlabs/unstuck-core (stdio bridge, embedded server, CLI, binary)",
   "license": "Apache-2.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "pnpm --filter @unstuck/viewer build && node scripts/embed-viewer.mjs && tsc -p tsconfig.json --noEmit && node scripts/build-binary.mjs",
+    "build": "pnpm --filter @velmlabs/unstuck-viewer build && node scripts/embed-viewer.mjs && tsc -p tsconfig.json --noEmit && node scripts/build-binary.mjs",
     "test": "vitest run --coverage",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
-    "@unstuck/core": "workspace:*",
-    "@unstuck/protocol": "workspace:*",
+    "@velmlabs/unstuck-core": "workspace:*",
+    "@velmlabs/unstuck-protocol": "workspace:*",
     "pngjs": "^7.0.0",
     "ws": "^8.22.2",
     "zod": "^3.25.76"

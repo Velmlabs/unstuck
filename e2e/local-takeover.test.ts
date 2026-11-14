@@ -5,7 +5,7 @@ import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { Unstuck, type TakeoverLink } from 'unstuck';
+import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Pre-installed Playwright (see sdk-ts/test/helpers.ts for why it is not a workspace dependency).

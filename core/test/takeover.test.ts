@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakeCdp, FakeTransport, type FakeViewer } from '../src/testing';
 import { createEngine, type LinkInfo } from '../src/engine';
 import { MemoryEventLog } from '../src/events';
-import type { TakeoverResult } from '@unstuck/protocol';
+import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
 
 const frame = { data: 'AQID', sessionId: 1, metadata: { deviceWidth: 1280, deviceHeight: 720 } };
 const realSetTimeout = globalThis.setTimeout;

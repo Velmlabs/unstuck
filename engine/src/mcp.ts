@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { createEngine, type EventLog, type Transport } from '@unstuck/core';
+import { createEngine, type EventLog, type Transport } from '@velmlabs/unstuck-core';
 import { connectCdp } from './direct-cdp';
 import { VERSION } from './version';
 

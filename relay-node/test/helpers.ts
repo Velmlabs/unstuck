@@ -1,4 +1,4 @@
-import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@unstuck/protocol';
+import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
 
 /** A minimal human's browser: connects to /ws/<id> and speaks sealed JSON with the link's key. */
 export async function viewerFor(link: string, ws = (u: string) => new WebSocket(u)) {

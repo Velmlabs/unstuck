@@ -1,8 +1,8 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { WebSocketServer } from 'ws';
 import type { AddressInfo } from 'node:net';
-import { createEngine } from '@unstuck/core';
-import { FakeCdp } from '@unstuck/core/testing';
+import { createEngine } from '@velmlabs/unstuck-core';
+import { FakeCdp } from '@velmlabs/unstuck-core/testing';
 import { buildTransport, selectTransport } from '../src/transport-select';
 
 describe('selectTransport', () => {

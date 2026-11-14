@@ -3,9 +3,9 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { createNodeRelay } from '@unstuck/relay';
-import { createKeyAuthorizer } from '@unstuck/relay-core';
-import type { CdpClient } from '@unstuck/core';
+import { createNodeRelay } from '@velmlabs/unstuck-relay';
+import { createKeyAuthorizer } from '@velmlabs/unstuck-relay-core';
+import type { CdpClient } from '@velmlabs/unstuck-core';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const RELAY_KEY = 'e2e-relay-key';
@@ -34,7 +34,7 @@ async function waitHealthy(url: string, ms: number) {
 /** Starts a relay that accepts RELAY_KEY: the Node relay in-process, or the Cloudflare relay under `wrangler dev`. */
 export async function startRelay(kind: 'node' | 'cloudflare'): Promise<{ url: string; stop(): Promise<void> }> {
   if (kind === 'node') {
-    const viewerDir = path.join(path.dirname(createRequire(import.meta.url).resolve('@unstuck/viewer/package.json')), 'dist');
+    const viewerDir = path.join(path.dirname(createRequire(import.meta.url).resolve('@velmlabs/unstuck-viewer/package.json')), 'dist');
     const r = await createNodeRelay({ port: 0, host: '127.0.0.1', viewerDir, authorize: createKeyAuthorizer({ keys: [RELAY_KEY] }) });
     return { url: `ws://127.0.0.1:${r.port}`, stop: () => r.close() };
   }

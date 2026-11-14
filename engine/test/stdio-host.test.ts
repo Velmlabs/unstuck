@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { PassThrough } from 'node:stream';
 import readline from 'node:readline';
-import { createRpcPeer, Methods, PROTOCOL_VERSION, type RpcPeer } from '@unstuck/protocol';
-import { FakeTransport, FakeCdp } from '@unstuck/core/testing';
-import { MemoryEventLog } from '@unstuck/core';
+import { createRpcPeer, Methods, PROTOCOL_VERSION, type RpcPeer } from '@velmlabs/unstuck-protocol';
+import { FakeTransport, FakeCdp } from '@velmlabs/unstuck-core/testing';
+import { MemoryEventLog } from '@velmlabs/unstuck-core';
 import { runStdioHost } from '../src/stdio-host';
 
 function start() {

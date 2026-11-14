@@ -25,6 +25,6 @@ describe('embed-viewer', () => {
   });
 
   it('fails loudly when the viewer has not been built', () => {
-    expect(() => buildAssetMap('/no/such/dist')).toThrow(/pnpm --filter @unstuck\/viewer build/);
+    expect(() => buildAssetMap('/no/such/dist')).toThrow(/pnpm --filter @velmlabs\/unstuck-viewer build/);
   });
 });

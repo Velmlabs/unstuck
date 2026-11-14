@@ -1,5 +1,5 @@
-import { Methods, type CdpClosedParams, type CdpEventParams, type RpcPeer } from '@unstuck/protocol';
-import type { CdpClient } from '@unstuck/core';
+import { Methods, type CdpClosedParams, type CdpEventParams, type RpcPeer } from '@velmlabs/unstuck-protocol';
+import type { CdpClient } from '@velmlabs/unstuck-core';
 
 /** A CdpClient whose commands and events travel over the SDK's own CDP session (stdio RPC). */
 export function createTunneledCdp(peer: RpcPeer, pageId: string): CdpClient {

@@ -10,7 +10,7 @@ describe('resolveEnginePath', () => {
   });
 
   it('falls back to the platform package', () => {
-    expect(resolveEnginePath({}, {}, (id) => `/pkgs/${id}`)).toBe(`/pkgs/@unstuck/engine-${process.platform}-${process.arch}/bin/unstuck-engine`);
+    expect(resolveEnginePath({}, {}, (id) => `/pkgs/${id}`)).toBe(`/pkgs/@velmlabs/unstuck-engine-${process.platform}-${process.arch}/bin/unstuck-engine`);
   });
 
   it('throws UnstuckEngineError naming what it tried when nothing resolves', () => {
@@ -21,7 +21,7 @@ describe('resolveEnginePath', () => {
     try {
       resolveEnginePath({}, {}, fail);
     } catch (e) {
-      expect((e as Error).message).toContain(`@unstuck/engine-${process.platform}-${process.arch}`);
+      expect((e as Error).message).toContain(`@velmlabs/unstuck-engine-${process.platform}-${process.arch}`);
       expect((e as Error).message).toContain('Set UNSTUCK_ENGINE_PATH');
     }
   });

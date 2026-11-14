@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import readline from 'node:readline';
-import { createRpcPeer, Methods, PROTOCOL_VERSION, RpcCallError, type HelloResult, type RpcPeer } from '@unstuck/protocol';
+import { createRpcPeer, Methods, PROTOCOL_VERSION, RpcCallError, type HelloResult, type RpcPeer } from '@velmlabs/unstuck-protocol';
 import { UnstuckEngineError } from './errors';
 import { VERSION } from './version';
 
 const requireFromHere = createRequire(import.meta.url);
 
-/** Engine binary lookup: explicit option → UNSTUCK_ENGINE_PATH → @unstuck/engine-<platform>-<arch> package. */
+/** Engine binary lookup: explicit option → UNSTUCK_ENGINE_PATH → @velmlabs/unstuck-engine-<platform>-<arch> package. */
 export function resolveEnginePath(
   opts: { enginePath?: string },
   env: Record<string, string | undefined> = process.env,
@@ -15,7 +15,7 @@ export function resolveEnginePath(
 ): string {
   if (opts.enginePath) return opts.enginePath;
   if (env.UNSTUCK_ENGINE_PATH) return env.UNSTUCK_ENGINE_PATH;
-  const pkg = `@unstuck/engine-${process.platform}-${process.arch}`;
+  const pkg = `@velmlabs/unstuck-engine-${process.platform}-${process.arch}`;
   const bin = `${pkg}/bin/unstuck-engine${process.platform === 'win32' ? '.exe' : ''}`;
   try {
     return resolve(bin);

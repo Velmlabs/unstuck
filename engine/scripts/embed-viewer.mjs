@@ -17,7 +17,7 @@ const MIME = {
 
 export function buildAssetMap(distDir) {
   if (!fs.existsSync(path.join(distDir, 'index.html'))) {
-    throw new Error(`viewer build not found at ${distDir}; run: pnpm --filter @unstuck/viewer build`);
+    throw new Error(`viewer build not found at ${distDir}; run: pnpm --filter @velmlabs/unstuck-viewer build`);
   }
   const map = {};
   const walk = (dir) => {

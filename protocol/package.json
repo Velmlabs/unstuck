@@ -1,5 +1,5 @@
 {
-  "name": "@unstuck/protocol",
+  "name": "@velmlabs/unstuck-protocol",
   "version": "0.0.0",
   "description": "Unstuck wire protocol: messages between SDK, engine, relay and viewer",
   "license": "Apache-2.0",

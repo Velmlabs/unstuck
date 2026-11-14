@@ -5,9 +5,9 @@ import { execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 const here = path.dirname(new URL(import.meta.url).pathname);
-const viewer = path.dirname(createRequire(import.meta.url).resolve('@unstuck/viewer/package.json'));
+const viewer = path.dirname(createRequire(import.meta.url).resolve('@velmlabs/unstuck-viewer/package.json'));
 const dist = path.join(viewer, 'dist');
-if (!fs.existsSync(path.join(dist, 'index.html'))) execSync('pnpm --filter @unstuck/viewer build', { stdio: 'inherit' });
+if (!fs.existsSync(path.join(dist, 'index.html'))) execSync('pnpm --filter @velmlabs/unstuck-viewer build', { stdio: 'inherit' });
 const out = path.join(here, '..', 'public');
 fs.rmSync(out, { recursive: true, force: true });
 fs.cpSync(dist, out, { recursive: true });

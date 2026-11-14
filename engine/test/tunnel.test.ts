@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createRpcPeer, Methods, type RpcPeer } from '@unstuck/protocol';
+import { createRpcPeer, Methods, type RpcPeer } from '@velmlabs/unstuck-protocol';
 import { createTunneledCdp } from '../src/tunnel';
 
 function pair(): { engine: RpcPeer; sdk: RpcPeer } {

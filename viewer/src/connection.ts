@@ -1,4 +1,4 @@
-import { decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@unstuck/protocol';
+import { decodeFrame, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
 
 export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed';
 type Ready = Extract<EngineToViewer, { t: 'ready' }>;

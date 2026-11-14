@@ -26,34 +26,37 @@ importers:
 
   core:
     dependencies:
-      '@unstuck/protocol':
+      '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol
 
   e2e:
     dependencies:
-      '@unstuck/core':
-        specifier: workspace:*
-        version: link:../core
-      '@unstuck/relay':
-        specifier: workspace:*
-        version: link:../relay-node
-      '@unstuck/relay-core':
-        specifier: workspace:*
-        version: link:../relay-core
-      unstuck:
+      '@velmlabs/unstuck':
         specifier: workspace:*
         version: link:../sdk-ts
+      '@velmlabs/unstuck-core':
+        specifier: workspace:*
+        version: link:../core
+      '@velmlabs/unstuck-relay':
+        specifier: workspace:*
+        version: link:../relay-node
+      '@velmlabs/unstuck-relay-core':
+        specifier: workspace:*
+        version: link:../relay-core
+      '@velmlabs/unstuck-viewer':
+        specifier: workspace:*
+        version: link:../viewer
 
   engine:
     dependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@3.25.76)
-      '@unstuck/core':
+      '@velmlabs/unstuck-core':
         specifier: workspace:*
         version: link:../core
-      '@unstuck/protocol':
+      '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol
       pngjs:
@@ -76,7 +79,7 @@ importers:
   examples/cdp:
     dependencies:
       '@velmlabs/unstuck':
-        specifier: workspace:unstuck@*
+        specifier: workspace:*
         version: link:../../sdk-ts
       playwright:
         specifier: 1.63.0
@@ -85,7 +88,7 @@ importers:
   examples/playwright-ts:
     dependencies:
       '@velmlabs/unstuck':
-        specifier: workspace:unstuck@*
+        specifier: workspace:*
         version: link:../../sdk-ts
       playwright:
         specifier: 1.63.0
@@ -94,7 +97,7 @@ importers:
   examples/puppeteer:
     dependencies:
       '@velmlabs/unstuck':
-        specifier: workspace:unstuck@*
+        specifier: workspace:*
         version: link:../../sdk-ts
       puppeteer:
         specifier: 24.17.0
@@ -106,7 +109,7 @@ importers:
         specifier: 4.4.0
         version: 4.4.0
       '@velmlabs/unstuck':
-        specifier: workspace:unstuck@*
+        specifier: workspace:*
         version: link:../../sdk-ts
       playwright:
         specifier: 1.63.0
@@ -120,10 +123,10 @@ importers:
 
   relay-cloudflare:
     dependencies:
-      '@unstuck/protocol':
+      '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@unstuck/relay-core':
+      '@velmlabs/unstuck-relay-core':
         specifier: workspace:*
         version: link:../relay-core
     devDependencies:
@@ -133,10 +136,10 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20261112.1
         version: 5.20261112.1
-      '@unstuck/core':
+      '@velmlabs/unstuck-core':
         specifier: workspace:*
         version: link:../core
-      '@unstuck/viewer':
+      '@velmlabs/unstuck-viewer':
         specifier: workspace:*
         version: link:../viewer
       '@vitest/coverage-istanbul':
@@ -151,19 +154,19 @@ importers:
 
   relay-core:
     dependencies:
-      '@unstuck/protocol':
+      '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol
 
   relay-node:
     dependencies:
-      '@unstuck/protocol':
+      '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol
-      '@unstuck/relay-core':
+      '@velmlabs/unstuck-relay-core':
         specifier: workspace:*
         version: link:../relay-core
-      '@unstuck/viewer':
+      '@velmlabs/unstuck-viewer':
         specifier: workspace:*
         version: link:../viewer
       ws:
@@ -173,19 +176,19 @@ importers:
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.2
-      '@unstuck/core':
+      '@velmlabs/unstuck-core':
         specifier: workspace:*
         version: link:../core
 
   sdk-ts:
     dependencies:
-      '@unstuck/protocol':
+      '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol
 
   viewer:
     dependencies:
-      '@unstuck/protocol':
+      '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol
       preact:

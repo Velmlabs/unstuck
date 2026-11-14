@@ -7,8 +7,8 @@ import { spawn } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { Unstuck, type TakeoverLink } from 'unstuck';
-import { createEngine, createRelayTransport, type LinkInfo } from '@unstuck/core';
+import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
+import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
 import { cdpFor, freePort, RELAY_KEY, startRelay } from './relay-harness';
 
 const here = path.dirname(fileURLToPath(import.meta.url));

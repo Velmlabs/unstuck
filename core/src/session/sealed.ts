@@ -1,4 +1,4 @@
-import { isJsonPlaintext, newConnNonce, openMsg, sealMsg } from '@unstuck/protocol';
+import { isJsonPlaintext, newConnNonce, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
 import type { ViewerConnection } from '../transport';
 
 const enc = new TextEncoder();

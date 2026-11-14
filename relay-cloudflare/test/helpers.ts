@@ -1,5 +1,5 @@
 import { exports } from 'cloudflare:workers';
-import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@unstuck/protocol';
+import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
 
 /** A WebSocket-shaped client over the Worker's fetch (no real network inside workerd tests). */
 export class FetchWs {

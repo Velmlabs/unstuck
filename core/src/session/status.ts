@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@unstuck/protocol';
+import type { SessionStatus } from '@velmlabs/unstuck-protocol';
 
 export type SessionEvent =
   | 'published'

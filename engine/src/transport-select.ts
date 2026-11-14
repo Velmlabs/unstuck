@@ -1,4 +1,4 @@
-import { createRelayTransport, type Transport } from '@unstuck/core';
+import { createRelayTransport, type Transport } from '@velmlabs/unstuck-core';
 
 export const CLOUD_RELAY_URL = 'wss://relay.unstuck.sh';
 
