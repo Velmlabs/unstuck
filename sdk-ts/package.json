@@ -1,13 +1,58 @@
 {
   "name": "@velmlabs/unstuck",
   "version": "0.1.0",
-  "description": "Human takeover for AI browser agents: when your agent gets stuck, a human takes over the live browser and hands it back.",
+  "description": "Human takeover for AI browser agents: when your agent gets stuck, a person takes over the live browser and hands it back.",
+  "keywords": [
+    "ai",
+    "agent",
+    "browser",
+    "captcha",
+    "human-in-the-loop",
+    "playwright",
+    "puppeteer",
+    "cdp",
+    "mcp"
+  ],
+  "homepage": "https://unstuck.sh/docs",
+  "bugs": {
+    "url": "https://github.com/velmlabs/unstuck/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/velmlabs/unstuck.git",
+    "directory": "sdk-ts"
+  },
   "license": "Apache-2.0",
+  "author": "Velm Labs",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts" },
-  "keywords": ["ai", "agent", "browser", "captcha", "human-in-the-loop", "playwright", "puppeteer", "cdp"],
-  "scripts": { "build": "tsc -p tsconfig.json --noEmit", "test": "vitest run --coverage" },
-  "dependencies": { "@velmlabs/unstuck-protocol": "workspace:*" }
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage",
+    "build:dist": "tsup"
+  },
+  "dependencies": {
+    "@velmlabs/unstuck-protocol": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
+    }
+  }
 }

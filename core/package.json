@@ -1,12 +1,63 @@
 {
   "name": "@velmlabs/unstuck-core",
-  "version": "0.0.0",
-  "description": "Unstuck runtime-agnostic engine core (web-standard APIs only)",
+  "version": "0.1.0",
+  "description": "The Unstuck takeover engine core: screencast, input, sessions and transports, usable in Node or Cloudflare Workers.",
+  "keywords": [
+    "ai",
+    "agent",
+    "browser",
+    "captcha",
+    "human-in-the-loop",
+    "playwright",
+    "puppeteer",
+    "cdp",
+    "mcp"
+  ],
+  "homepage": "https://unstuck.sh/docs",
+  "bugs": {
+    "url": "https://github.com/velmlabs/unstuck/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/velmlabs/unstuck.git",
+    "directory": "core"
+  },
   "license": "Apache-2.0",
+  "author": "Velm Labs",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
-  "exports": { ".": "./src/index.ts", "./testing": "./src/testing/index.ts" },
-  "scripts": { "build": "tsc -p tsconfig.json --noEmit", "test": "vitest run --coverage" },
-  "dependencies": { "@velmlabs/unstuck-protocol": "workspace:*" }
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing/index.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --coverage",
+    "build:dist": "tsup"
+  },
+  "dependencies": {
+    "@velmlabs/unstuck-protocol": "workspace:*"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js"
+      }
+    }
+  }
 }
