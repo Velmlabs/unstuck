@@ -7,16 +7,17 @@
 ## Install
 
 ```bash
-npm install @velmlabs/unstuck
+npm install @velmlabs/unstuck     # TypeScript, Node.js 20+
+pip install unstuck               # Python 3.10+
 ```
 
-```bash
-pip install unstuck
-```
+The engine ships inside the package for macOS (Apple silicon and Intel), Linux and Windows, so there is nothing else to install. Unstuck drives Chromium-based browsers: [requirements](https://unstuck.sh/docs/requirements/).
 
-The engine comes with the package for macOS, Linux and Windows; there is nothing else to install.
+New here? The [quickstart](https://unstuck.sh/docs/quickstart/) gets you to a first takeover in two minutes.
 
 ## One call where your agent gets stuck
+
+With Playwright (`npm install @velmlabs/unstuck playwright`):
 
 ```ts
 import { chromium } from 'playwright';
@@ -26,12 +27,14 @@ const browser = await chromium.launch();
 const page = await browser.newPage();
 await page.goto('https://www.google.com/recaptcha/api2/demo');
 
-const unstuck = new Unstuck({ onLink: ({ url }) => console.log('Open this on any device:', url) });
+const unstuck = new Unstuck({ onLink: ({ url }) => console.log('Open this link:', url) });
 const result = await unstuck.takeover(page, { reason: 'Please solve the CAPTCHA' });
 console.log(result.status); // 'resolved' | 'cancelled' | 'timed_out' | 'failed'
 ```
 
-The person opens the link, sees your agent's live page, taps and types into it, then taps **Done**. `takeover()` returns and your agent carries on.
+The person opens the link, sees your agent's live page, taps and types into it, then taps **Done**. `takeover()` returns, and your agent carries on in the same page with the same cookies and session.
+
+By default the link opens on the agent's own machine. To open it on a phone, from anywhere, see [Local or Unstuck Cloud](#local-or-unstuck-cloud).
 
 ## Works with
 
@@ -71,6 +74,8 @@ Run your own relay on Node or Docker (`relay-node/`) or on Cloudflare Workers (`
 - The audit log records states and input counts, never what was typed.
 
 ## Develop
+
+You need Node.js 22+, pnpm 10, [Bun](https://bun.sh) (to build the engine) and [uv](https://docs.astral.sh/uv/) (for the Python SDK's tests).
 
 ```bash
 pnpm install
