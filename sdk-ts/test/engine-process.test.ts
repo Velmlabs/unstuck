@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveEnginePath, spawnEngine } from '../src/engine-process';
+import { resolveEnginePath, resolveViaEngine, spawnEngine } from '../src/engine-process';
 import { UnstuckEngineError } from '../src/errors';
 import { ENGINE, fakeEngine } from './helpers';
 
@@ -22,7 +22,8 @@ describe('resolveEnginePath', () => {
       resolveEnginePath({}, {}, fail);
     } catch (e) {
       expect((e as Error).message).toContain(`@velmlabs/unstuck-engine-${process.platform}-${process.arch}`);
-      expect((e as Error).message).toContain('Set UNSTUCK_ENGINE_PATH');
+      expect((e as Error).message).toContain('Reinstall @velmlabs/unstuck without skipping optional dependencies');
+      expect((e as Error).message).toContain('set UNSTUCK_ENGINE_PATH');
     }
   });
 });
@@ -102,5 +103,21 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     expect(err).toBeInstanceOf(UnstuckEngineError);
     expect(err.message).toContain('old engine');
     expect(err.message).toContain('UNSTUCK_ENGINE_PATH');
+  });
+});
+
+describe('resolveViaEngine', () => {
+  const base = { resolve: (id: string) => (id === '@velmlabs/unstuck-engine/package.json' ? '/nm/@velmlabs/unstuck-engine/package.json' : `/sdk-sees/${id}`) };
+  it('looks for the platform package next to @velmlabs/unstuck-engine (strict node_modules layouts)', () => {
+    const make = (from: string) => ({ resolve: (id: string) => `${from}::${id}` });
+    expect(resolveViaEngine('@velmlabs/unstuck-engine-linux-x64/bin/unstuck-engine', base, make)).toBe('/nm/@velmlabs/unstuck-engine/package.json::@velmlabs/unstuck-engine-linux-x64/bin/unstuck-engine');
+  });
+  it('falls back to resolving from the SDK itself', () => {
+    const make = () => ({
+      resolve: () => {
+        throw new Error('not found');
+      },
+    });
+    expect(resolveViaEngine('x/bin', base, make)).toBe('/sdk-sees/x/bin');
   });
 });

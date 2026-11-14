@@ -185,6 +185,9 @@ importers:
 
   sdk-ts:
     dependencies:
+      '@velmlabs/unstuck-engine':
+        specifier: workspace:*
+        version: link:../engine
       '@velmlabs/unstuck-protocol':
         specifier: workspace:*
         version: link:../protocol

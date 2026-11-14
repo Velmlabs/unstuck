@@ -7,11 +7,25 @@ import { VERSION } from './version';
 
 const requireFromHere = createRequire(import.meta.url);
 
+type Resolver = { resolve: (id: string) => string };
+
+/**
+ * Resolves a module the way @velmlabs/unstuck-engine sees it: the platform packages are its optional dependencies, which
+ * strict layouts (pnpm, Yarn PnP) don't expose to the SDK itself. Falls back to resolving from the SDK.
+ */
+export function resolveViaEngine(id: string, base: Resolver = requireFromHere, make: (from: string) => Resolver = createRequire): string {
+  try {
+    return make(base.resolve('@velmlabs/unstuck-engine/package.json')).resolve(id);
+  } catch {
+    return base.resolve(id);
+  }
+}
+
 /** Engine binary lookup: explicit option → UNSTUCK_ENGINE_PATH → @velmlabs/unstuck-engine-<platform>-<arch> package. */
 export function resolveEnginePath(
   opts: { enginePath?: string },
   env: Record<string, string | undefined> = process.env,
-  resolve: (id: string) => string = (id) => requireFromHere.resolve(id),
+  resolve: (id: string) => string = (id) => resolveViaEngine(id),
 ): string {
   if (opts.enginePath) return opts.enginePath;
   if (env.UNSTUCK_ENGINE_PATH) return env.UNSTUCK_ENGINE_PATH;
@@ -22,7 +36,7 @@ export function resolveEnginePath(
   } catch {
     throw new UnstuckEngineError(
       `Unstuck engine not found. Tried: the enginePath option, UNSTUCK_ENGINE_PATH, and the package ${pkg}. ` +
-        `Install ${pkg} or Set UNSTUCK_ENGINE_PATH to the unstuck-engine binary.`,
+        `Reinstall @velmlabs/unstuck without skipping optional dependencies, or set UNSTUCK_ENGINE_PATH to the unstuck-engine binary.`,
     );
   }
 }
