@@ -7,11 +7,12 @@ import os from 'node:os';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
-export const SUPPORTED = ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64'];
+export const SUPPORTED = ['darwin-arm64', 'linux-x64', 'linux-arm64', 'win32-x64'];
 
 /** Absolute path of the engine binary for `platform`-`arch`. */
 export function binaryPath(platform = process.platform, arch = process.arch, resolve = createRequire(import.meta.url).resolve) {
   const id = `${platform}-${arch}`;
+  if (id === 'darwin-x64') throw new Error('Unstuck 0.1.0 has no engine for Intel Macs yet (Apple silicon, Linux and Windows are supported). Set UNSTUCK_ENGINE_PATH to an engine binary you built, or follow https://unstuck.sh/docs');
   if (!SUPPORTED.includes(id)) throw new Error(`Unstuck has no engine for ${id}. Supported: ${SUPPORTED.join(', ')}`);
   const pkg = `@velmlabs/unstuck-engine-${id}`;
   try {

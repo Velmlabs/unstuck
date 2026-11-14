@@ -19,12 +19,12 @@ describe('engine builds', () => {
   it('rejects a binary of the wrong type', () => {
     const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bt-')), 'x');
     fs.writeFileSync(f, '#!/bin/sh\n');
-    expect(() => checkBinaryType(f, PLATFORMS[0])).toThrow(/darwin-arm64 build is not a Mach-O 64-bit arm64 executable/);
+    expect(() => checkBinaryType(f, PLATFORMS.find((p) => p.id === 'darwin-arm64'))).toThrow(/darwin-arm64 build is not a Mach-O 64-bit arm64 executable/);
   });
   it('builds a working linux-x64 engine', () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'eng-'));
     const bin = buildEngine(PLATFORMS.find((p) => p.id === 'linux-x64'), out);
-    checkBinaryType(bin, PLATFORMS[2]);
+    checkBinaryType(bin, PLATFORMS.find((p) => p.id === 'linux-x64'));
     expect(execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim()).toBe('0.1.0');
   }, 300_000);
 });
@@ -32,7 +32,7 @@ describe('engine builds', () => {
 describe('macOS builds', () => {
   it('reads the minimum macOS version and checks the code signature page by page', () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'mac-'));
-    const arm = buildEngine(PLATFORMS[0], out);
+    const arm = buildEngine(PLATFORMS.find((p) => p.id === 'darwin-arm64'), out);
     expect(macosInfo(arm)).toEqual({ minos: '13.0', signature: 'valid' });
     const broken = path.join(out, 'broken');
     const bytes = fs.readFileSync(arm);

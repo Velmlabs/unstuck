@@ -14,7 +14,7 @@ describe('platform wheels', () => {
   it('a wheel per platform: the right tag, the engine inside and executable, nothing from the workspace', () => {
     const fake = path.join(tmp(), 'engine');
     fs.writeFileSync(fake, '#!/bin/sh\necho 0.1.0\n', { mode: 0o755 });
-    for (const p of [PLATFORMS[2], PLATFORMS[4]]) {
+    for (const p of PLATFORMS.filter((x) => ['linux-x64', 'win32-x64'].includes(x.id))) {
       const whl = buildWheel(p, fake, tmp());
       expect(path.basename(whl)).toBe(`unstuck-0.1.0-py3-none-${p.wheel}.whl`);
       const files = py(ZIP_LIST, whl).split('\n');
@@ -38,7 +38,7 @@ describe('platform wheels', () => {
   it('installed in a fresh venv, the SDK finds its bundled engine', () => {
     const fake = path.join(tmp(), 'engine');
     fs.writeFileSync(fake, '#!/bin/sh\necho 0.1.0\n', { mode: 0o755 });
-    const whl = buildWheel(PLATFORMS[2], fake, tmp());
+    const whl = buildWheel(PLATFORMS.find((x) => x.id === 'linux-x64'), fake, tmp());
     const venv = path.join(tmp(), 'venv');
     execFileSync('uv', ['venv', '-q', venv]);
     execFileSync('uv', ['pip', 'install', '-q', '--python', path.join(venv, 'bin/python'), whl]);

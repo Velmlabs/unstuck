@@ -6,22 +6,22 @@ describe('platform packages', () => {
     expect(PLATFORMS).toEqual([
       // macOS 13: Bun's binaries are built for it (LC_BUILD_VERSION minos 13.0), so the wheel tag must not claim older.
       { id: 'darwin-arm64', bun: 'bun-darwin-arm64', os: 'darwin', cpu: 'arm64', wheel: 'macosx_13_0_arm64', exe: 'unstuck-engine', minMacos: '13.0' },
-      // x64: Bun's baseline builds, so CPUs without AVX2 (older machines, many VMs, Rosetta before macOS 15) can run them.
-      { id: 'darwin-x64', bun: 'bun-darwin-x64-baseline', os: 'darwin', cpu: 'x64', wheel: 'macosx_13_0_x86_64', exe: 'unstuck-engine', minMacos: '13.0' },
+      // Not in 0.1.0: Intel Macs (darwin-x64). Bun's cross-compiled build has an invalid code signature; it returns once
+      // it can be re-signed. x64: Bun's baseline builds, so CPUs without AVX2 (older machines, many VMs) can run them.
       { id: 'linux-x64', bun: 'bun-linux-x64-baseline', os: 'linux', cpu: 'x64', libc: 'glibc', wheel: 'manylinux_2_17_x86_64', exe: 'unstuck-engine' },
       { id: 'linux-arm64', bun: 'bun-linux-arm64', os: 'linux', cpu: 'arm64', libc: 'glibc', wheel: 'manylinux_2_17_aarch64', exe: 'unstuck-engine' },
       { id: 'win32-x64', bun: 'bun-windows-x64-baseline', os: 'win32', cpu: 'x64', wheel: 'win_amd64', exe: 'unstuck-engine.exe' },
     ]);
   });
   it('a platform package installs only on its own os/cpu and ships just the binary', () => {
-    const m = platformManifest(PLATFORMS[4], '0.1.0');
+    const m = platformManifest(PLATFORMS[3], '0.1.0');
     expect(m).toMatchObject({ name: '@velmlabs/unstuck-engine-win32-x64', version: '0.1.0', os: ['win32'], cpu: ['x64'], files: ['bin', 'LICENSE-AGPL', 'NOTICE'], author: 'Velm Labs', homepage: 'https://unstuck.sh/docs' });
     // The binary embeds the AGPL viewer.
     expect(m.license).toBe('Apache-2.0 AND AGPL-3.0-only');
     // Yarn PnP must unpack it to run it; and only glibc Linux gets the glibc builds (Alpine would fail to start them).
     expect(m.preferUnplugged).toBe(true);
     expect(m.libc).toBeUndefined();
-    expect(platformManifest(PLATFORMS[2], '0.1.0').libc).toEqual(['glibc']);
+    expect(platformManifest(PLATFORMS[1], '0.1.0').libc).toEqual(['glibc']);
     expect(m.repository).toEqual({ type: 'git', url: 'git+https://github.com/velmlabs/unstuck.git', directory: 'engine' });
     expect(m.publishConfig).toEqual({ access: 'public' });
   });

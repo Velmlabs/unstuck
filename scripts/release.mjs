@@ -42,7 +42,7 @@ const npmDir = path.join(OUT, 'npm');
 const pypiDir = path.join(OUT, 'pypi');
 fs.mkdirSync(npmDir, { recursive: true });
 
-step('engines (5 platforms)');
+step(`engines (${PLATFORMS.length} platforms)`);
 embedViewer();
 const engines = {};
 for (const p of PLATFORMS) {

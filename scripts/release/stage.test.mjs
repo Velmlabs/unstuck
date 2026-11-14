@@ -19,7 +19,7 @@ describe('staging the engine packages', () => {
     const out = tmp();
     const bin = path.join(out, 'built-engine');
     fs.writeFileSync(bin, 'binary');
-    const dir = stagePlatform(out, PLATFORMS[4], bin, '0.1.0');
+    const dir = stagePlatform(out, PLATFORMS.find((p) => p.id === 'win32-x64'), bin, '0.1.0');
     expect(fs.readdirSync(path.join(dir, 'bin'))).toEqual(['unstuck-engine.exe']);
     expect(fs.statSync(path.join(dir, 'bin/unstuck-engine.exe')).mode & 0o111).not.toBe(0);
     expect(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).os).toEqual(['win32']);

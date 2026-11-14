@@ -5,8 +5,11 @@ import path from 'node:path';
 import { binaryPath, run, SUPPORTED } from './engine-launcher.mjs';
 
 describe('engine launcher', () => {
-  it('lists the five supported platforms', () => {
-    expect(SUPPORTED).toEqual(['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64', 'win32-x64']);
+  it('lists the four supported platforms (no Intel Macs in 0.1.0)', () => {
+    expect(SUPPORTED).toEqual(['darwin-arm64', 'linux-x64', 'linux-arm64', 'win32-x64']);
+  });
+  it('tells Intel Mac users plainly that there is no engine for them yet', () => {
+    expect(() => binaryPath('darwin', 'x64', () => '')).toThrow('Unstuck 0.1.0 has no engine for Intel Macs yet (Apple silicon, Linux and Windows are supported). Set UNSTUCK_ENGINE_PATH to an engine binary you built, or follow https://unstuck.sh/docs');
   });
   it('resolves the platform package binary (with .exe on Windows)', () => {
     const resolve = (id) => `/nm/${id}`;
@@ -14,7 +17,7 @@ describe('engine launcher', () => {
     expect(binaryPath('win32', 'x64', resolve)).toBe('/nm/@velmlabs/unstuck-engine-win32-x64/bin/unstuck-engine.exe');
   });
   it('names the supported platforms for an unsupported one', () => {
-    expect(() => binaryPath('freebsd', 'x64', () => '')).toThrow('Unstuck has no engine for freebsd-x64. Supported: darwin-arm64, darwin-x64, linux-x64, linux-arm64, win32-x64');
+    expect(() => binaryPath('freebsd', 'x64', () => '')).toThrow('Unstuck has no engine for freebsd-x64. Supported: darwin-arm64, linux-x64, linux-arm64, win32-x64');
   });
   it('explains a missing platform package (optional dependencies skipped)', () => {
     const resolve = () => {

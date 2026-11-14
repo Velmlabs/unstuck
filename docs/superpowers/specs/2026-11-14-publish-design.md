@@ -58,3 +58,9 @@ Not published now: the relay packages (`relay-core`, `relay-node`, `relay-cloudf
 
 - tsconfig details for `dist` builds; the launcher's exact error text; README wording per package.
 - Whether the e2e/examples keep pnpm aliases or switch to the real names (they switch, since the packages are renamed).
+
+## Changes after the pre-publish review
+
+- Intel Macs (darwin-x64) are left out of 0.1.0 (owner): Bun's cross-compiled build has an invalid code signature and it can't be re-signed here. Four platforms ship; Intel Mac users get a clear message.
+- The viewer stays AGPL-3.0-only (owner): engine packages and wheels are `Apache-2.0 AND AGPL-3.0-only`, with both licence texts and a NOTICE offering the viewer's source.
+- PyPI under the owner's account as `unstuck` (no scopes on PyPI); an organisation can be added later.
