@@ -15,8 +15,12 @@ function signatureLayout(bytes) {
     if (bytes.readUInt32LE(off) === 0x1d) {
       const sig = bytes.readUInt32LE(off + 8);
       const blobs = {};
-      for (let j = 0; j < bytes.readUInt32BE(sig + 8); j++) blobs[bytes.readUInt32BE(sig + 12 + 8 * j)] = sig + bytes.readUInt32BE(sig + 16 + 8 * j);
-      return { cd: blobs[0], blobs };
+      const indexOf = {};
+      for (let j = 0; j < bytes.readUInt32BE(sig + 8); j++) {
+        blobs[bytes.readUInt32BE(sig + 12 + 8 * j)] = sig + bytes.readUInt32BE(sig + 16 + 8 * j);
+        indexOf[bytes.readUInt32BE(sig + 12 + 8 * j)] = sig + 12 + 8 * j; // where the entry's type is
+      }
+      return { cd: blobs[0], blobs, indexOf };
     }
     off += bytes.readUInt32LE(off + 4);
   }
@@ -83,6 +87,31 @@ describe('macOS builds', () => {
       const short = path.join(out, 'short');
       fs.writeFileSync(short, bytes);
       expect(macosInfo(short).signature).toBe('invalid');
+    });
+    /** A copy of the signed binary after `edit(bytes, layout)`; returns its signature verdict. */
+    const verdictAfter = (name, edit) => {
+      const bytes = fs.readFileSync(signed);
+      edit(bytes, signatureLayout(bytes));
+      const f = path.join(out, name);
+      fs.writeFileSync(f, bytes);
+      return macosInfo(f).signature;
+    };
+    const slotAt = (bytes, cd, n) => cd + bytes.readUInt32BE(cd + 16) - n * bytes[cd + 36]; // special slot -n
+    it('changed requirements are invalid', () => {
+      expect(verdictAfter('req', (b, { blobs }) => (b[blobs[2] + 10] ^= 0xff))).toBe('invalid');
+    });
+    it('an entitlements blob whose slot hash was zeroed is invalid, changed or not', () => {
+      expect(verdictAfter('zeroed', (b, { cd }) => b.fill(0, slotAt(b, cd, 5), slotAt(b, cd, 5) + 32))).toBe('invalid');
+      expect(verdictAfter('zeroed-changed', (b, { cd, blobs }) => (b.fill(0, slotAt(b, cd, 5), slotAt(b, cd, 5) + 32), (b[blobs[5] + 100] ^= 0xff)))).toBe('invalid');
+    });
+    it('a slot hash with its blob gone from the index is invalid', () => {
+      expect(verdictAfter('dropped', (b, { indexOf }) => b.writeUInt32BE(0x99, indexOf[5]))).toBe('invalid');
+    });
+    it('entitlements not covered by the special slots are invalid', () => {
+      expect(verdictAfter('uncovered', (b, { cd }) => b.writeUInt32BE(4, cd + 24))).toBe('invalid');
+    });
+    it('every CodeDirectory is checked: an alternate one that is not a CodeDirectory is invalid', () => {
+      expect(verdictAfter('alternate', (b, { indexOf }) => b.writeUInt32BE(0x1000, indexOf[0x10000]))).toBe('invalid');
     });
     it('changed entitlements are invalid', () => {
       const bytes = fs.readFileSync(signed);

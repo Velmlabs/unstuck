@@ -58,29 +58,42 @@ export function macosInfo(file) {
   }
   if (!sig) return { minos, signature: 'missing' };
   const blob = d.subarray(sig.off, sig.off + sig.size);
+  if (blob.readUInt32BE(0) !== 0xfade0cc0) return { minos, signature: 'invalid' }; // embedded signature SuperBlob
   const blobs = {};
   for (let i = 0; i < blob.readUInt32BE(8); i++) blobs[blob.readUInt32BE(12 + 8 * i)] = blob.readUInt32BE(16 + 8 * i);
   if (blobs[0] === undefined) return { minos, signature: 'missing' };
-  const cd = blob.subarray(blobs[0]); // CodeDirectory: flags 12, hashOffset 16, nSpecialSlots 24, nCodeSlots 28, codeLimit 32
-  const flags = cd.readUInt32BE(12);
+  const flags = blob.readUInt32BE(blobs[0] + 12);
+  // macOS checks the strongest CodeDirectory, so every one present (slot 0 and alternates 0x1000-0x1004) must hold.
+  const cds = [0, 0x1000, 0x1001, 0x1002, 0x1003, 0x1004].filter((t) => blobs[t] !== undefined);
+  const ok = cds.every((t) => codeDirectoryMatches(d, blob, blobs, blob.subarray(blobs[t]), sig.off));
+  return { minos, signature: ok ? 'valid' : 'invalid', flags };
+}
+
+/**
+ * One CodeDirectory (flags 12, hashOffset 16, nSpecialSlots 24, nCodeSlots 28, codeLimit 32, hashSize 36, hashType 37,
+ * pageShift 39) matches the file: it covers all code up to the signature, every page hashes to its slot, and each of
+ * the requirements (2), entitlements (5) and DER entitlements (7) blobs is covered by its special slot -n and hashes to
+ * it; a special slot with no blob must be empty.
+ */
+function codeDirectoryMatches(d, blob, blobs, cd, sigOff) {
+  if (cd.readUInt32BE(0) !== 0xfade0c02) return false;
   const hashOffset = cd.readUInt32BE(16);
   const nSpecial = cd.readUInt32BE(24);
   const nCode = cd.readUInt32BE(28);
   const codeLimit = cd.readUInt32BE(32);
   const [hashSize, hashType, , pageShift] = [cd[36], cd[37], cd[38], cd[39]];
+  const algo = { 1: 'sha1', 2: 'sha256', 3: 'sha256', 4: 'sha384' }[hashType];
+  if (!algo) return false;
   const pageSize = 2 ** pageShift;
-  const hash = (b) => createHash(hashType === 2 ? 'sha256' : 'sha1').update(b).digest().subarray(0, hashSize);
+  const hash = (b) => createHash(algo).update(b).digest().subarray(0, hashSize);
   const slot = (i) => cd.subarray(hashOffset + i * hashSize, hashOffset + (i + 1) * hashSize);
-  const result = (ok) => ({ minos, signature: ok ? 'valid' : 'invalid', flags });
-  if (codeLimit !== sig.off || nCode !== Math.ceil(codeLimit / pageSize)) return result(false);
-  for (let p = 0; p < nCode; p++) if (!hash(d.subarray(p * pageSize, Math.min((p + 1) * pageSize, codeLimit))).equals(slot(p))) return result(false);
-  // Special slot -n holds the hash of the blob of type n (2 requirements, 5 entitlements, 7 DER entitlements).
+  if (codeLimit !== sigOff || nCode !== Math.ceil(codeLimit / pageSize)) return false;
+  for (let p = 0; p < nCode; p++) if (!hash(d.subarray(p * pageSize, Math.min((p + 1) * pageSize, codeLimit))).equals(slot(p))) return false;
   for (const n of [2, 5, 7]) {
-    if (n > nSpecial || blobs[n] === undefined) continue;
-    const stored = slot(-n);
-    if (stored.every((b) => b === 0)) continue;
-    const b = blob.subarray(blobs[n], blobs[n] + blob.readUInt32BE(blobs[n] + 4));
-    if (!hash(b).equals(stored)) return result(false);
+    if (blobs[n] !== undefined) {
+      if (n > nSpecial) return false;
+      if (!hash(blob.subarray(blobs[n], blobs[n] + blob.readUInt32BE(blobs[n] + 4))).equals(slot(-n))) return false;
+    } else if (n <= nSpecial && !slot(-n).every((b) => b === 0)) return false;
   }
-  return result(true);
+  return true;
 }
