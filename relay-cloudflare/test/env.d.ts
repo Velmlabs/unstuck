@@ -6,5 +6,6 @@ declare namespace Cloudflare {
     RELAY_OPEN?: string;
     VIEWER_LIMIT?: RateLimit;
     AGENT_LIMIT?: RateLimit;
+    AGENT_IP_LIMIT?: RateLimit;
   }
 }

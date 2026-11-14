@@ -1,6 +1,6 @@
 import { KEY_SUBPROTOCOL_PREFIX, RELAY_CLOSE, SESSION_ID_RE } from '@velmlabs/unstuck-protocol';
-import { createKeyAuthorizer, hashKey, type Authorize, type RelayEvent } from '@velmlabs/unstuck-relay-core';
-import { H_ACCOUNT, H_KEY_HASH, H_SESSION, makeRelaySessionDO, upgradeResponse } from './durable-object';
+import { createKeyAuthorizer, hashKey, refusalReason, type Authorize, type RelayEvent } from '@velmlabs/unstuck-relay-core';
+import { H_ACCOUNT, H_IP, H_KEY_HASH, H_SESSION, makeRelaySessionDO, upgradeResponse } from './durable-object';
 
 export interface RelayEnv {
   RELAY_SESSION: DurableObjectNamespace;
@@ -11,6 +11,8 @@ export interface RelayEnv {
   RELAY_OPEN?: string;
   VIEWER_LIMIT?: RateLimit;
   AGENT_LIMIT?: RateLimit;
+  /** Agent upgrades per client IP (key brute force). The binding can't count only failures, so it counts all. */
+  AGENT_IP_LIMIT?: RateLimit;
 }
 
 export interface RelayWorkerOptions<E> {
@@ -20,7 +22,9 @@ export interface RelayWorkerOptions<E> {
   now?: () => number;
 }
 
-const CSP = "default-src 'self'; img-src 'self' blob: data:; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'";
+const CSP = "default-src 'self'; img-src 'self' blob: data:; connect-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+const EXPIRED_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+const HSTS = 'max-age=31536000';
 const EXPIRED_HTML =
   '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unstuck</title></head><body style="font:16px system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;background:#0f172a;color:#e2e8f0"><main style="text-align:center;padding:16px"><h1 style="font-size:20px">This link has expired or is invalid</h1><p>The takeover already finished or timed out. You can close this tab.</p></main></body></html>';
 const pageHeaders = (csp: string) => ({
@@ -40,7 +44,7 @@ const defaultAuthorize = (env: RelayEnv): Authorize =>
 function refuse(status: number, error: string): Response {
   const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
   server.accept();
-  server.close(RELAY_CLOSE.refused(status), JSON.stringify({ error }));
+  server.close(RELAY_CLOSE.refused(status), refusalReason(error));
   return upgradeResponse(client);
 }
 
@@ -49,17 +53,30 @@ export function createRelayWorker<E extends RelayEnv = RelayEnv>(opts: RelayWork
   const now = opts.now ?? Date.now;
   const RelaySessionDO = makeRelaySessionDO<E>({ onEvent: opts.onEvent, now });
 
+  /** Every response is served over https (workers.dev or a custom domain): HSTS everywhere. */
   async function fetch(req: Request, env: E): Promise<Response> {
+    const res = await route(req, env);
+    const headers = new Headers(res.headers);
+    headers.set('strict-transport-security', HSTS);
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers, webSocket: res.webSocket });
+  }
+
+  async function route(req: Request, env: E): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
     if (path === '/healthz') return Response.json({ ok: true });
-    if (path.startsWith('/assets/')) return env.ASSETS.fetch(req);
+    if (path.startsWith('/assets/')) {
+      const asset = await env.ASSETS.fetch(req);
+      const headers = new Headers(asset.headers);
+      headers.set('x-content-type-options', 'nosniff');
+      return new Response(asset.body, { status: asset.status, headers });
+    }
 
     const page = /^\/s\/([^/]+)$/.exec(path);
     if (page) {
       const id = page[1]!;
       const status = SESSION_ID_RE.test(id) ? (await stubFor(env, id).fetch('https://do/status', { headers: { [H_SESSION]: id } })).status : 404;
-      if (status !== 204) return new Response(EXPIRED_HTML, { status: 404, headers: pageHeaders("default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'") });
+      if (status !== 204) return new Response(EXPIRED_HTML, { status: 404, headers: pageHeaders(EXPIRED_CSP) });
       const index = await env.ASSETS.fetch(new Request(new URL('/', url)));
       return new Response(index.body, { status: 200, headers: pageHeaders(CSP) });
     }
@@ -68,12 +85,15 @@ export function createRelayWorker<E extends RelayEnv = RelayEnv>(opts: RelayWork
     if (!sock || !SESSION_ID_RE.test(sock[2]!)) return new Response('not found', { status: 404 });
     if (req.headers.get('upgrade')?.toLowerCase() !== 'websocket') return new Response('expected a WebSocket upgrade', { status: 426 });
     const [, kind, id] = sock as unknown as [string, 'agent' | 'ws', string];
-    const ip = req.headers.get('cf-connecting-ip') ?? 'unknown';
+    const clientIp = req.headers.get('cf-connecting-ip');
+    const ip = clientIp ?? 'unknown';
 
     if (kind === 'ws') {
       if (env.VIEWER_LIMIT && !(await env.VIEWER_LIMIT.limit({ key: ip })).success) return new Response('too many requests', { status: 429 });
-      return stubFor(env, id).fetch('https://do/viewer', { headers: { upgrade: 'websocket', [H_SESSION]: id } });
+      return stubFor(env, id).fetch('https://do/viewer', { headers: { upgrade: 'websocket', [H_SESSION]: id, ...(clientIp ? { [H_IP]: clientIp } : {}) } });
     }
+
+    if (env.AGENT_IP_LIMIT && !(await env.AGENT_IP_LIMIT.limit({ key: ip })).success) return refuse(429, 'rate_limited');
 
     const offered = (req.headers.get('sec-websocket-protocol') ?? '').split(',').map((p) => p.trim());
     const key = offered.find((p) => p.startsWith(KEY_SUBPROTOCOL_PREFIX))?.slice(KEY_SUBPROTOCOL_PREFIX.length) ?? null;

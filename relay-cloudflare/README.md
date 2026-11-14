@@ -14,7 +14,7 @@ pnpm deploy                             # copies the viewer into ./public, then 
 Point agents at it with `UNSTUCK_RELAY_URL=wss://<your-worker>.workers.dev` and `UNSTUCK_AGENT_KEY=<one of the keys>`.
 
 - **Local:** `pnpm dev` (wrangler dev). Set `RELAY_OPEN = "1"` under `[vars]` to accept any agent while testing; never in production.
-- **Rate limits:** the template binds `VIEWER_LIMIT` (30 upgrades/min per IP) and `AGENT_LIMIT` (20 registrations/min per key) through Workers Rate Limiting. Remove the `[[ratelimits]]` blocks to turn them off.
+- **Rate limits:** the template binds `VIEWER_LIMIT` (30 upgrades/min per IP), `AGENT_LIMIT` (20 registrations/min per key) and `AGENT_IP_LIMIT` (60 agent upgrades/min per IP, against key guessing) through Workers Rate Limiting. Remove the `[[ratelimits]]` blocks to turn them off.
 - **Housekeeping:** each Durable Object keeps only a small session record (no screen data) and an alarm. When the takeover ends, expires (at most 1 hour) or its agent stays gone for 60 seconds, it deletes its storage and alarm.
 - **Limits to know:** Cloudflare caps WebSocket message size (see its Workers limits page); screen frames are JPEGs, usually well under 1 MB. Hibernatable sockets don't report buffered bytes, so slow-viewer frame dropping is left to the engine, which already sends newest-frame-only.
 
