@@ -1,8 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { binaryPath, run, SUPPORTED } from './engine-launcher.mjs';
+const madeDirs = [];
+/** A temporary folder this test file removes when it finishes (engine builds here are ~100 MB each). */
+const tmpDir = (prefix) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  madeDirs.push(d);
+  return d;
+};
+afterAll(() => madeDirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
+
 
 describe('engine launcher', () => {
   it('lists the five supported platforms, Intel Macs included', () => {
@@ -26,7 +35,7 @@ describe('engine launcher', () => {
     expect(() => binaryPath('linux', 'arm64', resolve)).toThrow('@velmlabs/unstuck-engine-linux-arm64 is not installed');
   });
   it('runs the binary with the same arguments and passes its exit code on', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'launch-'));
+    const dir = tmpDir('launch-');
     const bin = path.join(dir, 'fake');
     fs.writeFileSync(bin, '#!/bin/sh\n[ "$1" = "--mcp" ] && exit 3\nexit 9\n', { mode: 0o755 });
     expect(await run(['--mcp'], bin)).toBe(3);

@@ -1,13 +1,22 @@
-// Publishing 0.1.2: the TypeScript packages pack as built ES modules + bundled types, and the SDK imports from a clean folder.
-import { describe, it, expect, beforeAll } from 'vitest';
+// Publishing 0.1.3: the TypeScript packages pack as built ES modules + bundled types, and the SDK imports from a clean folder.
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { stageLauncher } from './release/stage.mjs';
+const madeDirs = [];
+/** A temporary folder this test file removes when it finishes (engine builds here are ~100 MB each). */
+const tmpDir = (prefix) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  madeDirs.push(d);
+  return d;
+};
+afterAll(() => madeDirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
+
 
 const PKGS = { protocol: '@velmlabs/unstuck-protocol', core: '@velmlabs/unstuck-core', 'sdk-ts': '@velmlabs/unstuck' };
-const out = fs.mkdtempSync(path.join(os.tmpdir(), 'pack-'));
+const out = tmpDir('pack-');
 const tarballs = {};
 const listing = (tgz) => execFileSync('tar', ['-tzf', tgz], { encoding: 'utf8' }).trim().split('\n').map((f) => f.replace(/^package\//, '')).sort();
 
@@ -33,7 +42,7 @@ describe('packed packages', () => {
     for (const dir of Object.keys(PKGS)) {
       const pkg = JSON.parse(execFileSync('tar', ['-xzOf', tarballs[dir], 'package/package.json'], { encoding: 'utf8' }));
       expect(pkg.name, dir).toBe(PKGS[dir]);
-      expect(pkg.version, dir).toBe('0.1.2');
+      expect(pkg.version, dir).toBe('0.1.3');
       expect(pkg.main, dir).toBe('./dist/index.js');
       expect(pkg.types, dir).toBe('./dist/index.d.ts');
       expect(JSON.stringify(pkg.exports), dir).not.toContain('src/');
@@ -48,10 +57,10 @@ describe('packed packages', () => {
   });
 
   it('the SDK imports from a clean folder with only the packed tarballs', () => {
-    const app = fs.mkdtempSync(path.join(os.tmpdir(), 'app-'));
+    const app = tmpDir('app-');
     fs.writeFileSync(path.join(app, 'package.json'), '{"type":"module"}');
     // The SDK depends on the generated launcher package; its platform packages are optional (not packed here).
-    const launcher = execFileSync('npm', ['pack', '--pack-destination', out], { cwd: stageLauncher(fs.mkdtempSync(path.join(os.tmpdir(), 'stage-')), '0.1.2'), encoding: 'utf8' }).trim().split('\n').pop();
+    const launcher = execFileSync('npm', ['pack', '--pack-destination', out], { cwd: stageLauncher(tmpDir('stage-'), '0.1.3'), encoding: 'utf8' }).trim().split('\n').pop();
     execFileSync('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', '--omit=optional', tarballs.protocol, tarballs['sdk-ts'], path.join(out, launcher)], { cwd: app, stdio: 'ignore' });
     const r = execFileSync('node', ['-e', "import('@velmlabs/unstuck').then((m) => console.log(typeof m.Unstuck, typeof m.UnstuckEngineError))"], { cwd: app, encoding: 'utf8' });
     expect(r.trim()).toBe('function function');

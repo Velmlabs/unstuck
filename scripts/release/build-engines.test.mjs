@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -6,6 +6,15 @@ import path from 'node:path';
 import { buildEngine, checkBinaryType, EXPECTED_TYPE, macosInfo } from './build-engines.mjs';
 import { PLATFORMS } from './platforms.mjs';
 import { adhocSign, ensureRcodesign } from './rcodesign.mjs';
+const madeDirs = [];
+/** A temporary folder this test file removes when it finishes (engine builds here are ~100 MB each). */
+const tmpDir = (prefix) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  madeDirs.push(d);
+  return d;
+};
+afterAll(() => madeDirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
+
 
 const root = path.join(path.dirname(new URL(import.meta.url).pathname), '../..');
 /** Where a SuperBlob's blobs and the CodeDirectory are in a signed Mach-O (the test edits them in place). */
@@ -37,21 +46,21 @@ describe('engine builds', () => {
     });
   });
   it('rejects a binary of the wrong type', () => {
-    const f = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'bt-')), 'x');
+    const f = path.join(tmpDir('bt-'), 'x');
     fs.writeFileSync(f, '#!/bin/sh\n');
     expect(() => checkBinaryType(f, PLATFORMS.find((p) => p.id === 'darwin-arm64'))).toThrow(/darwin-arm64 build is not a Mach-O 64-bit arm64 executable/);
   });
   it('builds a working linux-x64 engine', () => {
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'eng-'));
+    const out = tmpDir('eng-');
     const bin = buildEngine(PLATFORMS.find((p) => p.id === 'linux-x64'), out);
     checkBinaryType(bin, PLATFORMS.find((p) => p.id === 'linux-x64'));
-    expect(execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim()).toBe('0.1.2');
+    expect(execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim()).toBe('0.1.3');
   }, 300_000);
 });
 
 describe('macOS builds', () => {
   it('reads the minimum macOS version and checks the code signature page by page', () => {
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'mac-'));
+    const out = tmpDir('mac-');
     const arm = buildEngine(PLATFORMS.find((p) => p.id === 'darwin-arm64'), out);
     expect(macosInfo(arm)).toMatchObject({ minos: '13.0', signature: 'valid' });
     const broken = path.join(out, 'broken');
@@ -62,7 +71,7 @@ describe('macOS builds', () => {
   }, 300_000);
 
   describe('darwin-x64: Bun keeps its own signature, rcodesign replaces it with an ad-hoc one', () => {
-    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'mac-x64-'));
+    const out = tmpDir('mac-x64-');
     let raw;
     let signed;
     it('Bun\'s raw build is invalid: its signature no longer matches the file', () => {

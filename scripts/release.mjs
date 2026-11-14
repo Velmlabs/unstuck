@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publishing 0.1.2 (docs/superpowers/specs/2026-11-14-publish-design.md).
+// Publishing 0.1.3 (docs/superpowers/specs/2026-11-14-publish-design.md).
 //   pnpm release           dry run: build everything into release/, prove it works from a clean install, and record each
 //                          artifact's SHA-256 with the commit in release/dry-run-passed.json
 //   pnpm release:publish   publishes exactly those artifacts (scripts/publish.mjs)
@@ -20,7 +20,7 @@ import { stageLauncher, stagePlatform } from './release/stage.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
-const VERSION = '0.1.2';
+const VERSION = '0.1.3';
 const TS = [
   { dir: 'protocol', name: '@velmlabs/unstuck-protocol' },
   { dir: 'core', name: '@velmlabs/unstuck-core' },
@@ -136,6 +136,9 @@ const noEngineOverride = { UNSTUCK_ENGINE_PATH: '', PLAYWRIGHT_BROWSERS_PATH: pr
 
 step('TypeScript: clean folder, npm install, Quickstart takeover');
 const app = fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-app-'));
+// The clean-install folders hold an engine (~100 MB) and a Python venv: removed when the dry run exits, pass or fail.
+const scratch = [app];
+process.on('exit', () => scratch.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
 sh('npm', ['init', '-y'], { cwd: app, stdio: 'ignore' });
 sh('npm', ['pkg', 'set', 'type=module'], { cwd: app, stdio: 'ignore' });
 sh('npm', ['install', '--no-audit', '--no-fund', ...hostTarballs, 'playwright@1.63.0', 'tsx@4'], { cwd: app, stdio: 'ignore', env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } });
@@ -168,7 +171,9 @@ if (!tools.includes('request_human_takeover')) throw new Error(`MCP tools: ${too
 console.log(`tools: ${tools.join(', ')}`);
 
 step('Python: fresh venv, pip install, Playwright takeover');
-const venv = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-py-')), 'venv');
+const venvRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-py-'));
+scratch.push(venvRoot);
+const venv = path.join(venvRoot, 'venv');
 sh('uv', ['venv', '-q', venv]);
 const pyWheel = wheels.find((w) => w.endsWith(`${host.wheel}.whl`));
 sh('uv', ['pip', 'install', '-q', '--python', path.join(venv, 'bin/python'), pyWheel, 'playwright==1.63.0']);

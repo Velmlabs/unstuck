@@ -1,11 +1,20 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { findViolations, main } from './check-runtime-agnostic.mjs';
+const madeDirs = [];
+/** A temporary folder this test file removes when it finishes (engine builds here are ~100 MB each). */
+const tmpDir = (prefix) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  madeDirs.push(d);
+  return d;
+};
+afterAll(() => madeDirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
+
 
 function tmpDirWith(files) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rt-check-'));
+  const dir = tmpDir('rt-check-');
   for (const [name, body] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
     fs.writeFileSync(path.join(dir, name), body);

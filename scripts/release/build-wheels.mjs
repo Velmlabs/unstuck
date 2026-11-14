@@ -22,14 +22,18 @@ export function buildWheel(platform, binary, out) {
   } finally {
     fs.rmSync(binDir, { recursive: true, force: true });
   }
-  const pure = fs.readdirSync(work).find((f) => f.endsWith('-py3-none-any.whl'));
-  execFileSync('uvx', ['wheel==0.45.1', 'tags', '--platform-tag', platform.wheel, '--remove', path.join(work, pure)], { stdio: 'ignore' });
-  const tagged = fs.readdirSync(work).find((f) => f.endsWith(`-${platform.wheel}.whl`));
-  markPlatlib(path.join(work, tagged));
-  fs.mkdirSync(out, { recursive: true });
-  const dest = path.join(out, tagged);
-  fs.copyFileSync(path.join(work, tagged), dest);
-  return dest;
+  try {
+    const pure = fs.readdirSync(work).find((f) => f.endsWith('-py3-none-any.whl'));
+    execFileSync('uvx', ['wheel==0.45.1', 'tags', '--platform-tag', platform.wheel, '--remove', path.join(work, pure)], { stdio: 'ignore' });
+    const tagged = fs.readdirSync(work).find((f) => f.endsWith(`-${platform.wheel}.whl`));
+    markPlatlib(path.join(work, tagged));
+    fs.mkdirSync(out, { recursive: true });
+    const dest = path.join(out, tagged);
+    fs.copyFileSync(path.join(work, tagged), dest);
+    return dest;
+  } finally {
+    fs.rmSync(work, { recursive: true, force: true }); // each work folder holds a full wheel (~50 MB)
+  }
 }
 
 // A wheel with a native binary isn't pure Python: Root-Is-Purelib must be false so installers use platlib. The RECORD
