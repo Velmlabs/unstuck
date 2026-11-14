@@ -466,6 +466,62 @@ describe('incomplete links and the six-digit code', () => {
       expect(sent).toEqual([{ t: 'text', text: 'hello there' }]);
     });
 
+    it('Final: without a field map, a tap on the mirror keeps the keyboard opened with the Keyboard button', () => {
+      setup();
+      const canvas = goLive();
+      const bridge = screen.getByTestId('keyboard-bridge') as HTMLInputElement;
+      fireEvent.click(screen.getByRole('button', { name: /^keyboard$/i }));
+      tap(canvas, 150, 170);
+      expect(document.activeElement).toBe(bridge);
+    });
+
+    it('Final: a late "nothing focused" report for an earlier tap does not close the keyboard of a newer tap', () => {
+      const { canvas, bridge } = live();
+      tap(canvas, 20, 20); // a button on the page
+      tap(canvas, 150, 170); // then the code field
+      act(() => handlers.onFocus?.(null)); // the report for the first tap arrives late
+      expect(document.activeElement).toBe(bridge);
+      act(() => handlers.onFocus?.('otp')); // the report for the second tap
+      expect(document.activeElement).toBe(bridge);
+      expect(screen.queryByRole('button', { name: /type here/i })).toBeNull();
+    });
+
+    const withViewport = (height: number, fn: (vv: { height: number; offsetTop: number }, fire: () => void) => void) => {
+      const listeners: Record<string, () => void> = {};
+      const vv = { height, offsetTop: 0, addEventListener: (t: string, f: () => void) => (listeners[t] = f), removeEventListener: () => {} };
+      Object.defineProperty(window, 'visualViewport', { value: vv, configurable: true });
+      try {
+        fn(vv, () => act(() => listeners.resize?.()));
+      } finally {
+        Object.defineProperty(window, 'visualViewport', { value: undefined, configurable: true });
+      }
+    };
+
+    it('Final: the Keyboard button and the chip never lift the mirror (there is no field to keep in view)', () => {
+      withViewport(800, (vv, fire) => {
+        setup();
+        const canvas = goLive();
+        fireEvent.click(screen.getByRole('button', { name: /^keyboard$/i }));
+        vv.height = 120;
+        fire();
+        expect((canvas.parentElement as HTMLElement).style.transform).toBe('');
+      });
+    });
+
+    it('Final: tapping a lower field while the keyboard is already open lifts the mirror for that field at once', () => {
+      withViewport(800, (vv, fire) => {
+        const { canvas } = live();
+        tap(canvas, 150, 170);
+        vv.height = 220;
+        fire();
+        const stage = canvas.parentElement as HTMLElement;
+        const first = Number(/-(\d+)px/.exec(stage.style.transform)?.[1] ?? 0);
+        tap(canvas, 150, 270); // the lower text field: no resize event this time
+        const second = Number(/-(\d+)px/.exec(stage.style.transform)?.[1] ?? 0);
+        expect(second).toBeGreaterThan(first);
+      });
+    });
+
     it('keeps the field in view above the keyboard, and lets go when the keyboard closes', () => {
       const listeners: Record<string, () => void> = {};
       const vv = { height: 800, addEventListener: (t: string, f: () => void) => (listeners[t] = f), removeEventListener: () => {} };

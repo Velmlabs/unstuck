@@ -25,7 +25,7 @@ beforeEach(() => void vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 
 afterEach(() => void vi.useRealTimers());
 
 describe('field feed', () => {
-  it('scans on the first frame and sends the map; frames within 500 ms do not rescan, a later one does', async () => {
+  it('scans on the first frame and sends the map; frames within 500 ms do not rescan at once, the window\'s trailing scan does', async () => {
     const t = setup();
     t.feed.onFrame();
     await flush();
@@ -34,9 +34,9 @@ describe('field feed', () => {
     t.feed.onFrame();
     await flush();
     expect(t.scan).toHaveBeenCalledTimes(1);
-    vi.advanceTimersByTime(300);
     t.setMap([otp, email]);
-    t.feed.onFrame();
+    // The throttled frame got a trailing scan at the end of the window (500 ms), which sends the new map.
+    vi.advanceTimersByTime(300);
     await flush();
     expect(t.scan).toHaveBeenCalledTimes(2);
     expect(t.sent.at(-1)).toEqual({ t: 'fields', fields: [otp, email] });
@@ -110,5 +110,48 @@ describe('field feed', () => {
     t.feed.onInput(wheel);
     await flush();
     expect(t.sent).toEqual([{ t: 'fields', fields: [otp] }]);
+  });
+
+  it('Final: a frame inside the 500 ms window gets one trailing scan when the window ends (the page settled)', async () => {
+    const t = setup();
+    t.feed.onFrame();
+    await flush();
+    t.setMap([otp, email]);
+    vi.advanceTimersByTime(100);
+    t.feed.onFrame(); // throttled
+    t.feed.onFrame(); // throttled
+    await flush();
+    expect(t.scan).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(400);
+    await flush();
+    expect(t.scan).toHaveBeenCalledTimes(2);
+    expect(t.sent.at(-1)).toEqual({ t: 'fields', fields: [otp, email] });
+  });
+
+  it('Final: one scan at a time; a burst of triggers while it runs gives exactly one more, so a slow page is never starved', async () => {
+    const t = setup();
+    let release!: () => void;
+    t.scan.mockImplementationOnce(() => new Promise((r) => (release = () => r([otp]))));
+    t.feed.onInput(wheel);
+    for (let i = 0; i < 20; i++) t.feed.onInput(wheel);
+    await flush();
+    expect(t.scan).toHaveBeenCalledTimes(1);
+    release();
+    await flush();
+    expect(t.sent).toContainEqual({ t: 'fields', fields: [otp] });
+    expect(t.scan).toHaveBeenCalledTimes(2);
+  });
+
+  it('Final: a forced send (viewer joined) is kept even when an ordinary scan was already running', async () => {
+    const t = setup();
+    t.feed.onFrame();
+    await flush(); // the map is sent once
+    let release!: () => void;
+    t.scan.mockImplementationOnce(() => new Promise((r) => (release = () => r([otp]))));
+    t.feed.onInput(wheel); // an ordinary scan, still running
+    t.feed.onTargetChanged(); // a new viewer: must get the map even though it is unchanged
+    release();
+    await flush();
+    expect(t.sent.filter((m) => m.t === 'fields')).toHaveLength(2);
   });
 });

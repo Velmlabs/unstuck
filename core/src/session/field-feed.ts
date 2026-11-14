@@ -19,23 +19,51 @@ export function createFieldFeed(deps: { scan: () => Promise<Field[]>; focus: () 
   let lastScanAt = -Infinity;
   let last: Field[] = [];
   let lastJson = '[]';
-  let gen = 0;
+  // One scan at a time: triggers while it runs mark the map dirty and get exactly one more scan afterwards, so a slow
+  // page (or a remote browser) is never starved and a trackpad's 60 wheel events a second cost one or two scans.
+  let inFlight = false;
+  let dirty = false;
+  /** A forced send (viewer joined, target changed) sticks until a scan has run with it. */
+  let pendingForce = false;
+  let trailing: ReturnType<typeof setTimeout> | null = null;
 
-  const scan = (force: boolean): void => {
+  const run = (): void => {
+    if (stopped) return;
+    if (inFlight) return void (dirty = true);
+    inFlight = true;
     lastScanAt = Date.now();
-    const mine = ++gen;
+    const force = pendingForce;
+    pendingForce = false;
     deps
       .scan()
       .then((fields) => {
-        if (stopped || mine !== gen) return; // a newer scan supersedes this one
+        if (stopped) return;
         const json = JSON.stringify(fields);
-        const changed = json !== lastJson;
-        if (!changed && !(force && fields.length > 0)) return;
+        if (json === lastJson && !(force && fields.length > 0)) return;
         last = fields;
         lastJson = json;
         deps.send({ t: 'fields', fields });
       })
-      .catch(() => {}); // a page mid-navigation: the next trigger scans again
+      .catch(() => {}) // a page mid-navigation: the next trigger scans again
+      .finally(() => {
+        inFlight = false;
+        if (dirty) {
+          dirty = false;
+          run();
+        }
+      });
+  };
+
+  /** Scans now, or (frames within 500 ms of the last scan) once the window ends, so a page that settles is seen. */
+  const request = (immediate: boolean, force = false): void => {
+    if (stopped) return;
+    if (force) pendingForce = true;
+    const wait = lastScanAt + FRAME_INTERVAL_MS - Date.now();
+    if (immediate || wait <= 0) return run();
+    trailing ??= setTimeout(() => {
+      trailing = null;
+      run();
+    }, wait);
   };
 
   const resend = setInterval(() => {
@@ -44,13 +72,13 @@ export function createFieldFeed(deps: { scan: () => Promise<Field[]>; focus: () 
 
   return {
     onFrame() {
-      if (!stopped && Date.now() - lastScanAt >= FRAME_INTERVAL_MS) scan(false);
+      request(false);
     },
     onInput(msg) {
       if (stopped) return;
       const tap = msg.t === 'mouse' && msg.action === 'up';
       if (!(tap || msg.t === 'wheel' || (msg.t === 'key' && msg.action === 'down') || msg.t === 'text')) return;
-      scan(false);
+      request(true);
       if (tap)
         deps
           .focus()
@@ -58,11 +86,12 @@ export function createFieldFeed(deps: { scan: () => Promise<Field[]>; focus: () 
           .catch(() => {});
     },
     onTargetChanged() {
-      if (!stopped) scan(true);
+      request(true, true);
     },
     stop() {
       stopped = true;
       clearInterval(resend);
+      if (trailing) clearTimeout(trailing);
     },
   };
 }

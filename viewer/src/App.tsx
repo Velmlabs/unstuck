@@ -103,6 +103,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const bridgeKind = useRef<FieldKind>('text');
   const bridgeBoxRef = useRef<Box | null>(null);
   const mappedTap = useRef(false);
+  /** Taps sent whose focus report hasn't arrived yet: only the newest tap's report may open or close anything. */
+  const awaitingFocus = useRef(0);
   const [chip, setChip] = useState<FieldKind | null>(null);
   const sockRef = useRef<ViewerSocket | null>(null);
   const pageSize = useRef({ width: 0, height: 0 });
@@ -121,6 +123,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       onCodeRequest: (invalid) => setCodeAsk({ invalid }),
       onFields: (fields) => void (fieldsRef.current = fields),
       onFocus: (kind) => {
+        awaitingFocus.current = Math.max(0, awaitingFocus.current - 1);
+        if (awaitingFocus.current > 0) return; // a report for an earlier tap: a newer one is on its way
         const typing = document.activeElement === bridgeRef.current;
         if (kind === null) {
           setChip(null);
@@ -203,11 +207,23 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const box = bridgeBox(field, { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height }, pageSize.current);
     configureBridge(el, kind);
     bridgeKind.current = kind;
-    bridgeBoxRef.current = box;
+    bridgeBoxRef.current = field ? box : null; // only a tapped field is kept in view above the keyboard
     mappedTap.current = field !== null;
     Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
     el.focus({ preventScroll: true }); // inside the tap's own handler, or iOS won't open the keyboard
     setChip(null);
+    relift(); // the keyboard may already be open (another field was being typed into)
+  };
+  /** Lifts the mirror so the tapped field sits above the keyboard (the visual viewport), or drops the lift. */
+  const relift = () => {
+    const vv = window.visualViewport;
+    const stage = stageRef.current;
+    const box = bridgeBoxRef.current;
+    if (!vv || !stage) return;
+    if (document.activeElement !== bridgeRef.current || !box) return void (stage.style.transform = '');
+    const current = Number.parseFloat(stage.style.transform.slice('translateY('.length)) || 0;
+    const lift = liftOffset(box, (vv.offsetTop || 0) + vv.height, stage.getBoundingClientRect().top - current);
+    stage.style.transform = lift ? `translateY(-${lift}px)` : '';
   };
   const closeBridge = () => {
     bridgeRef.current?.blur();
@@ -239,7 +255,9 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     tapRef.current = null;
     if (!tap || Math.hypot(e.clientX - tap.x, e.clientY - tap.y) >= TAP_SLOP_PX) return;
     if (tap.field) openBridge(tap.field.kind, tap.field);
-    else if (document.activeElement === bridgeRef.current) closeBridge();
+    // Only a keyboard a field tap opened closes on a tap elsewhere: the Keyboard button's stays (older engines send no
+    // map, and fields the map can't see, like cross-origin frames, still need typing).
+    else if (document.activeElement === bridgeRef.current && mappedTap.current) closeBridge();
   };
 
   /** Always pair a press with a release, even if the pointer ended in the letterbox or was cancelled. */
@@ -252,6 +270,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     pressed.current = null;
     e.preventDefault();
     send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers: modifiersOf(e) });
+    awaitingFocus.current++;
   };
 
   const cancel = (e: PointerEvent) => {
@@ -322,14 +341,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const onResize = () => {
-      const stage = stageRef.current;
-      const box = bridgeBoxRef.current;
-      if (!stage) return;
-      if (document.activeElement !== bridgeRef.current || !box) return void (stage.style.transform = '');
-      const lift = liftOffset(box, vv.height, stage.getBoundingClientRect().top - (Number.parseFloat(stage.style.transform.slice(11)) || 0));
-      stage.style.transform = lift ? `translateY(-${lift}px)` : '';
-    };
+    const onResize = () => relift();
     vv.addEventListener('resize', onResize);
     return () => vv.removeEventListener('resize', onResize);
   }, [screen.kind]);

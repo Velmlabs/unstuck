@@ -96,4 +96,15 @@ describe('browserPlatformIsMac', () => {
     });
     expect(await browserPlatformIsMac(cdp)).toBe(false);
   });
+
+  it('Final: a failed check (page navigating) is retried on the next key, not cached', async () => {
+    const cdp = new FakeCdp();
+    let calls = 0;
+    cdp.respond('Runtime.evaluate', () => {
+      if (calls++ === 0) throw new Error('Execution context was destroyed');
+      return { result: { value: 'MacIntel' } };
+    });
+    expect(await browserPlatformIsMac(cdp)).toBe(false);
+    expect(await browserPlatformIsMac(cdp)).toBe(true);
+  });
 });

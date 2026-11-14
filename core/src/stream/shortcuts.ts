@@ -48,7 +48,10 @@ export function browserPlatformIsMac(cdp: CdpClient): Promise<boolean> {
     p = cdp
       .send<{ result?: { value?: unknown } }>('Runtime.evaluate', { expression: 'navigator.platform', returnByValue: true })
       .then((r) => /^mac/i.test(String(r?.result?.value ?? '')))
-      .catch(() => false);
+      .catch(() => {
+        platforms.delete(cdp); // a page mid-navigation: ask again on the next key instead of guessing forever
+        return false;
+      });
     platforms.set(cdp, p);
   }
   return p;
