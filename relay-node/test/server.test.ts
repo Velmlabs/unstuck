@@ -16,7 +16,8 @@ afterEach(async () => {
   stop = [];
 });
 
-async function relay(opts: { now?: () => number; sweepMs?: number; keys?: string[]; trustProxy?: boolean; authorize?: Parameters<typeof createNodeRelay>[0]['authorize'] } = {}) {
+type RelayOpts = Parameters<typeof createNodeRelay>[0];
+async function relay(opts: { now?: () => number; sweepMs?: number; keys?: string[]; trustProxy?: RelayOpts['trustProxy']; hsts?: boolean; authorize?: RelayOpts['authorize'] } = {}) {
   const events: RelayEvent[] = [];
   const r = await createNodeRelay({
     port: 0,
@@ -24,6 +25,7 @@ async function relay(opts: { now?: () => number; sweepMs?: number; keys?: string
     viewerDir,
     authorize: opts.authorize ?? createKeyAuthorizer({ keys: opts.keys ?? ['K'] }),
     trustProxy: opts.trustProxy,
+    hsts: opts.hsts,
     onEvent: (e) => void events.push(e),
     now: opts.now,
     sweepMs: opts.sweepMs ?? 20,
@@ -205,10 +207,32 @@ describe('full takeover through the Node relay', () => {
 });
 
 describe('edge cases', () => {
-  it('behind a trusted proxy, viewer limits use X-Forwarded-For', async () => {
+  it('behind a trusted proxy, viewer limits use the X-Forwarded-For entry the proxy appended (the rightmost)', async () => {
     const r = await relay({ trustProxy: true });
-    for (let i = 0; i < 30; i++) await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '9.9.9.9, 10.0.0.1' });
+    for (let i = 0; i < 30; i++) await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '10.0.0.1, 9.9.9.9' });
     expect(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '9.9.9.9' })).toBe(429);
+    expect(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '8.8.8.8' })).toBe(404);
+  });
+
+  it('security finding 1: a client-chosen leftmost X-Forwarded-For entry does not escape the viewer limit', async () => {
+    const r = await relay({ trustProxy: true });
+    const statuses: number[] = [];
+    for (let i = 0; i < 31; i++) statuses.push(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': `1.2.3.${i}, 9.9.9.9` }));
+    expect(statuses[30]).toBe(429);
+  });
+
+  it('security finding 1: trustProxy 0 ignores X-Forwarded-For', async () => {
+    const r = await relay({ trustProxy: 0 });
+    const statuses: number[] = [];
+    for (let i = 0; i < 31; i++) statuses.push(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': `1.2.3.${i}` }));
+    expect(statuses[30]).toBe(429);
+  });
+
+  it('security finding 1: with trustProxy = 2 the client is the second entry from the right', async () => {
+    const r = await relay({ trustProxy: 2 });
+    for (let i = 0; i < 30; i++) await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': `1.2.3.${i}, 9.9.9.9, 10.0.0.1` });
+    expect(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '9.9.9.9, 10.0.0.2' })).toBe(429);
+    // Fewer entries than trusted hops: the leftmost one is used.
     expect(await upgradeStatus(`${r.http}/ws/NOSUCHSESSION_0000000`, { 'x-forwarded-for': '8.8.8.8' })).toBe(404);
   });
 
@@ -224,17 +248,17 @@ describe('edge cases', () => {
     expect((await fetch(`${r.http}/assets/nope.js`)).status).toBe(404);
   });
 
-  it('a 5th viewer is closed with 1013; an oversize viewer message closes it with 1009', async () => {
+  it('a 5th viewer evicts the oldest unconfirmed one with 1013; an oversize viewer message closes it with 1009', async () => {
     const r = await relay();
     const a = await agent(r.url);
     const vs: Awaited<ReturnType<typeof viewerFor>>[] = [];
     for (let i = 0; i < 4; i++) vs.push(await viewerFor(a.link.url));
     const fifth = await viewerFor(a.link.url);
+    await waitFor(() => vs.some((v) => v.closeCode() === 1013));
+    expect(fifth.closeCode()).toBeNull();
+    fifth.sock.send(new Uint8Array(70_000));
     await waitFor(() => fifth.closeCode() !== null);
-    expect(fifth.closeCode()).toBe(1013);
-    vs[0]!.sock.send(new Uint8Array(70_000));
-    await waitFor(() => vs[0]!.closeCode() !== null);
-    expect(vs[0]!.closeCode()).toBe(1009);
+    expect(fifth.closeCode()).toBe(1009);
   });
 
   it('an ended session id can be registered again', async () => {
@@ -304,3 +328,76 @@ describe('edge cases', () => {
   });
 });
 
+
+describe('security fixes', () => {
+  it('finding 2: viewers that never said hello cannot keep a human out', async () => {
+    const r = await relay();
+    const a = await agent(r.url);
+    const squatters: Awaited<ReturnType<typeof viewerFor>>[] = [];
+    for (let i = 0; i < 4; i++) squatters.push(await viewerFor(a.link.url));
+    const human = await viewerFor(a.link.url);
+    await human.send({ t: 'hello', token: human.token });
+    await waitFor(() => human.json.some((m) => m.t === 'ready'));
+    expect(human.closeCode()).toBeNull();
+    await waitFor(() => squatters.filter((v) => v.closeCode() === 1013).length >= 1);
+  });
+
+  it('finding 3: viewer sockets accept at most viewerPayloadMax bytes per message (1009 from ws, before buffering 2 MB)', async () => {
+    const r = await relay();
+    const a = await agent(r.url);
+    const { WebSocket: Ws } = await import('ws');
+    const raw = new Ws(`${r.url}/ws/${a.link.sessionId}`);
+    await new Promise((res) => raw.once('open', res));
+    const code = new Promise<number>((res) => raw.once('close', (c: number) => res(c)));
+    raw.send(Buffer.alloc(65_537));
+    expect(await code).toBe(1009);
+    expect((await fetch(`${r.http}/healthz`)).status).toBe(200);
+  });
+
+  it('finding 4: failed agent authorizations are limited per IP, whatever key is presented', async () => {
+    const r = await relay();
+    const codes: number[] = [];
+    for (let i = 0; i < 11; i++) {
+      const ws = new WebSocket(`${r.url}/agent/SESSIONBRUTE_${String(i).padStart(10, '0')}`, ['unstuck-relay.1', `key.guess${i}`]);
+      codes.push(await new Promise<number>((res) => (ws.onclose = (e) => res(e.code))));
+    }
+    expect(codes.slice(0, 10).every((c) => c === 4401)).toBe(true);
+    expect(codes[10]).toBe(4429);
+    // Even the right key is refused from that IP until the window passes: no oracle.
+    const ok = new WebSocket(`${r.url}/agent/SESSIONBRUTE_OK00000000`, ['unstuck-relay.1', 'key.K']);
+    expect(await new Promise<number>((res) => (ok.onclose = (e) => res(e.code)))).toBe(4429);
+  });
+
+  it('finding 4: successful agent upgrades do not count toward the per-IP failure limit', async () => {
+    const r = await relay({ keys: Array.from({ length: 12 }, (_, i) => `K${i}`) });
+    for (let i = 0; i < 12; i++) {
+      const ws = new WebSocket(`${r.url}/agent/SESSIONGOOD_${String(i).padStart(10, '0')}`, ['unstuck-relay.1', `key.K${i}`]);
+      await new Promise((res) => (ws.onopen = res));
+      ws.close();
+    }
+  });
+
+  it('finding 9: a refusal error longer than a close reason allows still closes with the refusal code', async () => {
+    const r = await relay({ authorize: async () => ({ ok: false, status: 402, error: 'quota exceeded: '.repeat(20) }) });
+    const ws = new WebSocket(`${r.url}/agent/SESSIONLONGERR_0000000`, ['unstuck-relay.1', 'key.K']);
+    const e = await new Promise<CloseEvent>((res) => (ws.onclose = res));
+    expect(e.code).toBe(4402);
+    expect(JSON.parse(e.reason).error).toMatch(/^quota exceeded/);
+  });
+
+  it('finding 9: page CSPs forbid <base> and form posts; HSTS only when asked for', async () => {
+    const r = await relay();
+    const a = await agent(r.url);
+    const u = new URL(a.link.url);
+    for (const p of [u.pathname, '/s/NOSUCHSESSION_0000000']) {
+      const res = await fetch(r.http + p);
+      expect(res.headers.get('content-security-policy')).toContain("base-uri 'none'");
+      expect(res.headers.get('content-security-policy')).toContain("form-action 'none'");
+      expect(res.headers.get('strict-transport-security')).toBeNull();
+    }
+    const tls = await relay({ hsts: true });
+    for (const p of ['/healthz', '/s/NOSUCHSESSION_0000000', '/nope']) {
+      expect((await fetch(tls.http + p)).headers.get('strict-transport-security')).toBe('max-age=31536000');
+    }
+  });
+});

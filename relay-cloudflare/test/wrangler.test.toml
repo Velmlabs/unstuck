@@ -29,5 +29,11 @@ name = "AGENT_LIMIT"
 namespace_id = "1002"
 simple = { limit = 20, period = 60 }
 
+# Agent upgrades per client IP, whatever key they present (key brute force).
+[[ratelimits]]
+name = "AGENT_IP_LIMIT"
+namespace_id = "1003"
+simple = { limit = 60, period = 60 }
+
 [vars]
 # RELAY_OPEN = "1"   # accept any agent: local testing only

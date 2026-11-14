@@ -10,7 +10,9 @@ Environment:
   UNSTUCK_AGENT_KEYS   comma-separated agent keys allowed to register sessions
   UNSTUCK_RELAY_OPEN   set to 1 to accept any agent (local testing only)
   PORT                 port, when --port isn't given
-  UNSTUCK_TRUST_PROXY  set to 1 to take client IPs from X-Forwarded-For
+  UNSTUCK_TRUST_PROXY  number of proxies you trust in front of the relay (usually 1): client IPs
+                       then come from X-Forwarded-For, that many entries from the right
+  UNSTUCK_HSTS         set to 1 to send Strict-Transport-Security (only when served over https)
 `;
 const OPEN_WARNING = 'relay is OPEN: anyone can register sessions (UNSTUCK_RELAY_OPEN=1); use UNSTUCK_AGENT_KEYS in production';
 
@@ -36,6 +38,11 @@ export async function main(argv: string[], env: Record<string, string | undefine
     io.stderr.write(`[unstuck-relay] set UNSTUCK_AGENT_KEYS (or UNSTUCK_RELAY_OPEN=1 for local testing)\n${USAGE}`);
     return 2;
   }
+  const trustProxy = env.UNSTUCK_TRUST_PROXY ? Number(env.UNSTUCK_TRUST_PROXY) : 0;
+  if (!Number.isInteger(trustProxy) || trustProxy < 0) {
+    io.stderr.write(`[unstuck-relay] UNSTUCK_TRUST_PROXY must be a number of proxies\n${USAGE}`);
+    return 2;
+  }
   const warn = () => io.stderr.write(`[unstuck-relay] ${OPEN_WARNING}\n`);
   if (open) warn();
   const relay = await createNodeRelay({
@@ -44,7 +51,8 @@ export async function main(argv: string[], env: Record<string, string | undefine
     viewerDir: env.UNSTUCK_VIEWER_DIR ?? defaultViewerDir(),
     authorize: createKeyAuthorizer(open ? { open: true } : { keys }),
     onEvent: (e) => void io.stderr.write(JSON.stringify(e) + '\n'),
-    trustProxy: env.UNSTUCK_TRUST_PROXY === '1',
+    trustProxy,
+    hsts: env.UNSTUCK_HSTS === '1',
     onAgent: open ? warn : undefined,
   });
   io.stderr.write(`[unstuck-relay] listening on http://${values.host ?? '0.0.0.0'}:${relay.port}\n`);

@@ -198,12 +198,14 @@ describe('takeover through a Durable Object', () => {
     first.close();
   });
 
-  it('a 5th viewer is closed with 1013', async () => {
+  it('a 5th viewer evicts the oldest unconfirmed one with 1013', async () => {
     const a = await agent();
-    for (let i = 0; i < 4; i++) await viewerFor(a.link.url);
+    const vs = [];
+    for (let i = 0; i < 4; i++) vs.push(await viewerFor(a.link.url));
     const fifth = await viewerFor(a.link.url);
-    await waitFor(() => fifth.closeCode() !== null);
-    expect(fifth.closeCode()).toBe(1013);
+    await waitFor(() => vs[0]!.closeCode() !== null);
+    expect(vs[0]!.closeCode()).toBe(1013);
+    expect(fifth.closeCode()).toBeNull();
     await a.engine.close();
   });
 
@@ -282,5 +284,154 @@ describe('default authorizer and fallbacks', () => {
       await inst.webSocketError({ deserializeAttachment: () => null });
       expect((await state.storage.list()).size).toBe(0);
     });
+  });
+});
+
+describe('security fixes', () => {
+  const agentReq = (id: string, key: string, ip = '5.5.5.5') =>
+    new Request(`${BASE}/agent/${id}`, { headers: { Upgrade: 'websocket', 'Sec-WebSocket-Protocol': `unstuck-relay.1, key.${key}`, 'cf-connecting-ip': ip } });
+  const closeCodeOf = async (res: Response) => {
+    const ws = res.webSocket!;
+    ws.accept();
+    return new Promise<{ code: number; reason: string }>((r) => ws.addEventListener('close', (e) => r({ code: e.code, reason: e.reason })));
+  };
+  const storageOf = (id: string) =>
+    runInDurableObject(stub(id), async (_i, state) => ({ keys: (await state.storage.list()).size, alarm: await state.storage.getAlarm() }));
+
+  it('finding 2: four silent viewers cannot keep a human out; the oldest is evicted with 1013', async () => {
+    const a = await agent();
+    const squatters = [];
+    for (let i = 0; i < 4; i++) {
+      const res = await exports.default.fetch(new Request(`${BASE}/ws/${a.id}`, { headers: { Upgrade: 'websocket', 'cf-connecting-ip': `6.6.6.${i}` } }));
+      const ws = res.webSocket!;
+      ws.accept();
+      const sq = { code: 0 };
+      ws.addEventListener('close', (e) => (sq.code = e.code));
+      squatters.push(sq);
+    }
+    const human = await viewerFor(a.link.url);
+    await human.send({ t: 'hello', token: human.token });
+    await waitFor(() => human.json.some((m) => m.t === 'ready'));
+    await waitFor(() => squatters[0]!.code === 1013);
+    expect(human.closeCode()).toBeNull();
+    // The human's socket is marked confirmed in its hibernation attachment, so a rebuild can't make it evictable.
+    const confirmed = await runInDurableObject(stub(a.id), async (_i, state) =>
+      state.getWebSockets().map((ws) => ws.deserializeAttachment() as { role: string; confirmed?: boolean } | null).filter((x) => x?.role === 'viewer' && x.confirmed).length,
+    );
+    expect(confirmed).toBe(1);
+    await runInDurableObject(stub(a.id), async (inst: any) => void (inst.session = null));
+    for (let i = 0; i < 4; i++) await exports.default.fetch(new Request(`${BASE}/ws/${a.id}`, { headers: { Upgrade: 'websocket', 'cf-connecting-ip': `7.7.7.${i}` } })).then((r) => r.webSocket!.accept());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(human.closeCode()).toBeNull();
+    await a.engine.close();
+  });
+
+  it('finding 2: a viewer attached before attachments carried confirmed state counts as confirmed after a rebuild', async () => {
+    const a = await agent();
+    const old = await viewerFor(a.link.url);
+    await runInDurableObject(stub(a.id), async (inst: any, state) => {
+      for (const ws of state.getWebSockets()) {
+        const at = ws.deserializeAttachment() as { role: string; c: number };
+        if (at.role === 'viewer') ws.serializeAttachment({ role: 'viewer', c: at.c });
+      }
+      inst.session = null;
+    });
+    for (let i = 0; i < 4; i++) await viewerFor(a.link.url);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(old.closeCode()).toBeNull();
+    await a.engine.close();
+  });
+
+  it('finding 4: agent upgrades are limited per IP, whatever key is presented', async () => {
+    const codes: number[] = [];
+    for (let i = 0; i < 61; i++) {
+      const res = await exports.default.fetch(agentReq(`SESSIONBRUTE_${String(i).padStart(10, '0')}`, `guess${i}`, '4.4.4.4'));
+      codes.push((await closeCodeOf(res)).code);
+    }
+    expect(codes.slice(0, 20).every((c) => c === 4401)).toBe(true);
+    expect(codes).toContain(4429);
+  });
+
+  it('finding 6: a session that never registers is gone 30 s after its agent connected', async () => {
+    const id = 'SESSIONNOHELLO_0000000';
+    const ws = new FetchWs(`wss://relay.test/agent/${id}`, ['unstuck-relay.1', 'key.K']);
+    await waitFor(() => ws.readyState === 1);
+    ws.close(); // and never comes back
+    await new Promise((r) => setTimeout(r, 50));
+    const alarm = await runInDurableObject(stub(id), async (_i, state) => state.storage.getAlarm());
+    expect(alarm).not.toBeNull();
+    expect(alarm! - Date.now()).toBeLessThanOrEqual(30_000);
+    probe.offset = 31_000;
+    await runDurableObjectAlarm(stub(id));
+    expect(await storageOf(id)).toEqual({ keys: 0, alarm: null });
+  });
+
+  it('finding 6: any request that finds a record past expiresAt + 60 s cleans it up first (backstop)', async () => {
+    const a = await agent();
+    await runInDurableObject(stub(a.id), async (inst: any, state) => {
+      const rec = await state.storage.get<any>('rec');
+      await state.storage.put('rec', { ...rec, expiresAt: Date.now() - 61_000 });
+      await state.storage.deleteAlarm(); // the alarm was lost
+      inst.session = null;
+    });
+    expect((await get(`/s/${a.id}`)).status).toBe(404);
+    expect(await storageOf(a.id)).toEqual({ keys: 0, alarm: null });
+    expect(probe.events.filter((e) => e.name === 'session_closed')).toHaveLength(1);
+    await a.engine.close();
+  });
+
+  it('finding 7: after an agent reconnect and a rebuild, the replaced socket is never rebound as the agent', async () => {
+    const id = 'SESSIONREBIND_00000000';
+    const helloMsg = JSON.stringify({ t: 'hello', expiresAt: Date.now() + 60_000, secret: 'SAME' });
+    const connect = async () => {
+      const ws = new FetchWs(`wss://relay.test/agent/${id}`, ['unstuck-relay.1', 'key.K']);
+      await waitFor(() => ws.readyState === 1);
+      const got: string[] = [];
+      ws.onmessage = (e) => got.push(String(e.data));
+      ws.send(helloMsg);
+      await waitFor(() => got.includes('{"t":"registered"}'));
+      return { ws, got };
+    };
+    const first = await connect();
+    first.ws.onclose = null;
+    const second = await connect();
+    const tags = await runInDurableObject(stub(id), async (inst: any, state) => {
+      inst.session = null; // hibernation
+      return state.getWebSockets().map((ws) => (ws.deserializeAttachment() as { active?: boolean }).active);
+    });
+    expect(tags.filter((t) => t === true)).toHaveLength(1);
+    const v = new FetchWs(`wss://relay.test/ws/${id}`);
+    await waitFor(() => v.readyState === 1);
+    await waitFor(() => second.got.some((m) => m.includes('"open"')));
+    expect(first.got.some((m) => m.includes('"open"'))).toBe(false);
+    second.ws.close();
+  });
+
+  it('finding 9: assets get nosniff; pages forbid <base> and form posts; every response has HSTS', async () => {
+    const a = await agent();
+    const page = await get(`/s/${a.id}`);
+    for (const p of [page, await get('/s/NOSUCHSESSION_0000000')]) {
+      expect(p.headers.get('content-security-policy')).toContain("base-uri 'none'");
+      expect(p.headers.get('content-security-policy')).toContain("form-action 'none'");
+    }
+    const asset = await get((await page.text()).match(/\/assets\/[^"]+\.js/)![0]);
+    expect(asset.headers.get('x-content-type-options')).toBe('nosniff');
+    for (const r of [page, asset, await get('/healthz'), await get('/nope'), await get('/agent/SESSIONPLAIN_00000000')]) {
+      expect(r.headers.get('strict-transport-security')).toBe('max-age=31536000');
+    }
+    const up = await exports.default.fetch(new Request(`${BASE}/ws/${a.id}`, { headers: { Upgrade: 'websocket' } }));
+    expect(up.status).toBe(101);
+    up.webSocket!.accept();
+    up.webSocket!.close();
+    await a.engine.close();
+  });
+
+  it('finding 9: a refusal error longer than a close reason allows still closes with the refusal code', async () => {
+    const { createRelayWorker } = await import('../src/worker');
+    const relay = createRelayWorker({ authorize: async () => ({ ok: false, status: 402, error: 'quota exceeded: '.repeat(20) }) });
+    const res = await relay.fetch(agentReq('SESSIONLONGERR_0000000', 'K'), { ...env, AGENT_LIMIT: undefined, AGENT_IP_LIMIT: undefined } as never);
+    const { code, reason } = await closeCodeOf(res);
+    expect(code).toBe(4402);
+    expect(JSON.parse(reason).error).toMatch(/^quota exceeded/);
   });
 });

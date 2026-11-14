@@ -22,7 +22,8 @@ UNSTUCK_RELAY_URL=wss://relay.example.com UNSTUCK_AGENT_KEY=change-me python my_
 | `UNSTUCK_AGENT_KEYS` | Comma-separated keys allowed to register takeovers. Required unless open mode. |
 | `UNSTUCK_RELAY_OPEN=1` | Accept any agent. **Local testing only**; it warns at start and on every agent connection. |
 | `PORT` | Port (default 8787), or `--port`. `--host` sets the bind address (default `0.0.0.0`). |
-| `UNSTUCK_TRUST_PROXY=1` | Take client IPs from `X-Forwarded-For`. Only behind a proxy you control. |
+| `UNSTUCK_TRUST_PROXY=1` | Take client IPs from `X-Forwarded-For`. Only behind a proxy you control. The value is how many proxies you trust (usually `1`): the client is that many entries from the right, so entries a client adds on the left are ignored. |
+| `UNSTUCK_HSTS=1` | Send `Strict-Transport-Security: max-age=31536000`. Only when clients reach the relay over https (e.g. behind a TLS proxy). |
 
 ## What it keeps
 

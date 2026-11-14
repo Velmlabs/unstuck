@@ -61,3 +61,12 @@ describe('constants', () => {
     expect(RELAY_CLOSE.replaced).toBe(4409);
   });
 });
+
+describe('agent close codes (security finding 5)', () => {
+  it.each([1000, 1001, 1003, 1008, 1011, 1013, 3000, 4000, 4999])('accepts sendable code %i', (code) => {
+    expect(parseAgentToRelay(JSON.stringify({ t: 'close', c: 1, code }))).not.toBeNull();
+  });
+  it.each([0, 999, 1004, 1005, 1006, 1015, 1016, 2999, 5000, 65535, -1, 1000.5])('rejects code %s, which a socket would refuse to send', (code) => {
+    expect(parseAgentToRelay(JSON.stringify({ t: 'close', c: 1, code }))).toBeNull();
+  });
+});

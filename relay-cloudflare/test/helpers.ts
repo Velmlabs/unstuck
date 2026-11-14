@@ -21,7 +21,8 @@ export class FetchWs {
   private async start(url: string, protocols: string[]) {
     const res = await exports.default.fetch(
       new Request(url.replace(/^ws/, 'http'), {
-        headers: { Upgrade: 'websocket', ...(protocols.length ? { 'Sec-WebSocket-Protocol': protocols.join(', ') } : {}) },
+        // Each socket from its own address, like separate clients (per-IP limits are tested explicitly).
+        headers: { Upgrade: 'websocket', 'cf-connecting-ip': `10.${FetchWs.all.length >> 8 & 255}.${FetchWs.all.length & 255}.${Math.floor(Math.random() * 256)}`, ...(protocols.length ? { 'Sec-WebSocket-Protocol': protocols.join(', ') } : {}) },
       }),
     );
     this.status = res.status;
