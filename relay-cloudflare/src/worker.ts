@@ -33,6 +33,8 @@ const pageHeaders = (csp: string) => ({
   'cache-control': 'no-store',
   'referrer-policy': 'no-referrer',
   'x-content-type-options': 'nosniff',
+  // A viewer on its own origin checks whether the session still exists (status only; no credentials, no secrets).
+  'access-control-allow-origin': '*',
 });
 
 const defaultAuthorize = (env: RelayEnv): Authorize =>

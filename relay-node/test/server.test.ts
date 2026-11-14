@@ -61,6 +61,8 @@ describe('HTTP', () => {
     expect(page.headers.get('cache-control')).toBe('no-store');
     expect(page.headers.get('referrer-policy')).toBe('no-referrer');
     expect(page.headers.get('content-security-policy')).toContain("default-src 'self'");
+    expect(page.headers.get('access-control-allow-origin')).toBe('*');
+    expect(missing.headers.get('access-control-allow-origin')).toBe('*');
     const asset = (await page.text()).match(/\/assets\/[^"]+\.js/)![0];
     const js = await fetch(r.http + asset);
     expect(js.status).toBe(200);

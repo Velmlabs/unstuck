@@ -114,7 +114,8 @@ Run your own relay on Node or Docker (`relay-node/`) or on Cloudflare Workers (`
 ## Security
 
 - Each link carries a single-use token and a fresh encryption key in the URL fragment, which never reaches a server or log.
-- The screen, taps and keystrokes are encrypted end to end (AES-GCM) between your agent's engine and the person's browser. A relay, Unstuck Cloud included, only sees ciphertext.
+- The screen, taps and keystrokes are encrypted end to end (AES-GCM) between your agent's engine and the person's browser. A relay, Unstuck Cloud included, only sees ciphertext, padded so message sizes don't reveal what was typed. It can't replay old messages or silently drop keystrokes.
+- With Unstuck Cloud, the page the person opens doesn't come from the relay. Your engine links to a viewer on its own origin (`view.unstuck.sh/v/<engine version>/`), with an integrity hash on every script and a published `SHA256SUMS.json` you can compare against this repository's build. So the relay can't swap in code that reads the key. A self-hosted relay serves the viewer itself; set `UNSTUCK_VIEWER_URL` to use a separately hosted one.
 - One person at a time; an optional 6-digit code means a forwarded link alone isn't enough.
 - The person can only use the page they were handed. The tab stays on the page's own site (example.com and its subdomains), so the agent browser's other logins are out of reach: links to other sites don't open, new tabs and windows can't be opened, and downloads are blocked. If the flow needs another site, such as a Google sign-in or a bank's 3-D Secure page, list it: `allowedSites: ['accounts.google.com']` (Python: `allowed_sites=[...]`, MCP: `allowed_sites`).
 - The audit log records states and input counts, never what was typed.

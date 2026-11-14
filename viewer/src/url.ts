@@ -19,9 +19,6 @@ export function sessionIdFromPath(pathname: string): string | null {
   return m && pathname.split('/').filter(Boolean).length >= 2 ? m[1]! : null;
 }
 
-export function wsUrlFor(origin: string, sessionId: string): string {
-  return `${origin.replace(/^http/, 'ws')}/ws/${sessionId}`;
-}
 
 type TabStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 const linkKey = (sessionId: string) => `unstuck:link:${sessionId}`;
@@ -64,4 +61,24 @@ export function forgetFragment(sessionId: string, storage: Pick<Storage, 'remove
   } catch {
     // nothing stored, or storage unavailable
   }
+}
+
+/**
+ * The relay this page talks to: the one named in ?r= when the viewer is served from its own origin (only wss://, or
+ * ws:// on this machine, and no path or credentials), otherwise the page's own origin (the relay served the page).
+ */
+export function relayFor(search: string, origin: string): { ws: string; http: string } {
+  const own = { ws: origin.replace(/^http/, 'ws'), http: origin };
+  const r = new URLSearchParams(search).get('r');
+  if (!r) return own;
+  let u: URL;
+  try {
+    u = new URL(r);
+  } catch {
+    return own;
+  }
+  const local = u.hostname === '127.0.0.1' || u.hostname === 'localhost' || u.hostname === '[::1]';
+  const ok = (u.protocol === 'wss:' || (u.protocol === 'ws:' && local)) && (u.pathname === '/' || u.pathname === '') && !u.username && !u.password && !u.search && !u.hash;
+  if (!ok) return own;
+  return { ws: `${u.protocol}//${u.host}`, http: `${u.protocol === 'wss:' ? 'https:' : 'http:'}//${u.host}` };
 }

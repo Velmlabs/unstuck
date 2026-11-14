@@ -129,6 +129,63 @@ describe('takeover through a relay, end to end', () => {
     await page.close();
   }, 60_000);
 
+  it('viewer on its own origin: the link opens it, it talks to the relay named in ?r=, and the relay never serves the page', async () => {
+    const version = JSON.parse(fs.readFileSync(path.join(here, '../viewer/package.json'), 'utf8')).version as string;
+    const hosted = path.join(here, '../viewer/dist-hosted/v', version);
+    expect(fs.existsSync(path.join(hosted, 'index.html')), 'run pnpm --filter @velmlabs/unstuck-viewer build:hosted').toBe(true);
+    // Stand-in for view.unstuck.sh: static files only, strict CSP that allows connecting to the relay.
+    const relayPort = new URL(relays.node!.url).port;
+    const viewerServer = http.createServer((req, res) => {
+      const p = new URL(req.url ?? '/', 'http://x').pathname;
+      const rel = p.startsWith(`/v/${version}/assets/`) ? p.slice(`/v/${version}/`.length) : /^\/v\/[^/]+\/s\/[A-Za-z0-9_-]+$/.test(p) ? 'index.html' : null;
+      if (!rel) return void res.writeHead(404).end();
+      res.writeHead(200, {
+        'content-type': rel.endsWith('.js') ? 'text/javascript' : rel.endsWith('.css') ? 'text/css' : 'text/html; charset=utf-8',
+        'content-security-policy': `default-src 'self'; img-src 'self' blob: data:; connect-src 'self' ws://127.0.0.1:${relayPort} http://127.0.0.1:${relayPort}; style-src 'self'; script-src 'self'; frame-ancestors 'none'`,
+        'referrer-policy': 'no-referrer',
+      }).end(fs.readFileSync(path.join(hosted, rel)));
+    });
+    await new Promise<void>((r) => viewerServer.listen(0, '127.0.0.1', r));
+    const viewerOrigin = `http://127.0.0.1:${(viewerServer.address() as AddressInfo).port}`;
+    const pagesFromRelay: string[] = [];
+    const prev = process.env.UNSTUCK_VIEWER_URL;
+    process.env.UNSTUCK_VIEWER_URL = `${viewerOrigin}/v/${version}`;
+    try {
+      const page = await agentPage();
+      let link!: TakeoverLink;
+      let arrived!: () => void;
+      const got = new Promise<void>((r) => (arrived = r));
+      const unstuck = new Unstuck({ enginePath: ENGINE, relay: relays.node!.url, agentKey: RELAY_KEY, onLink: (l) => ((link = l), arrived()) });
+      const result = unstuck.takeover(page, { reason: 'Solve the test CAPTCHA', timeoutS: 60 });
+      await got;
+      expect(link.url.startsWith(`${viewerOrigin}/v/${version}/s/`)).toBe(true);
+      expect(new URL(link.url).searchParams.get('r')).toBe(relays.node!.url);
+      const ctx = await humanBrowser.newContext({ ...devices['iPhone 13'] });
+      ctx.on('request', (r: any) => {
+        if (r.url().startsWith(relays.node!.url.replace('ws://', 'http://') + '/s/') && r.method() === 'GET') pagesFromRelay.push(r.url());
+      });
+      const errors: string[] = [];
+      const human = await ctx.newPage();
+      human.on('pageerror', (e: any) => errors.push(e.message));
+      human.on('console', (m: any) => m.type() === 'error' && errors.push(m.text()));
+      await human.goto(link.url);
+      await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+      expect(await human.evaluate(() => [...document.querySelectorAll('script[src], link[rel=stylesheet]')].every((e) => e.getAttribute('integrity')?.startsWith('sha384-')))).toBe(true);
+      expect(new URL(human.url()).hash).toBe(''); // the secret left the address bar
+      await human.getByRole('button', { name: 'Done' }).click();
+      await expect(result).resolves.toMatchObject({ status: 'resolved' });
+      expect(pagesFromRelay).toEqual([]);
+      expect(errors).toEqual([]);
+      await ctx.close();
+      await unstuck.close();
+      await page.close();
+    } finally {
+      if (prev === undefined) delete process.env.UNSTUCK_VIEWER_URL;
+      else process.env.UNSTUCK_VIEWER_URL = prev;
+      viewerServer.close();
+    }
+  }, 60_000);
+
   it('Python SDK × Node relay', async () => {
     const child = spawn('uv', ['run', '--project', path.join(here, '../sdk-py'), 'python', path.join(here, 'py_agent.py'), site, relays.node!.url, RELAY_KEY, ENGINE], {
       stdio: ['ignore', 'pipe', 'inherit'],

@@ -94,6 +94,14 @@ describe('createRelayTransport', () => {
     await expect(p).resolves.toEqual({ baseUrl: `http://localhost:8787/s/${ID}` });
   });
 
+  it('with a viewer URL, links open the pinned viewer and name the relay in ?r= (the secret stays in the fragment)', async () => {
+    const t = createRelayTransport({ url: 'wss://relay.unstuck.sh', viewerUrl: 'https://view.unstuck.sh/v/1.2.3/', WebSocketImpl: FakeWs as never });
+    const p = t.publish(ID, { expiresAt: 1 });
+    FakeWs.all[0]!.accept();
+    FakeWs.all[0]!.text({ t: 'registered' });
+    await expect(p).resolves.toEqual({ baseUrl: `https://view.unstuck.sh/v/1.2.3/s/${ID}?r=wss%3A%2F%2Frelay.unstuck.sh` });
+  });
+
   it('relay open/close and envelopes become viewer connections', async () => {
     const { t, ws } = await published();
     const conns: ViewerConnection[] = [];

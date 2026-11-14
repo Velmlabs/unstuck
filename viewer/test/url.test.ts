@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseFragment, sessionIdFromPath, wsUrlFor, takeFragment, forgetFragment } from '../src/url';
+import { parseFragment, sessionIdFromPath, takeFragment, forgetFragment, relayFor } from '../src/url';
 
 describe('url helpers', () => {
   const K = 'A'.repeat(43);
@@ -21,10 +21,6 @@ describe('url helpers', () => {
     expect(sessionIdFromPath('/')).toBeNull();
   });
 
-  it('wsUrlFor maps http(s) to ws(s)', () => {
-    expect(wsUrlFor('http://127.0.0.1:5000', 'abc')).toBe('ws://127.0.0.1:5000/ws/abc');
-    expect(wsUrlFor('https://box.example.com', 'abc')).toBe('wss://box.example.com/ws/abc');
-  });
 });
 
 describe('takeFragment: the link secret leaves the address bar', () => {
@@ -60,5 +56,20 @@ describe('takeFragment: the link secret leaves the address bar', () => {
     forgetFragment('ABC', store);
     expect(store.m.size).toBe(0);
     forgetFragment('ABC', { removeItem: () => { throw new Error('denied'); } });
+  });
+});
+
+describe('relayFor: which relay the viewer talks to', () => {
+  it('its own origin when the relay serves the page (self-hosted, local)', () => {
+    expect(relayFor('', 'https://relay.example')).toEqual({ ws: 'wss://relay.example', http: 'https://relay.example' });
+    expect(relayFor('', 'http://127.0.0.1:5000')).toEqual({ ws: 'ws://127.0.0.1:5000', http: 'http://127.0.0.1:5000' });
+  });
+  it('the relay named in ?r= when the viewer has its own origin', () => {
+    expect(relayFor('?r=wss%3A%2F%2Frelay.unstuck.sh', 'https://view.unstuck.sh')).toEqual({ ws: 'wss://relay.unstuck.sh', http: 'https://relay.unstuck.sh' });
+    expect(relayFor('?r=ws%3A%2F%2F127.0.0.1%3A8787%2F', 'https://view.unstuck.sh')).toEqual({ ws: 'ws://127.0.0.1:8787', http: 'http://127.0.0.1:8787' });
+  });
+  it('refuses anything but wss (or plain ws on this machine), with no path, and falls back to its own origin', () => {
+    for (const r of ['ws://evil.example', 'https://relay.example', 'javascript:alert(1)', 'wss://relay.example/x', 'wss://u:p@relay.example', 'nonsense'])
+      expect(relayFor(`?r=${encodeURIComponent(r)}`, 'https://view.unstuck.sh')).toEqual({ ws: 'wss://view.unstuck.sh', http: 'https://view.unstuck.sh' });
   });
 });

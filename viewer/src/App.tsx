@@ -7,10 +7,10 @@ import { attachBridge, configureBridge } from './bridge';
 import { bridgeBox, fieldBox, hitField, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { clampToPage, toPagePoint } from './mapping';
-import { forgetFragment, parseFragment, sessionIdFromPath, wsUrlFor } from './url';
+import { forgetFragment, parseFragment, relayFor, sessionIdFromPath } from './url';
 
 export interface AppProps {
-  location: { hash: string; pathname: string; origin: string };
+  location: { hash: string; pathname: string; origin: string; search?: string };
   connectFn?: (url: string, token: string, codec: Codec, h: ConnectionHandlers, opts: { resumeKey?: string; alive?: () => Promise<boolean> }) => ViewerSocket;
   drawFrame?: (canvas: HTMLCanvasElement, frame: Frame) => void;
   now?: () => number;
@@ -133,7 +133,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   useEffect(() => {
     if (!link || !token || !sessionId) return;
     const saved = resumeStore.get(sessionId);
-    const sock = connectFn(wsUrlFor(location.origin, sessionId), token, lazyCodec(link.key, sessionId), {
+    // The relay serves this page, or (viewer on its own origin) is named in ?r=.
+    const relay = relayFor(location.search ?? '', location.origin);
+    const own = relay.http === location.origin;
+    const sock = connectFn(`${relay.ws}/ws/${sessionId}`, token, lazyCodec(link.key, sessionId), {
       onCodeRequest: (invalid) => setCodeAsk({ invalid }),
       onFields: (fields) => void (fieldsRef.current = fields),
       onFocus: (kind, field) => {
@@ -179,7 +182,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     }, {
       ...(saved ? { resumeKey: saved } : {}),
       // The relay answers 404 for a session that has ended (its page shows "expired").
-      alive: () => fetch(`${location.origin}${location.pathname}`, { method: 'HEAD', cache: 'no-store' }).then((r) => r.status !== 404, () => true),
+      alive: () =>
+        fetch(own ? `${location.origin}${location.pathname}` : `${relay.http}/s/${sessionId}`, { method: 'HEAD', cache: 'no-store' }).then((r) => r.status !== 404, () => true),
     });
     sockRef.current = sock;
     // Back from another app (iOS froze the page and its retry timers), or back online: reconnect now.

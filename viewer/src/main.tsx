@@ -10,6 +10,6 @@ try {
 } catch {
   // storage blocked: the fragment still leaves the address bar
 }
-const { pathname, origin } = window.location;
+const { pathname, origin, search } = window.location;
 const hash = takeFragment(window.location, tab, window.history);
-render(<App location={{ hash, pathname, origin }} />, document.getElementById('app')!);
+render(<App location={{ hash, pathname, origin, search }} />, document.getElementById('app')!);

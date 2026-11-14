@@ -27,6 +27,11 @@ export interface RelayTransportOptions {
   /** wss://host (or ws:// for local testing). */
   url: string;
   agentKey?: string;
+  /**
+   * A viewer served from its own origin (e.g. https://view.unstuck.sh/v/<version>): links open it instead of the
+   * relay's page and name the relay in ?r=, so whoever runs the relay can't change the code that holds the key.
+   */
+  viewerUrl?: string;
   WebSocketImpl?: typeof WebSocket;
   connectTimeoutMs?: number;
 }
@@ -229,6 +234,7 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
         sessions.delete(id);
         throw e;
       }
+      if (opts.viewerUrl) return { baseUrl: `${opts.viewerUrl.replace(/\/+$/, '')}/s/${id}?r=${encodeURIComponent(relay)}` };
       return { baseUrl: `${httpBase}/s/${id}` };
     },
     onConnection(id, h) {

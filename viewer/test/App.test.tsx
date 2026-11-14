@@ -11,7 +11,9 @@ let connectOpts: { resumeKey?: string; alive?: () => Promise<boolean> } | undefi
 let wakes = 0;
 let connects = 0;
 let hellos: (string | undefined)[];
-const connectFn: AppProps['connectFn'] = (_url, _token, _codec, h, opts) => {
+let connectUrl = '';
+const connectFn: AppProps['connectFn'] = (url, _token, _codec, h, opts) => {
+  connectUrl = url;
   connects++;
   handlers = h;
   connectOpts = opts;
@@ -58,6 +60,18 @@ describe('the link secret kept for reloads', () => {
     goLive();
     act(() => handlers.onState('resolved'));
     expect(sessionStorage.getItem('unstuck:link:SESSION')).toBeNull();
+  });
+});
+
+describe('a viewer served from its own origin', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('connects to the relay named in ?r= and asks it whether the session still exists', async () => {
+    const fetchMock = vi.fn(async () => ({ status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App location={{ hash: `#t=TOK&k=${KEY}`, pathname: '/v/1.2.3/s/SESSION', origin: 'https://view.unstuck.sh', search: '?r=wss%3A%2F%2Frelay.unstuck.sh' }} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    expect(connectUrl).toBe('wss://relay.unstuck.sh/ws/SESSION');
+    await connectOpts!.alive!();
+    expect(fetchMock).toHaveBeenCalledWith('https://relay.unstuck.sh/s/SESSION', { method: 'HEAD', cache: 'no-store' });
   });
 });
 

@@ -43,6 +43,9 @@ describe('worker routes', () => {
     expect(page.headers.get('cache-control')).toBe('no-store');
     expect(page.headers.get('referrer-policy')).toBe('no-referrer');
     expect(page.headers.get('content-security-policy')).toContain("default-src 'self'");
+    // A viewer on its own origin asks whether the session still exists: readable cross-origin, live or not.
+    expect(page.headers.get('access-control-allow-origin')).toBe('*');
+    expect((await get('/s/NOSUCHSESSION_0000000')).headers.get('access-control-allow-origin')).toBe('*');
     const asset = (await page.text()).match(/\/assets\/[^"]+\.js/)![0];
     expect((await get(asset)).status).toBe(200);
     expect((await get('/elsewhere')).status).toBe(404);

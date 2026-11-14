@@ -118,6 +118,8 @@ export async function createNodeRelay(opts: NodeRelayOptions): Promise<NodeRelay
         'cache-control': 'no-store',
         'referrer-policy': 'no-referrer',
         'x-content-type-options': 'nosniff',
+        // A viewer on its own origin checks whether the session still exists (status only; no credentials).
+        'access-control-allow-origin': '*',
       });
       return res.end(ok ? index : EXPIRED_HTML);
     }

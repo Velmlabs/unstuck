@@ -3,7 +3,7 @@ import { WebSocketServer } from 'ws';
 import type { AddressInfo } from 'node:net';
 import { createEngine } from '@velmlabs/unstuck-core';
 import { FakeCdp } from '@velmlabs/unstuck-core/testing';
-import { buildTransport, selectTransport } from '../src/transport-select';
+import { buildTransport, selectTransport, viewerUrlFor } from '../src/transport-select';
 
 describe('selectTransport', () => {
   it('flags beat UNSTUCK_RELAY_URL, which beats UNSTUCK_API_KEY, which beats embedded', () => {
@@ -47,6 +47,15 @@ describe('Review Focus 5: a wrong UNSTUCK_API_KEY fails fast and says which vari
     const { transport } = buildTransport({}, { UNSTUCK_RELAY_URL: `ws://127.0.0.1:${port}`, UNSTUCK_AGENT_KEY: 'k' }, { write: (s: string) => (err += s) })!;
     await createEngine({ transport }).takeover(new FakeCdp(), { reason: 'x', timeoutS: 60 });
     expect(err).toBe('');
+  });
+
+  it('Unstuck Cloud links open the viewer pinned to this engine version on its own origin; UNSTUCK_VIEWER_URL overrides', () => {
+    expect(viewerUrlFor({ kind: 'relay', url: 'wss://relay.unstuck.sh', source: 'UNSTUCK_API_KEY' }, {}, '9.8.7')).toBe('https://view.unstuck.sh/v/9.8.7');
+    expect(viewerUrlFor({ kind: 'relay', url: 'wss://relay.unstuck.sh', source: 'flag' }, {}, '9.8.7')).toBe('https://view.unstuck.sh/v/9.8.7');
+    expect(viewerUrlFor({ kind: 'relay', url: 'wss://own.example', source: 'UNSTUCK_RELAY_URL' }, {}, '9.8.7')).toBeUndefined();
+    expect(viewerUrlFor({ kind: 'relay', url: 'wss://staging.example', source: 'UNSTUCK_API_KEY' }, { UNSTUCK_VIEWER_URL: 'https://view-staging.example/v/x' }, '9.8.7')).toBe('https://view-staging.example/v/x');
+    expect(viewerUrlFor({ kind: 'relay', url: 'wss://own.example', source: 'UNSTUCK_RELAY_URL' }, { UNSTUCK_VIEWER_URL: 'http://evil.example' }, '9.8.7')).toBeUndefined(); // https only
+    expect(viewerUrlFor({ kind: 'relay', url: 'ws://127.0.0.1:1', source: 'flag' }, { UNSTUCK_VIEWER_URL: 'http://127.0.0.1:5000/v/x' }, '9.8.7')).toBe('http://127.0.0.1:5000/v/x'); // or http on this machine
   });
 
   it('embedded mode builds nothing here', () => {

@@ -1,6 +1,9 @@
 import { createRelayTransport, type Transport } from '@velmlabs/unstuck-core';
+import { VERSION } from './version';
 
 export const CLOUD_RELAY_URL = 'wss://relay.unstuck.sh';
+/** Unstuck Cloud's viewer, on its own origin; each engine links to the build of its own version. */
+export const CLOUD_VIEWER_URL = 'https://view.unstuck.sh/v';
 
 export type TransportChoice =
   | { kind: 'relay'; url: string; agentKey?: string; source: 'flag' | 'UNSTUCK_RELAY_URL' | 'UNSTUCK_API_KEY' }
@@ -14,6 +17,16 @@ export function selectTransport(flags: { relay?: string; agentKey?: string }, en
   return { kind: 'embedded' };
 }
 
+/**
+ * Where links open the viewer: UNSTUCK_VIEWER_URL (https, or http on this machine), else the hosted viewer pinned to this engine's
+ * version for the Unstuck Cloud relay, else undefined (the relay's own page, e.g. a self-hosted relay).
+ */
+export function viewerUrlFor(choice: TransportChoice, env: Record<string, string | undefined>, version: string): string | undefined {
+  if (choice.kind !== 'relay') return undefined;
+  if (env.UNSTUCK_VIEWER_URL) return /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)[:/])/.test(env.UNSTUCK_VIEWER_URL) ? env.UNSTUCK_VIEWER_URL : undefined;
+  return choice.url.replace(/\/+$/, '') === CLOUD_RELAY_URL ? `${CLOUD_VIEWER_URL}/${version}` : undefined;
+}
+
 /** The relay transport for this configuration, or null for embedded mode. Never prints the key. */
 export function buildTransport(
   flags: { relay?: string; agentKey?: string },
@@ -22,7 +35,8 @@ export function buildTransport(
 ): { transport: Transport; description: string } | null {
   const choice = selectTransport(flags, env);
   if (choice.kind === 'embedded') return null;
-  const relay = createRelayTransport({ url: choice.url, agentKey: choice.agentKey });
+  const viewerUrl = viewerUrlFor(choice, env, VERSION);
+  const relay = createRelayTransport({ url: choice.url, agentKey: choice.agentKey, ...(viewerUrl ? { viewerUrl } : {}) });
   const publish = relay.publish.bind(relay);
   relay.publish = (id, opts) =>
     publish(id, opts).catch((e: { detail?: string }) => {
