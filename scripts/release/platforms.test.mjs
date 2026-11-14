@@ -17,27 +17,27 @@ describe('platform packages', () => {
     ]);
   });
   it('a platform package installs only on its own os/cpu and ships just the binary', () => {
-    const m = platformManifest(byId('win32-x64'), '0.1.4');
-    expect(m).toMatchObject({ name: '@velmlabs/unstuck-engine-win32-x64', version: '0.1.4', os: ['win32'], cpu: ['x64'], files: ['bin'], author: 'Velm Labs', homepage: 'https://unstuck.sh/docs' });
+    const m = platformManifest(byId('win32-x64'), '0.1.5');
+    expect(m).toMatchObject({ name: '@velmlabs/unstuck-engine-win32-x64', version: '0.1.5', os: ['win32'], cpu: ['x64'], files: ['bin'], author: 'Velm Labs', homepage: 'https://unstuck.sh/docs' });
     // Engine and embedded viewer are both Apache-2.0.
     expect(m.license).toBe('Apache-2.0');
     // Yarn PnP must unpack it to run it; and only glibc Linux gets the glibc builds (Alpine would fail to start them).
     expect(m.preferUnplugged).toBe(true);
     expect(m.libc).toBeUndefined();
-    expect(platformManifest(byId('linux-x64'), '0.1.4').libc).toEqual(['glibc']);
+    expect(platformManifest(byId('linux-x64'), '0.1.5').libc).toEqual(['glibc']);
     expect(m.repository).toEqual({ type: 'git', url: 'git+https://github.com/velmlabs/unstuck.git', directory: 'engine' });
     expect(m.publishConfig).toEqual({ access: 'public' });
   });
   it('an Intel Mac package installs on darwin/x64 only', () => {
-    expect(platformManifest(byId('darwin-x64'), '0.1.4')).toMatchObject({ name: '@velmlabs/unstuck-engine-darwin-x64', os: ['darwin'], cpu: ['x64'] });
-    expect(platformManifest(byId('darwin-x64'), '0.1.4').libc).toBeUndefined();
+    expect(platformManifest(byId('darwin-x64'), '0.1.5')).toMatchObject({ name: '@velmlabs/unstuck-engine-darwin-x64', os: ['darwin'], cpu: ['x64'] });
+    expect(platformManifest(byId('darwin-x64'), '0.1.5').libc).toBeUndefined();
   });
   it('the launcher package has a bin and optional dependencies on every platform package, nothing else', () => {
-    const m = launcherManifest('0.1.4');
+    const m = launcherManifest('0.1.5');
     expect(m.name).toBe('@velmlabs/unstuck-engine');
     expect(m.bin).toEqual({ 'unstuck-engine': 'bin/unstuck-engine.mjs' });
     expect(m.type).toBe('module');
-    expect(m.optionalDependencies).toEqual(Object.fromEntries(PLATFORMS.map((p) => [`@velmlabs/unstuck-engine-${p.id}`, '0.1.4'])));
+    expect(m.optionalDependencies).toEqual(Object.fromEntries(PLATFORMS.map((p) => [`@velmlabs/unstuck-engine-${p.id}`, '0.1.5'])));
     expect(m.dependencies).toBeUndefined();
     expect(m.files).toEqual(['bin']);
   });

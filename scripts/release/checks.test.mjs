@@ -50,8 +50,8 @@ describe('npm tarball contents', () => {
 });
 
 describe('wheel contents', () => {
-  const name = (tag) => `unstuck-0.1.4-py3-none-${tag}.whl`;
-  const meta = ['METADATA', 'WHEEL', 'RECORD', 'licenses/LICENSE'].map((f) => `unstuck-0.1.4.dist-info/${f}`);
+  const name = (tag) => `unstuck-0.1.5-py3-none-${tag}.whl`;
+  const meta = ['METADATA', 'WHEEL', 'RECORD', 'licenses/LICENSE'].map((f) => `unstuck-0.1.5.dist-info/${f}`);
   const py = ['unstuck/__init__.py', 'unstuck/_engine.py', 'unstuck/py.typed'];
   it('the package, its engine for that platform and the licences', () => {
     expect(wheelProblems(name('manylinux_2_17_x86_64'), [...py, 'unstuck/_bin/unstuck-engine', ...meta])).toEqual([]);
@@ -60,16 +60,16 @@ describe('wheel contents', () => {
   });
   it('flags a missing engine or licence, bytecode, tests and the wrong binary', () => {
     const w = name('macosx_13_0_arm64');
-    expect(wheelProblems(w, [...py, 'unstuck/__pycache__/x.cpython-313.pyc', 'tests/test_a.py', 'unstuck/_bin/unstuck-engine.exe', ...meta.slice(0, 3), 'unstuck-0.1.4.dist-info/licenses/NOTICE'])).toEqual([
+    expect(wheelProblems(w, [...py, 'unstuck/__pycache__/x.cpython-313.pyc', 'tests/test_a.py', 'unstuck/_bin/unstuck-engine.exe', ...meta.slice(0, 3), 'unstuck-0.1.5.dist-info/licenses/NOTICE'])).toEqual([
       `${w}: missing unstuck/_bin/unstuck-engine`,
-      `${w}: missing unstuck-0.1.4.dist-info/licenses/LICENSE`,
+      `${w}: missing unstuck-0.1.5.dist-info/licenses/LICENSE`,
       `${w}: unexpected file unstuck/__pycache__/x.cpython-313.pyc`,
       `${w}: unexpected file tests/test_a.py`,
       `${w}: unexpected file unstuck/_bin/unstuck-engine.exe`,
-      `${w}: unexpected file unstuck-0.1.4.dist-info/licenses/NOTICE`,
+      `${w}: unexpected file unstuck-0.1.5.dist-info/licenses/NOTICE`,
     ]);
   });
   it('a wheel for a platform this release does not build', () => {
-    expect(wheelProblems('unstuck-0.1.4-py3-none-any.whl', py)).toEqual(['unstuck-0.1.4-py3-none-any.whl: not a platform this release builds']);
+    expect(wheelProblems('unstuck-0.1.5-py3-none-any.whl', py)).toEqual(['unstuck-0.1.5-py3-none-any.whl: not a platform this release builds']);
   });
 });
