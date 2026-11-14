@@ -46,39 +46,39 @@ describe('the dry-run record', () => {
 
 describe('npm registry state', () => {
   it('free when the package or version does not exist', async () => {
-    expect(await npmState('@velmlabs/unstuck', '0.1.1', 'x', json(404, {}))).toBe('free');
-    expect(await npmState('@velmlabs/unstuck', '0.1.1', 'x', json(200, { versions: { '0.0.1': {} }, time: {} }))).toBe('free');
+    expect(await npmState('@velmlabs/unstuck', '0.1.2', 'x', json(404, {}))).toBe('free');
+    expect(await npmState('@velmlabs/unstuck', '0.1.2', 'x', json(200, { versions: { '0.0.1': {} }, time: {} }))).toBe('free');
   });
   it('same or different by the tarball sha1', async () => {
-    const body = { versions: { '0.1.1': { dist: { shasum: 'abc' } } }, time: { '0.1.1': 't' } };
-    expect(await npmState('@velmlabs/unstuck', '0.1.1', 'abc', json(200, body))).toBe('same');
-    expect(await npmState('@velmlabs/unstuck', '0.1.1', 'def', json(200, body))).toBe('different');
+    const body = { versions: { '0.1.2': { dist: { shasum: 'abc' } } }, time: { '0.1.2': 't' } };
+    expect(await npmState('@velmlabs/unstuck', '0.1.2', 'abc', json(200, body))).toBe('same');
+    expect(await npmState('@velmlabs/unstuck', '0.1.2', 'def', json(200, body))).toBe('different');
   });
   it('a version published then unpublished can never be reused', async () => {
-    expect(await npmState('@velmlabs/unstuck', '0.1.1', 'abc', json(200, { versions: {}, time: { '0.1.1': 't' } }))).toBe('different');
+    expect(await npmState('@velmlabs/unstuck', '0.1.2', 'abc', json(200, { versions: {}, time: { '0.1.2': 't' } }))).toBe('different');
   });
   it('asks for the scoped name escaped, and fails loudly on a registry error', async () => {
     let url;
-    await npmState('@velmlabs/unstuck-core', '0.1.1', 'x', async (u) => ((url = u), { status: 404, ok: false }));
+    await npmState('@velmlabs/unstuck-core', '0.1.2', 'x', async (u) => ((url = u), { status: 404, ok: false }));
     expect(url).toBe('https://registry.npmjs.org/@velmlabs%2funstuck-core');
-    await expect(npmState('@velmlabs/unstuck', '0.1.1', 'x', json(500, {}))).rejects.toThrow(/npm registry answered 500/);
+    await expect(npmState('@velmlabs/unstuck', '0.1.2', 'x', json(500, {}))).rejects.toThrow(/npm registry answered 500/);
   });
 });
 
 describe('PyPI state', () => {
   const release = { urls: [{ filename: 'u.whl', digests: { sha256: 'abc' } }] };
   it('free when the project, the release or that file is not there', async () => {
-    expect(await pypiState('unstuck', '0.1.1', 'u.whl', 'abc', json(404, {}))).toBe('free');
-    expect(await pypiState('unstuck', '0.1.1', 'v.whl', 'abc', json(200, release))).toBe('free');
+    expect(await pypiState('unstuck', '0.1.2', 'u.whl', 'abc', json(404, {}))).toBe('free');
+    expect(await pypiState('unstuck', '0.1.2', 'v.whl', 'abc', json(200, release))).toBe('free');
   });
   it('same or different by the file sha256', async () => {
-    expect(await pypiState('unstuck', '0.1.1', 'u.whl', 'abc', json(200, release))).toBe('same');
-    expect(await pypiState('unstuck', '0.1.1', 'u.whl', 'def', json(200, release))).toBe('different');
+    expect(await pypiState('unstuck', '0.1.2', 'u.whl', 'abc', json(200, release))).toBe('same');
+    expect(await pypiState('unstuck', '0.1.2', 'u.whl', 'def', json(200, release))).toBe('different');
   });
   it('asks for that release, and fails loudly on an error', async () => {
     let url;
-    await pypiState('unstuck', '0.1.1', 'u.whl', 'abc', async (u) => ((url = u), { status: 404, ok: false }));
-    expect(url).toBe('https://pypi.org/pypi/unstuck/0.1.1/json');
-    await expect(pypiState('unstuck', '0.1.1', 'u.whl', 'abc', json(503, {}))).rejects.toThrow(/PyPI answered 503/);
+    await pypiState('unstuck', '0.1.2', 'u.whl', 'abc', async (u) => ((url = u), { status: 404, ok: false }));
+    expect(url).toBe('https://pypi.org/pypi/unstuck/0.1.2/json');
+    await expect(pypiState('unstuck', '0.1.2', 'u.whl', 'abc', json(503, {}))).rejects.toThrow(/PyPI answered 503/);
   });
 });

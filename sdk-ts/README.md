@@ -21,4 +21,4 @@ The engine comes with the package: npm installs the build for your computer (mac
 
 Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_…`. Tutorials for Playwright, Puppeteer, MCP, browser-use, Stagehand and any Chromium: https://unstuck.sh/docs
 
-License: Apache-2.0. The engine binary also contains the AGPL-3.0 viewer; see its package's NOTICE.
+License: Apache-2.0, including the engine.

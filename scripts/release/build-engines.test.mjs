@@ -45,7 +45,7 @@ describe('engine builds', () => {
     const out = fs.mkdtempSync(path.join(os.tmpdir(), 'eng-'));
     const bin = buildEngine(PLATFORMS.find((p) => p.id === 'linux-x64'), out);
     checkBinaryType(bin, PLATFORMS.find((p) => p.id === 'linux-x64'));
-    expect(execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim()).toBe('0.1.1');
+    expect(execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim()).toBe('0.1.2');
   }, 300_000);
 });
 

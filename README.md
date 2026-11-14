@@ -88,5 +88,5 @@ Every package keeps test coverage above 90%. `pnpm e2e:examples` runs each examp
 
 ## License
 
-- SDKs, engine, protocol, MCP server and integrations: [Apache-2.0](LICENSE-APACHE)
-- Relay and viewer: [AGPL-3.0](LICENSE-AGPL)
+- SDKs, engine, viewer, protocol, MCP server and integrations: [Apache-2.0](LICENSE-APACHE). Everything you install from npm or PyPI is Apache-2.0.
+- Relay (`relay-core`, `relay-node`, `relay-cloudflare`): [AGPL-3.0](LICENSE-AGPL). It matters only if you run your own relay: if you change it and offer it to others, share your changes.

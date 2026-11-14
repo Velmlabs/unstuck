@@ -30,15 +30,18 @@ describe('npm tarball contents', () => {
     expect(tarballProblems('@velmlabs/unstuck-engine', [...base, 'bin/unstuck-engine.mjs', 'bin/other.js'])).toEqual(['@velmlabs/unstuck-engine: unexpected file bin/other.js']);
     expect(tarballProblems('@velmlabs/unstuck-engine', base)).toEqual(['@velmlabs/unstuck-engine: missing bin/unstuck-engine.mjs']);
   });
-  it('a platform package: its binary and both licences with the notice', () => {
-    const plat = [...base, 'LICENSE-AGPL', 'NOTICE'];
+  it('a platform package: its binary and the Apache licence, nothing else', () => {
+    const plat = base;
     expect(tarballProblems('@velmlabs/unstuck-engine-win32-x64', [...plat, 'bin/unstuck-engine.exe'])).toEqual([]);
     expect(tarballProblems('@velmlabs/unstuck-engine-darwin-x64', [...plat, 'bin/unstuck-engine'])).toEqual([]);
     expect(tarballProblems('@velmlabs/unstuck-engine-linux-x64', [...base, 'bin/unstuck-engine.exe'])).toEqual([
-      '@velmlabs/unstuck-engine-linux-x64: missing LICENSE-AGPL',
-      '@velmlabs/unstuck-engine-linux-x64: missing NOTICE',
       '@velmlabs/unstuck-engine-linux-x64: missing bin/unstuck-engine',
       '@velmlabs/unstuck-engine-linux-x64: unexpected file bin/unstuck-engine.exe',
+    ]);
+    // The viewer is Apache-2.0 now: the old AGPL files must not ship again.
+    expect(tarballProblems('@velmlabs/unstuck-engine-linux-x64', [...base, 'LICENSE-AGPL', 'NOTICE', 'bin/unstuck-engine'])).toEqual([
+      '@velmlabs/unstuck-engine-linux-x64: unexpected file LICENSE-AGPL',
+      '@velmlabs/unstuck-engine-linux-x64: unexpected file NOTICE',
     ]);
   });
   it('an unknown package is a problem', () => {
@@ -47,8 +50,8 @@ describe('npm tarball contents', () => {
 });
 
 describe('wheel contents', () => {
-  const name = (tag) => `unstuck-0.1.1-py3-none-${tag}.whl`;
-  const meta = ['METADATA', 'WHEEL', 'RECORD', 'licenses/LICENSE', 'licenses/LICENSE-AGPL', 'licenses/NOTICE'].map((f) => `unstuck-0.1.1.dist-info/${f}`);
+  const name = (tag) => `unstuck-0.1.2-py3-none-${tag}.whl`;
+  const meta = ['METADATA', 'WHEEL', 'RECORD', 'licenses/LICENSE'].map((f) => `unstuck-0.1.2.dist-info/${f}`);
   const py = ['unstuck/__init__.py', 'unstuck/_engine.py', 'unstuck/py.typed'];
   it('the package, its engine for that platform and the licences', () => {
     expect(wheelProblems(name('manylinux_2_17_x86_64'), [...py, 'unstuck/_bin/unstuck-engine', ...meta])).toEqual([]);
@@ -57,16 +60,16 @@ describe('wheel contents', () => {
   });
   it('flags a missing engine or licence, bytecode, tests and the wrong binary', () => {
     const w = name('macosx_13_0_arm64');
-    expect(wheelProblems(w, [...py, 'unstuck/__pycache__/x.cpython-313.pyc', 'tests/test_a.py', 'unstuck/_bin/unstuck-engine.exe', ...meta.slice(0, 4)])).toEqual([
+    expect(wheelProblems(w, [...py, 'unstuck/__pycache__/x.cpython-313.pyc', 'tests/test_a.py', 'unstuck/_bin/unstuck-engine.exe', ...meta.slice(0, 3), 'unstuck-0.1.2.dist-info/licenses/NOTICE'])).toEqual([
       `${w}: missing unstuck/_bin/unstuck-engine`,
-      `${w}: missing unstuck-0.1.1.dist-info/licenses/LICENSE-AGPL`,
-      `${w}: missing unstuck-0.1.1.dist-info/licenses/NOTICE`,
+      `${w}: missing unstuck-0.1.2.dist-info/licenses/LICENSE`,
       `${w}: unexpected file unstuck/__pycache__/x.cpython-313.pyc`,
       `${w}: unexpected file tests/test_a.py`,
       `${w}: unexpected file unstuck/_bin/unstuck-engine.exe`,
+      `${w}: unexpected file unstuck-0.1.2.dist-info/licenses/NOTICE`,
     ]);
   });
   it('a wheel for a platform this release does not build', () => {
-    expect(wheelProblems('unstuck-0.1.1-py3-none-any.whl', py)).toEqual(['unstuck-0.1.1-py3-none-any.whl: not a platform this release builds']);
+    expect(wheelProblems('unstuck-0.1.2-py3-none-any.whl', py)).toEqual(['unstuck-0.1.2-py3-none-any.whl: not a platform this release builds']);
   });
 });

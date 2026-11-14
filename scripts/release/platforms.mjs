@@ -1,4 +1,4 @@
-// The engine builds and the npm manifests of the packages generated for them (publishing 0.1.1).
+// The engine builds and the npm manifests of the packages generated for them.
 export const PLATFORMS = [
   // macOS 13: Bun's binaries are built for it (LC_BUILD_VERSION minos 13.0), so the wheel tag must not claim older.
   { id: 'darwin-arm64', bun: 'bun-darwin-arm64', os: 'darwin', cpu: 'arm64', wheel: 'macosx_13_0_arm64', exe: 'unstuck-engine', minMacos: '13.0' },
@@ -25,13 +25,11 @@ export function platformManifest(p, version) {
     version,
     description: `The Unstuck engine binary for ${p.id}. Installed automatically by @velmlabs/unstuck-engine.`,
     ...common,
-    // The binary embeds the viewer, which is AGPL-3.0-only (see NOTICE for the source offer).
-    license: 'Apache-2.0 AND AGPL-3.0-only',
     os: [p.os],
     cpu: [p.cpu],
     ...(p.libc ? { libc: [p.libc] } : {}),
     preferUnplugged: true,
-    files: ['bin', 'LICENSE-AGPL', 'NOTICE'],
+    files: ['bin'],
   };
 }
 

@@ -1,9 +1,9 @@
 {
   "name": "@velmlabs/unstuck-viewer",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Unstuck takeover viewer: the page a human uses to control the agent's browser",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit && vite build",

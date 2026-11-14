@@ -21,4 +21,4 @@ The engine comes in the wheel for your platform (macOS 13+ on Apple silicon or I
 
 Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_...`. Tutorials: https://unstuck.sh/docs
 
-License: Apache-2.0 for the Python code. The bundled engine also contains the Unstuck viewer, licensed AGPL-3.0-only; see NOTICE for the source offer.
+License: Apache-2.0, including the bundled engine.

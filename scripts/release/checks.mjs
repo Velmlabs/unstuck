@@ -1,4 +1,4 @@
-// What each published artifact may contain (publishing 0.1.1): nothing but what's listed, so no sources, tests,
+// What each published artifact may contain: nothing but what's listed, so no sources, tests,
 // source maps or secrets ship. Each function returns a list of problems; empty means the contents are right.
 import { PLATFORMS } from './platforms.mjs';
 
@@ -17,7 +17,7 @@ export function tarballProblems(name, files) {
   if (TS_PACKAGES.includes(name)) return problems(name, files, [...BASE, 'dist/index.js'], (f) => COMPILED.test(f));
   if (name === '@velmlabs/unstuck-engine') return problems(name, files, [...BASE, 'bin/unstuck-engine.mjs'], () => false);
   const platform = PLATFORMS.find((p) => name === `@velmlabs/unstuck-engine-${p.id}`);
-  if (platform) return problems(name, files, [...BASE, 'LICENSE-AGPL', 'NOTICE', `bin/${platform.exe}`], () => false);
+  if (platform) return problems(name, files, [...BASE, `bin/${platform.exe}`], () => false);
   return [`${name}: not a package this release publishes`];
 }
 
@@ -27,7 +27,7 @@ export function wheelProblems(wheel, files) {
   const platform = m && PLATFORMS.find((p) => p.wheel === m[2]);
   if (!platform) return [`${wheel}: not a platform this release builds`];
   const info = `unstuck-${m[1]}.dist-info`;
-  const required = [`unstuck/_bin/${platform.exe}`, ...['METADATA', 'WHEEL', 'RECORD', 'licenses/LICENSE', 'licenses/LICENSE-AGPL', 'licenses/NOTICE'].map((f) => `${info}/${f}`)];
+  const required = [`unstuck/_bin/${platform.exe}`, ...['METADATA', 'WHEEL', 'RECORD', 'licenses/LICENSE'].map((f) => `${info}/${f}`)];
   const allowed = (f) => /^unstuck\/[\w]+\.py$/.test(f) || f === 'unstuck/py.typed' || f === `${info}/entry_points.txt`;
   return problems(wheel, files, required, allowed);
 }

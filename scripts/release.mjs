@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publishing 0.1.1 (docs/superpowers/specs/2026-11-14-publish-design.md).
+// Publishing 0.1.2 (docs/superpowers/specs/2026-11-14-publish-design.md).
 //   pnpm release           dry run: build everything into release/, prove it works from a clean install, and record each
 //                          artifact's SHA-256 with the commit in release/dry-run-passed.json
 //   pnpm release:publish   publishes exactly those artifacts (scripts/publish.mjs)
@@ -20,7 +20,7 @@ import { stageLauncher, stagePlatform } from './release/stage.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 const TS = [
   { dir: 'protocol', name: '@velmlabs/unstuck-protocol' },
   { dir: 'core', name: '@velmlabs/unstuck-core' },
