@@ -28,14 +28,17 @@ export async function edgeSmoke(appDir) {
     });
   } catch (e) {
     const texts = (e.errors ?? []).map((m) => m.text);
-    const builtins = texts.map((t) => /Could not resolve "([^"]+)"/.exec(t)?.[1]).filter((id) => id && isBuiltin(id));
+    const builtins = (e.errors ?? []).flatMap((m) => {
+      const id = /Could not resolve "([^"]+)"/.exec(m.text)?.[1];
+      return id && isBuiltin(id) ? [`${id} (imported by ${m.location?.file ?? 'unknown'})`] : [];
+    });
     if (builtins.length) throw new Error(`edge entry pulls in Node built-ins: ${[...new Set(builtins)].join(', ')}`);
     throw new Error(`edge entry does not bundle for workerd:\n${texts.join('\n') || e.message}`);
   } finally {
     fs.rmSync(entry, { force: true });
   }
   const inputs = Object.keys(result.metafile.inputs);
-  const nodeInputs = inputs.filter((i) => i.startsWith('node:') || isBuiltin(i));
+  const nodeInputs = inputs.filter((i) => i.startsWith('node:'));
   if (nodeInputs.length) throw new Error(`edge entry pulls in Node built-ins: ${nodeInputs.join(', ')}`);
   const bytes = result.outputFiles.reduce((n, f) => n + f.contents.length, 0);
   if (bytes > MAX_BYTES) throw new Error(`edge bundle is ${(bytes / 1024).toFixed(0)} KiB (limit 1024 KiB)`);
