@@ -11,3 +11,6 @@ export { nextStatus, isTerminal, InvalidTransitionError, type SessionEvent } fro
 export { newSessionId, newSecret, importSecret, signToken, verifyToken, type TokenCheck } from './session/tokens';
 export { createRelayTransport, RelayError, type RelayErrorDetail, type RelayTransportOptions } from './relay-transport';
 export { isPublicSuffix, siteOf } from './session/page-lock';
+export { CLOUD_RELAY_URL, CLOUD_VIEWER_URL, CLOUD_API_URL, selectTransport, viewerUrlFor, cloudAlertsFor, buildRelayTransport, type TransportChoice } from './cloud/transport';
+export { createCloudAlerter, MAX_REASON, MAX_SITE, type CloudAlerterOptions } from './cloud/alerts';
+export { hostnames } from './cloud/sites';

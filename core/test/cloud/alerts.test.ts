@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { newDeviceKeyPair, exportDevicePublicKey, openAlert } from '@velmlabs/unstuck-protocol';
-import type { LinkInfo } from '@velmlabs/unstuck-core';
-import { createCloudAlerter } from '../src/cloud-alerts';
+import type { LinkInfo } from '../../src/engine';
+import { createCloudAlerter } from '../../src/cloud/alerts';
 
 const T = 'tok_SECRET_value';
 const K = 'key_SECRET_value';
@@ -196,7 +196,7 @@ describe('createCloudAlerter', () => {
     const urls: string[] = [];
     globalThis.fetch = (async (u: string) => (urls.push(u), json({ error: 'alerts_not_allowed' }, 403))) as unknown as typeof fetch;
     const written: string[] = [];
-    const write = vi.spyOn(process.stderr, 'write').mockImplementation((c: any) => (written.push(String(c)), true));
+    const write = vi.spyOn(console, 'error').mockImplementation((c: unknown) => void written.push(String(c)));
     try {
       await createCloudAlerter({ apiBase: 'https://api.test//', apiKey: 'k' })(info, 'x.com');
     } finally {
@@ -205,6 +205,6 @@ describe('createCloudAlerter', () => {
     }
     expect(urls).toEqual(['https://api.test/api/v1/agent/devices']);
     expect(written).toHaveLength(1);
-    expect(written[0]).toMatch(/^\[unstuck\] .*\n$/);
+    expect(written[0]).toMatch(/^\[unstuck\] /);
   });
 });

@@ -73,7 +73,8 @@ describe('createTunneledCdp', () => {
     sdk.notify(Methods.cdpClosed, { pageId: 'p1', reason: 'gone' });
     await tick();
     const h = vi.fn();
-    cdp.onClose(h);
+    const off = cdp.onClose(h);
     expect(h).toHaveBeenCalledWith('gone');
+    expect(() => off()).not.toThrow();
   });
 });

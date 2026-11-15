@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { createEngine, type EventLog, type LinkInfo, type Transport } from '@velmlabs/unstuck-core';
 import { connectCdp } from './direct-cdp';
-import { hostnames } from './stdio-host';
+import { hostnames } from '@velmlabs/unstuck-core';
 import { VERSION } from './version';
 
 export const TOOL_NAME = 'request_human_takeover';
