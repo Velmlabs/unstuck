@@ -27,11 +27,22 @@ export interface PairProps {
   openUrl: (url: string) => void;
 }
 
+/** What Cloud says is really set up for this phone (GET /api/v1/devices/self). */
+type Status = { push: boolean; telegram: boolean; telegramAnyBrowser: boolean };
+
 type Phase = 'loading' | 'confirm' | 'ready' | 'pairing' | 'paired' | 'expired' | 'rejected' | 'unreachable';
 type Note = { kind: 'ok' | 'error'; text: string } | null;
 
 const EXPIRED = 'This pairing code has expired. Make a new one in your dashboard.';
 const REJECTED = 'Could not pair this phone. Make a new code in your dashboard and try again.';
+const ANY_BROWSER_COPY =
+  'Telegram links then carry the key that opens them, so Unstuck Cloud and Telegram could open your takeovers. Phone notifications stay locked to this browser.';
+
+function parseStatus(v: unknown): Status | null {
+  const s = v as Partial<Status> | null;
+  if (!s || typeof s.push !== 'boolean' || typeof s.telegram !== 'boolean' || typeof s.telegramAnyBrowser !== 'boolean') return null;
+  return { push: s.push, telegram: s.telegram, telegramAnyBrowser: s.telegramAnyBrowser };
+}
 
 export function Pair({ code, apiBase, pathname, search, store, history, env, fetchFn, subscribePush, openUrl }: PairProps) {
   const doFetch = fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
@@ -42,6 +53,8 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
   const [tgNote, setTgNote] = useState<Note>(null);
   const [typed, setTyped] = useState('');
   const [codeError, setCodeError] = useState(false);
+  const [status, setStatus] = useState<Status | null>(null);
+  const [anyNote, setAnyNote] = useState<Note>(null);
 
   useEffect(() => {
     // The code is a credential: it leaves the address bar (and so history and sync) as soon as it is read.
@@ -61,6 +74,35 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
       () => setPhase('ready'),
     );
   }, []);
+
+  // Once paired: what is really set up, on mount and whenever the page is shown again (back from Telegram, or from
+  // the back/forward cache). A failed load keeps the last known state (at first: today's buttons, no warning).
+  const token = phase === 'paired' ? device?.deviceToken : undefined;
+  useEffect(() => {
+    if (!token) return;
+    let live = true;
+    const load = async () => {
+      try {
+        const res = await doFetch(`${apiBase}/api/v1/devices/self`, { headers: { Authorization: `Bearer ${token}` } });
+        const next = res.ok ? parseStatus(await res.json()) : null;
+        if (live && next) setStatus(next);
+      } catch {
+        // offline: keep what is shown
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void load();
+    };
+    const onShow = () => void load();
+    void load();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onShow);
+    return () => {
+      live = false;
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onShow);
+    };
+  }, [token]);
 
   async function pair() {
     const pairingCode = code ?? normalizeCode(typed);
@@ -108,7 +150,7 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
       const subscription = await subscribePush(publicKey);
       const res = await doFetch(`${apiBase}/api/v1/devices/self/push`, { method: 'PUT', headers: auth(), body: JSON.stringify({ subscription }) });
       if (!res.ok) throw new Error('push');
-      setPushNote({ kind: 'ok', text: 'Phone notifications are on.' });
+      setStatus((s) => ({ telegram: false, telegramAnyBrowser: false, ...s, push: true }));
     } catch {
       setPushNote({ kind: 'error', text: 'Could not turn on phone notifications. Check that notifications are allowed for this site, then try again.' });
     }
@@ -124,6 +166,18 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
       openUrl(url);
     } catch {
       setTgNote({ kind: 'error', text: 'Could not start Telegram. Try again.' });
+    }
+  }
+
+  async function setAnyBrowser(enabled: boolean) {
+    setAnyNote(null);
+    try {
+      const res = await doFetch(`${apiBase}/api/v1/devices/self/telegram-any-browser`, { method: 'PUT', headers: auth(), body: JSON.stringify({ enabled }) });
+      const next = res.ok ? parseStatus(await res.json()) : null;
+      if (!next) throw new Error('any-browser');
+      setStatus(next);
+    } catch {
+      setAnyNote({ kind: 'error', text: 'Could not change this setting. Try again.' });
     }
   }
 
@@ -179,15 +233,30 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
           {needsHome && homeScreenSteps}
           {!needsHome && env.canPush && (
             <section>
-              <button type="button" class="btn pair-btn" onClick={() => void turnOnPush()}>Turn on phone notifications</button>
+              {status?.push && <p role="status">Phone notifications are on.</p>}
+              <button type="button" class="btn pair-btn" onClick={() => void turnOnPush()}>{status?.push ? 'Turn on again' : 'Turn on phone notifications'}</button>
               {pushNote && <p role={pushNote.kind === 'error' ? 'alert' : 'status'}>{pushNote.text}</p>}
             </section>
           )}
           <section>
-            <button type="button" class="btn pair-btn" onClick={() => void connectTelegram()}>Connect Telegram</button>
-            <p>
-              Tip: in Telegram, open Settings, Chat Settings and turn off "In-App Browser", so links from the bot open in this browser.
-            </p>
+            {status?.telegram ? (
+              <>
+                <p role="status">Telegram is connected: alerts for this phone arrive in your Telegram chat.</p>
+                <button type="button" class="btn btn-ghost pair-btn btn-small" onClick={() => void connectTelegram()}>Reconnect Telegram</button>
+                <label class="toggle">
+                  <input type="checkbox" checked={status.telegramAnyBrowser} onChange={() => void setAnyBrowser(!status.telegramAnyBrowser)} /> Telegram links open in any browser
+                </label>
+                <p class="muted">{ANY_BROWSER_COPY}</p>
+                {anyNote && <p role="alert">{anyNote.text}</p>}
+              </>
+            ) : (
+              <button type="button" class="btn pair-btn" onClick={() => void connectTelegram()}>Connect Telegram</button>
+            )}
+            {!status?.telegramAnyBrowser && (
+              <p>
+                Tip: in Telegram, open Settings, Chat Settings and turn off "In-App Browser", so links from the bot open in this browser.
+              </p>
+            )}
             {tgNote && <p role="alert">{tgNote.text}</p>}
           </section>
         </>

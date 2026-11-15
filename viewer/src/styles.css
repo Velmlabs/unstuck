@@ -475,3 +475,30 @@ input:focus-visible {
 .start-note {
   font-size: 13px;
 }
+
+.pair .btn-small {
+  min-height: 36px;
+  margin-top: 8px;
+  background: transparent;
+  color: var(--color-foreground);
+  font-size: 14px;
+}
+
+.pair .toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-foreground);
+}
+
+.pair .toggle input {
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 0;
+}
+
+.pair .muted {
+  color: var(--color-muted-foreground);
+  font-size: 14px;
+}

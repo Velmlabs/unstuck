@@ -134,14 +134,18 @@ describe('pairing', () => {
 describe('pairing a browser that is already paired', () => {
   const old = () => memoryStore({ deviceId: 'old', deviceToken: 'oldtok', privateKey: {} as CryptoKey, label: 'Old Pixel' });
 
-  it('asks first; Keep current keeps the old pairing and sends nothing', async () => {
+  it('asks first; Keep current keeps the old pairing and sends nothing but the status read', async () => {
     const store = old();
     const { fetchFn } = setup({ store });
     await screen.findByText('This browser is already paired as Old Pixel. Pair it again?');
     expect(screen.queryByRole('button', { name: 'Pair this phone' })).toBeNull();
+    expect(fetchFn).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Keep current' }));
     await screen.findByText(/this phone is paired/i);
-    expect(fetchFn).not.toHaveBeenCalled();
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
+    expect(fetchFn.mock.calls[0]![0]).toBe('https://unstuck.sh/api/v1/devices/self');
+    expect((fetchFn.mock.calls[0]![1] as RequestInit).method).toBeUndefined();
+    expect((fetchFn.mock.calls[0]![1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer oldtok' });
     expect(store.rec?.deviceId).toBe('old');
   });
 
@@ -151,7 +155,7 @@ describe('pairing a browser that is already paired', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Pair again' }));
     await pairNow();
     await screen.findByText(/this phone is paired/i);
-    const urls = fetchFn.mock.calls.map((c) => c[0]);
+    const urls = fetchFn.mock.calls.slice(0, 2).map((c) => c[0]);
     expect(urls).toEqual(['https://unstuck.sh/api/v1/devices/pair', 'https://unstuck.sh/api/v1/devices/self']);
     const del = fetchFn.mock.calls[1]![1] as RequestInit;
     expect(del.method).toBe('DELETE');
@@ -280,5 +284,178 @@ describe('telegram', () => {
     await pairNow();
     fireEvent.click(await screen.findByRole('button', { name: /connect telegram/i }));
     await screen.findByText(/could not start telegram/i);
+  });
+});
+
+describe('status once paired (what Cloud says is really set up)', () => {
+  const paired = () => memoryStore({ deviceId: 'dev9', deviceToken: 'tok9', privateKey: {} as CryptoKey, label: 'Galaxy' });
+  type Status = { label: string; push: boolean; telegram: boolean; telegramAnyBrowser: boolean };
+  function withStatus(first: Status | number, extra: (url: string, init?: RequestInit) => Response | undefined = () => undefined) {
+    let status: Status | number = first;
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      const e = extra(url, init);
+      if (e) return e;
+      if (url.endsWith('/api/v1/devices/self') && (init?.method ?? 'GET') === 'GET') return typeof status === 'number' ? json(status, {}) : json(200, status);
+      if (url.endsWith('/devices/self/telegram')) return json(200, { url: 'https://t.me/unstuck_bot?start=abc' });
+      return json(404, {});
+    });
+    const set = (s: Status | number) => void (status = s);
+    return { fetchFn, set };
+  }
+  const st = (o: Partial<Status> = {}): Status => ({ label: 'Galaxy', push: false, telegram: false, telegramAnyBrowser: false, ...o });
+  const statusCalls = (fetchFn: ReturnType<typeof vi.fn>) => fetchFn.mock.calls.filter((c) => c[0] === 'https://unstuck.sh/api/v1/devices/self' && !(c[1] as RequestInit | undefined)?.method);
+  afterEach(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+  });
+
+  it('loads the status with the device token on mount', async () => {
+    const { fetchFn } = withStatus(st());
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    await waitFor(() => expect(statusCalls(fetchFn)).toHaveLength(1));
+    expect((statusCalls(fetchFn)[0]![1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer tok9' });
+  });
+
+  it('Telegram linked: says so, with a smaller Reconnect Telegram button instead of Connect Telegram', async () => {
+    const { fetchFn } = withStatus(st({ telegram: true }));
+    const { openUrl } = setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    expect(await screen.findByText('Telegram is connected: alerts for this phone arrive in your Telegram chat.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Connect Telegram' })).toBeNull();
+    const again = screen.getByRole('button', { name: 'Reconnect Telegram' });
+    expect(again.className).toContain('btn-small');
+    fireEvent.click(again);
+    await waitFor(() => expect(openUrl).toHaveBeenCalledWith('https://t.me/unstuck_bot?start=abc'));
+  });
+
+  it('not linked: Connect Telegram as before, and no any-browser toggle', async () => {
+    const { fetchFn } = withStatus(st());
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    await waitFor(() => expect(statusCalls(fetchFn)).toHaveLength(1));
+    expect(screen.getByRole('button', { name: 'Connect Telegram' })).toBeTruthy();
+    expect(screen.queryByText(/Telegram is connected/)).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: /any browser/i })).toBeNull();
+  });
+
+  it('push on: "Phone notifications are on." and the button stays as Turn on again', async () => {
+    const { fetchFn } = withStatus(st({ push: true }));
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    expect(await screen.findByText('Phone notifications are on.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Turn on again' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Turn on phone notifications' })).toBeNull();
+  });
+
+  it('a failed status load (error or network) keeps today’s buttons and shows nothing alarming', async () => {
+    for (const fail of [500, 'throw'] as const) {
+      cleanup();
+      const fetchFn = vi.fn(async () => (fail === 'throw' ? Promise.reject(new Error('offline')) : json(fail, {})));
+      setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+      await waitFor(() => expect(fetchFn).toHaveBeenCalled());
+      expect(screen.getByRole('button', { name: 'Connect Telegram' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Turn on phone notifications' })).toBeTruthy();
+      expect(screen.queryByRole('alert')).toBeNull();
+    }
+  });
+
+  it('a malformed status body is ignored', async () => {
+    const fetchFn = vi.fn(async () => json(200, { push: 'yes' }));
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    await waitFor(() => expect(fetchFn).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Connect Telegram' })).toBeTruthy();
+  });
+
+  it('refreshes when the page becomes visible again (back from Telegram) and on pageshow; not while hidden', async () => {
+    const { fetchFn, set } = withStatus(st());
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    await waitFor(() => expect(statusCalls(fetchFn)).toHaveLength(1));
+    set(st({ telegram: true }));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(statusCalls(fetchFn)).toHaveLength(1);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(await screen.findByText(/Telegram is connected/)).toBeTruthy();
+    window.dispatchEvent(new Event('pageshow'));
+    await waitFor(() => expect(statusCalls(fetchFn)).toHaveLength(3));
+  });
+
+  it('stops listening once the page is gone', async () => {
+    const { fetchFn } = withStatus(st());
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    await waitFor(() => expect(statusCalls(fetchFn)).toHaveLength(1));
+    cleanup();
+    window.dispatchEvent(new Event('pageshow'));
+    document.dispatchEvent(new Event('visibilitychange'));
+    expect(statusCalls(fetchFn)).toHaveLength(1);
+  });
+
+  it('a phone just paired loads its status too', async () => {
+    const { fetchFn } = withStatus(st(), (url) => (url.endsWith('/devices/pair') ? json(200, { deviceId: 'dev1', deviceToken: 'tok1' }) : undefined));
+    setup({ fetchFn: fetchFn as unknown as typeof fetch });
+    await pairNow();
+    await waitFor(() => expect(statusCalls(fetchFn)).toHaveLength(1));
+    expect((statusCalls(fetchFn)[0]![1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer tok1' });
+  });
+
+  it('turning push on updates the status line', async () => {
+    const { fetchFn } = withStatus(st(), (url) => {
+      if (url.endsWith('/push/vapid')) return json(200, { publicKey: 'V' });
+      if (url.endsWith('/devices/self/push')) return json(200, {});
+      return undefined;
+    });
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    fireEvent.click(await screen.findByRole('button', { name: 'Turn on phone notifications' }));
+    expect(await screen.findByText('Phone notifications are on.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Turn on again' })).toBeTruthy();
+  });
+});
+
+describe('"Telegram links open in any browser"', () => {
+  const paired = () => memoryStore({ deviceId: 'dev9', deviceToken: 'tok9', privateKey: {} as CryptoKey, label: 'Galaxy' });
+  const COPY = 'Telegram links then carry the key that opens them, so Unstuck Cloud and Telegram could open your takeovers. Phone notifications stay locked to this browser.';
+  function server(initial: boolean, put: (enabled: boolean) => Response = (enabled) => json(200, { label: 'Galaxy', push: false, telegram: true, telegramAnyBrowser: enabled })) {
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/devices/self/telegram-any-browser')) return put(JSON.parse(String(init!.body)).enabled);
+      if (url.endsWith('/api/v1/devices/self')) return json(200, { label: 'Galaxy', push: false, telegram: true, telegramAnyBrowser: initial });
+      return json(404, {});
+    });
+  }
+
+  it('off by default, shown under Telegram with the plain trade-off; turning it on PUTs {enabled: true} with the device token', async () => {
+    const fetchFn = server(false);
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    const box = (await screen.findByRole('checkbox', { name: 'Telegram links open in any browser' })) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    expect(screen.getByText(COPY)).toBeTruthy();
+    // Left off: the in-app browser tip stays.
+    expect(screen.getByText(/in-app browser/i)).toBeTruthy();
+    fireEvent.click(box);
+    await waitFor(() => expect(box.checked).toBe(true));
+    const put = fetchFn.mock.calls.find((c) => String(c[0]).endsWith('/telegram-any-browser'))!;
+    expect(put[0]).toBe('https://unstuck.sh/api/v1/devices/self/telegram-any-browser');
+    expect((put[1] as RequestInit).method).toBe('PUT');
+    expect((put[1] as RequestInit).headers).toMatchObject({ Authorization: 'Bearer tok9' });
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ enabled: true });
+  });
+
+  it('on: turning it off PUTs {enabled: false}', async () => {
+    const fetchFn = server(true);
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    const box = (await screen.findByRole('checkbox', { name: 'Telegram links open in any browser' })) as HTMLInputElement;
+    await waitFor(() => expect(box.checked).toBe(true));
+    fireEvent.click(box);
+    await waitFor(() => expect(box.checked).toBe(false));
+    const put = fetchFn.mock.calls.find((c) => String(c[0]).endsWith('/telegram-any-browser'))!;
+    expect(JSON.parse(String((put[1] as RequestInit).body))).toEqual({ enabled: false });
+  });
+
+  it('a refused or failed change says so and keeps the old state', async () => {
+    for (const put of [() => json(409, { error: 'telegram_not_linked' }), () => Promise.reject(new Error('offline')) as never]) {
+      cleanup();
+      const fetchFn = server(false, put);
+      setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+      const box = (await screen.findByRole('checkbox', { name: 'Telegram links open in any browser' })) as HTMLInputElement;
+      fireEvent.click(box);
+      expect(await screen.findByText('Could not change this setting. Try again.')).toBeTruthy();
+      expect(box.checked).toBe(false);
+    }
   });
 });
