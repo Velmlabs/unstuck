@@ -46,7 +46,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --coverage",
-    "build:dist": "tsup"
+    "build:dist": "tsup",
+    "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
     "@velmlabs/unstuck-core": "workspace:*",
@@ -84,5 +85,10 @@
         "default": "./dist/index.js"
       }
     }
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.8.1",
+    "@cloudflare/workers-types": "^5.20261112.1",
+    "wrangler": "^4.161.0"
   }
 }

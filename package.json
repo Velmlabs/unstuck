@@ -8,7 +8,7 @@
   },
   "scripts": {
     "build": "pnpm -r build",
-    "test": "pnpm run test:scripts && pnpm -r test && pnpm run test:py",
+    "test": "pnpm run test:scripts && pnpm -r test && pnpm --filter @velmlabs/unstuck test:workers && pnpm run test:py",
     "test:scripts": "vitest run --config scripts/vitest.config.ts --coverage",
     "check:runtime": "node scripts/check-runtime-agnostic.mjs protocol/src core/src viewer/src relay-core/src && node scripts/check-edge-graph.mjs sdk-ts/src/edge.ts",
     "test:py": "cd sdk-py && uv run pytest --cov=unstuck -q",
