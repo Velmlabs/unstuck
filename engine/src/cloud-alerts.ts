@@ -14,9 +14,19 @@ export interface CloudAlerterOptions {
 interface Device {
   id: string;
   publicKey: string;
+  label?: string;
 }
 
 const CACHE_MS = 60_000;
+/** The sealed payload's caps (code points): a long reason must not push the link past what push and Telegram carry. */
+export const MAX_REASON = 200;
+export const MAX_SITE = 253;
+
+const cut = (s: string, n: number) => [...s].slice(0, n).join('');
+/** A label as one safe log token: no control, zero-width or bidi characters (Cloud sanitises too), at most 64. */
+// eslint-disable-next-line no-control-regex
+const logLabel = (d: Device) => cut(String(d.label ?? '').replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim(), 64) || 'phone';
+const logId = (id: string) => id.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64);
 
 /** `t` and `k` from a link's `#t=…&k=…` fragment, plus the URL without it; null when it has none. */
 function splitLink(url: string): { t: string; k: string; viewerUrl: string } | null {
@@ -39,6 +49,8 @@ export function createCloudAlerter(o: CloudAlerterOptions): (info: LinkInfo, sit
   const now = o.now ?? Date.now;
   const headers = { Authorization: `Bearer ${o.apiKey}` };
   let cache: { at: number; devices: Device[] } | null = null;
+  /** The phones the previous alert was sealed to (ids and labels), so the log line appears only when it changes. */
+  let lastSet: string | null = null;
 
   async function devices(): Promise<Device[]> {
     if (cache && now() - cache.at < CACHE_MS) return cache.devices;
@@ -58,8 +70,26 @@ export function createCloudAlerter(o: CloudAlerterOptions): (info: LinkInfo, sit
       if (!link) return;
       const list = await devices();
       if (list.length === 0) return;
-      const payload: AlertPayload = { t: link.t, k: link.k, reason: info.reason, site: site ?? '', expiresAt: info.expiresAt };
-      const sealed = await Promise.all(list.map(async (d) => ({ device: d.id, blob: await sealAlert(d.publicKey, d.id, info.sessionId, payload) })));
+      const payload: AlertPayload = { t: link.t, k: link.k, reason: cut(info.reason, MAX_REASON), site: cut(site ?? '', MAX_SITE), expiresAt: info.expiresAt };
+      // Each phone on its own: one with a bad key is skipped, the others still get the alert.
+      const results = await Promise.all(
+        list.map(async (d) => {
+          try {
+            return { d, blob: await sealAlert(d.publicKey, d.id, info.sessionId, payload) };
+          } catch {
+            log(`[unstuck] skipped phone ${logLabel(d)} (${logId(d.id)}): its key is not valid`);
+            return null;
+          }
+        }),
+      );
+      const ok = results.filter((r): r is { d: Device; blob: string } => r !== null);
+      if (ok.length === 0) return;
+      const named = ok.map((r) => `${logLabel(r.d)} (${logId(r.d.id)})`).join(', ');
+      if (named !== lastSet) {
+        lastSet = named;
+        log(`[unstuck] alert sealed to ${ok.length} phone(s): ${named}`);
+      }
+      const sealed = ok.map((r) => ({ device: r.d.id, blob: r.blob }));
       const res = await doFetch(`${base}/api/v1/agent/notify`, {
         method: 'POST',
         headers: { ...headers, 'Content-Type': 'application/json' },

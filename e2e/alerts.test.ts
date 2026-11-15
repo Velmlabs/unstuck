@@ -92,7 +92,7 @@ describe('a takeover alert reaches the paired phone, sealed', () => {
     // The engine's alerter seals the link to that device and "sends" it to the fake Cloud.
     const log: string[] = [];
     await createCloudAlerter({ apiBase, apiKey: API_KEY, log: (l) => log.push(l) })({ sessionId: link.sessionId, url: link.url, reason: link.reason, expiresAt: link.expiresAt }, '127.0.0.1');
-    expect(log).toEqual([]);
+    expect(log).toEqual(['[unstuck] alert sealed to 1 phone(s): phone (dev-e2e)']);
     expect(notifies).toHaveLength(1);
     const n = notifies[0]!;
     // Everything Cloud received is ciphertext: neither the link secret nor the reason is in it.
@@ -118,6 +118,10 @@ describe('a takeover alert reaches the paired phone, sealed', () => {
     await human.goto(sealedLink);
     await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
     expect(await human.getByText('Solve the test CAPTCHA').count()).toBe(1);
+    // The engine's own viewer page allows no other origin (CSP connect-src 'self'), so it can't ask Cloud who sent the
+    // alert: no key is named and no warning is shown (view.unstuck.sh's page allows the Cloud API).
+    expect(await human.getByText(/From your key/).count()).toBe(0);
+    expect(await human.getByText(/wasn't sent by Unstuck alerts/).count()).toBe(0);
     expect(human.url()).not.toContain('#');
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved', sessionId: link.sessionId });

@@ -108,7 +108,8 @@ describe('createCloudAlerter', () => {
     const a = await device('d1');
     const badNotify = setup(() => json({ devices: [a] }), () => new Response('', { status: 500 }));
     await badNotify.alert(info, 'x.com');
-    expect(badNotify.lines).toHaveLength(1);
+    expect(badNotify.lines).toHaveLength(2); // sealed-to line, then the failure
+    expect(badNotify.lines[1]).toMatch(/could not send/);
 
     const badJson = setup(() => new Response('<html>', { status: 200 }));
     await badJson.alert(info, 'x.com');
@@ -117,6 +118,7 @@ describe('createCloudAlerter', () => {
     const badKey = setup(() => json({ devices: [{ id: 'd', publicKey: 'AAAA', label: 'x' }] }));
     await badKey.alert(info, 'x.com');
     expect(badKey.lines).toHaveLength(1);
+    expect(badKey.calls).toHaveLength(1); // nothing sealed: no notify call
 
     for (const s of [throwing, five, badNotify, badJson, badKey]) for (const l of s.lines) for (const secret of [T, K, 'APIKEY']) expect(l).not.toContain(secret);
   });
@@ -149,6 +151,44 @@ describe('createCloudAlerter', () => {
     expect(denied.calls).toHaveLength(1); // cached
     expect(denied.lines).toHaveLength(1);
     expect(denied.lines[0]).toMatch(/not enabled/);
+  });
+
+  it('logs which phones it sealed to, first time and whenever the set changes, never the key, token or link', async () => {
+    const a = await device('d1');
+    const b = await device('d2');
+    let list = [a];
+    const s = setup(() => json({ devices: list.map(({ id, publicKey }) => ({ id, publicKey, label: id === 'd1' ? 'iPhone \u202eevil\u0007' : 'Pixel' })) }));
+    await s.alert(info, 'x.com');
+    expect(s.lines).toEqual(['[unstuck] alert sealed to 1 phone(s): iPhone evil (d1)']);
+    s.tick(61_000);
+    await s.alert(info, 'x.com');
+    expect(s.lines).toHaveLength(1); // same set: no new line
+    list = [a, b];
+    s.tick(61_000);
+    await s.alert(info, 'x.com');
+    expect(s.lines).toEqual(['[unstuck] alert sealed to 1 phone(s): iPhone evil (d1)', '[unstuck] alert sealed to 2 phone(s): iPhone evil (d1), Pixel (d2)']);
+    for (const l of s.lines) for (const secret of [T, K, 'APIKEY', 'view.unstuck.sh']) expect(l).not.toContain(secret);
+  });
+
+  it('a device with a bad key is skipped (one line); the others still get the alert', async () => {
+    const a = await device('d1');
+    const s = setup(() => json({ devices: [{ id: 'bad', publicKey: 'AAAA', label: 'Old phone' }, { id: a.id, publicKey: a.publicKey, label: 'Pixel' }] }));
+    await s.alert(info, 'x.com');
+    const body = JSON.parse(s.calls[1]!.init.body as string);
+    expect(body.sealed.map((x: { device: string }) => x.device)).toEqual(['d1']);
+    expect(s.lines).toEqual(['[unstuck] skipped phone Old phone (bad): its key is not valid', '[unstuck] alert sealed to 1 phone(s): Pixel (d1)']);
+  });
+
+  it('caps the sealed reason at 200 and the site at 253 code points', async () => {
+    const a = await device('d1');
+    const s = setup(() => json({ devices: [a] }));
+    await s.alert({ ...info, reason: '\u{1F600}'.repeat(5000) }, 'a'.repeat(300));
+    const body = JSON.parse(s.calls[1]!.init.body as string);
+    const p = (await openAlert(a.priv, 'd1', 'sess1', body.sealed[0].blob))!;
+    expect([...p.reason]).toHaveLength(200);
+    expect(p.reason).toBe('\u{1F600}'.repeat(200));
+    expect(p.site).toBe('a'.repeat(253));
+    expect(body.sealed[0].blob.length).toBeLessThan(2000);
   });
 
   it('defaults: global fetch, console-free stderr log and Date.now; a trailing slash on the base is stripped', async () => {
