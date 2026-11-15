@@ -674,38 +674,73 @@ describe('incomplete links and the six-digit code', () => {
 describe('sealed alert links', () => {
   const withSearch = (search: string, extra: Partial<AppProps> = {}) =>
     render(<App location={{ ...loc(), search }} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} {...extra} />);
+  const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))));
+  const WARN = "This link wasn't sent by Unstuck alerts. Only continue if you expected it.";
 
-  it.each(['no_device', 'not_for_this_device'] as const)('shows the paired-phone page for %s and never connects', (alertError) => {
-    render(<App location={{ ...loc(''), search: '?by=k' }} alertError={alertError} connectFn={connectFn} drawFrame={drawFrame} />);
+  it('shows the paired-phone page for no_device and never connects', () => {
+    render(<App location={{ ...loc(''), search: '?by=k' }} alertError="no_device" connectFn={connectFn} drawFrame={drawFrame} />);
     expect(screen.getByText('Open this link on the phone you paired')).toBeTruthy();
     expect(screen.getByText(/In-App Browser/)).toBeTruthy();
     expect(screen.getByText(/Settings/)).toBeTruthy();
     expect(connects).toBe(0);
   });
 
-  it('shows the key and site while waiting (from the sealed payload) and when live', () => {
-    withSearch('?by=crawler-prod', { alert: { reason: 'Solve the CAPTCHA', site: 'news.example.com' } });
-    expect(screen.getByText('From your key crawler-prod · news.example.com')).toBeTruthy();
-    expect(screen.getByText('Solve the CAPTCHA')).toBeTruthy();
-    goLive();
-    expect(screen.getByText('From your key crawler-prod · shop.example')).toBeTruthy();
+  it('says the phone was paired again or removed for not_for_this_device (this browser has a pairing), and never connects', () => {
+    render(<App location={{ ...loc(''), search: '' }} alertError="not_for_this_device" connectFn={connectFn} drawFrame={drawFrame} />);
+    expect(screen.getByText("This phone was paired again or removed, so alerts sent before that can't be opened here.")).toBeTruthy();
+    expect(screen.queryByText('Open this link on the phone you paired')).toBeNull();
+    expect(connects).toBe(0);
   });
 
-  it('shows the key alone when no site is known yet', () => {
-    withSearch('?by=crawler-prod');
+  it('shows the key only after Cloud confirms it sent this alert, with the site from the sealed payload', async () => {
+    let answer!: (s: { keyName: string }) => void;
+    const sender = vi.fn(() => new Promise<{ keyName: string }>((r) => (answer = r)));
+    withSearch('?by=forged', { alert: { reason: 'Solve the CAPTCHA', site: 'news.example.com', sender } });
+    expect(screen.queryByText(/From your key/)).toBeNull();
+    expect(screen.getByText('Solve the CAPTCHA')).toBeTruthy();
+    await act(async () => answer({ keyName: 'crawler-prod' }));
+    expect(screen.getByText('From your key crawler-prod · news.example.com')).toBeTruthy();
+    goLive();
+    // The relay's site never replaces the sealed one in the key line.
+    expect(screen.getByText('From your key crawler-prod · news.example.com')).toBeTruthy();
+    expect(screen.queryByText(/forged/)).toBeNull();
+    expect(sender).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the key alone when the sealed payload has no site', async () => {
+    withSearch('', { alert: { reason: 'r', site: '', sender: async () => ({ keyName: 'crawler-prod' }) } });
+    await flush();
     expect(screen.getByText('From your key crawler-prod')).toBeTruthy();
   });
 
-  it('shows nothing about a key without ?by=', () => {
-    withSearch('');
+  it('a 404 (not sent by Unstuck) shows the warning and no key', async () => {
+    withSearch('?by=crawler-prod', { alert: { reason: 'r', site: 's', sender: async () => 'not_sent' as const } });
+    await flush();
+    expect(screen.getByRole('alert').textContent).toBe(WARN);
     expect(screen.queryByText(/From your key/)).toBeNull();
   });
 
-  it('cuts a long key name to 64 characters and shows markup as plain text', () => {
-    const by = '<b>' + 'x'.repeat(100);
-    const { container } = withSearch(`?by=${encodeURIComponent(by)}`);
+  it('a network error or other answer shows neither label nor warning', async () => {
+    withSearch('?by=crawler-prod', { alert: { reason: 'r', site: 's', sender: async () => null } });
+    await flush();
+    expect(screen.queryByText(/From your key/)).toBeNull();
+    expect(screen.queryByText(WARN)).toBeNull();
+  });
+
+  it('never renders ?by= from the query string on a plain link', async () => {
+    withSearch('?by=crawler-prod');
+    await flush();
+    goLive();
+    expect(screen.queryByText(/From your key/)).toBeNull();
+    expect(screen.queryByText(/crawler-prod/)).toBeNull();
+  });
+
+  it('cuts a long key name to 64 code points, strips bidi and control characters, and shows markup as plain text', async () => {
+    const name = '<b>\u202e' + 'x'.repeat(100);
+    const { container } = withSearch('', { alert: { reason: 'r', site: 'a\u200bb.com', sender: async () => ({ keyName: name }) } });
+    await flush();
     const p = container.querySelector('.from')!;
-    expect(p.textContent).toBe('From your key ' + by.slice(0, 64));
+    expect(p.textContent).toBe('From your key ' + ('<b>' + 'x'.repeat(100)).slice(0, 64) + ' · ab.com');
     expect(container.querySelector('.from b')).toBeNull();
   });
 });

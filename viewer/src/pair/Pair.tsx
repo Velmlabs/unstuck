@@ -27,7 +27,7 @@ export interface PairProps {
   openUrl: (url: string) => void;
 }
 
-type Phase = 'loading' | 'ready' | 'pairing' | 'paired' | 'expired' | 'rejected' | 'unreachable';
+type Phase = 'loading' | 'confirm' | 'ready' | 'pairing' | 'paired' | 'expired' | 'rejected' | 'unreachable';
 type Note = { kind: 'ok' | 'error'; text: string } | null;
 
 const EXPIRED = 'This pairing code has expired. Make a new one in your dashboard.';
@@ -55,7 +55,8 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
     store.get().then(
       (rec) => {
         setDevice(rec);
-        setPhase(code || !rec ? 'ready' : 'paired');
+        // A code while already paired: ask before replacing the pairing (the old device would keep getting alerts).
+        setPhase(!rec ? 'ready' : code ? 'confirm' : 'paired');
       },
       () => setPhase('ready'),
     );
@@ -78,7 +79,16 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
       if (res.status === 400) return setPhase('rejected');
       if (!res.ok) return setPhase('unreachable');
       const body = (await res.json()) as { deviceId: string; deviceToken: string };
-      const rec = { deviceId: body.deviceId, privateKey: kp.privateKey, deviceToken: body.deviceToken };
+      const name = label.trim() || defaultLabel(env.userAgent, env.standalone, env.maxTouchPoints);
+      const rec: DeviceRecord = { deviceId: body.deviceId, privateKey: kp.privateKey, deviceToken: body.deviceToken, apiBase, label: name };
+      // Paired again: the old device goes, with its own token, so it stops getting (and duplicating) alerts.
+      if (device) {
+        try {
+          await doFetch(`${apiBase}/api/v1/devices/self`, { method: 'DELETE', headers: { Authorization: `Bearer ${device.deviceToken}` } });
+        } catch {
+          // offline: the old device stays listed in the dashboard, where it can be removed
+        }
+      }
       await store.put(rec);
       setDevice(rec);
       setPhase('paired');
@@ -132,6 +142,13 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
     <main class="message-card pair">
       <h1>Pair this phone</h1>
       {phase === 'loading' && <p role="status">One moment…</p>}
+      {phase === 'confirm' && (
+        <>
+          <p>{device?.label ? `This browser is already paired as ${device.label}. Pair it again?` : 'This browser is already paired. Pair it again?'}</p>
+          <button type="button" class="btn pair-btn" onClick={() => setPhase('ready')}>Pair again</button>
+          <button type="button" class="btn btn-ghost pair-btn" onClick={() => setPhase('paired')}>Keep current</button>
+        </>
+      )}
       {phase === 'expired' && <p role="alert">{EXPIRED}</p>}
       {phase === 'rejected' && <p role="alert">{REJECTED}</p>}
       {phase === 'unreachable' && (
@@ -158,7 +175,7 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
       )}
       {phase === 'paired' && (
         <>
-          <p role="status">This phone is paired. Clearing this browser's site data unpairs it.</p>
+          <p role="status">{device?.label ? `This phone is paired as ${device.label}.` : 'This phone is paired.'} Clearing this browser's site data unpairs it.</p>
           {needsHome && homeScreenSteps}
           {!needsHome && env.canPush && (
             <section>

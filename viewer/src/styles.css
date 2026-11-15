@@ -85,6 +85,15 @@ body {
   white-space: nowrap;
 }
 
+.not-sent {
+  margin: 4px 0 0;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  border-left: 3px solid var(--color-warn);
+  background: var(--color-muted);
+}
+
 .countdown {
   font: 600 16px/1 var(--mono);
   font-variant-numeric: tabular-nums;

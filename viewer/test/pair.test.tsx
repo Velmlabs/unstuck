@@ -122,9 +122,75 @@ describe('pairing', () => {
     expect(store.rec?.deviceId).toBe('dev1');
   });
 
-  it('a stale code with an existing pairing still offers to pair again', async () => {
+  it('stores the API base and the label with the device record', async () => {
+    const { store } = setup({ apiBase: 'https://staging.example' });
+    fireEvent.input(await screen.findByLabelText(/name/i), { target: { value: 'My Pixel' } });
+    await pairNow();
+    await screen.findByText(/this phone is paired/i);
+    expect(store.rec).toMatchObject({ apiBase: 'https://staging.example', label: 'My Pixel' });
+  });
+});
+
+describe('pairing a browser that is already paired', () => {
+  const old = () => memoryStore({ deviceId: 'old', deviceToken: 'oldtok', privateKey: {} as CryptoKey, label: 'Old Pixel' });
+
+  it('asks first; Keep current keeps the old pairing and sends nothing', async () => {
+    const store = old();
+    const { fetchFn } = setup({ store });
+    await screen.findByText('This browser is already paired as Old Pixel. Pair it again?');
+    expect(screen.queryByRole('button', { name: 'Pair this phone' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep current' }));
+    await screen.findByText(/this phone is paired/i);
+    expect(fetchFn).not.toHaveBeenCalled();
+    expect(store.rec?.deviceId).toBe('old');
+  });
+
+  it('Pair again pairs the new device, then removes the old one with its own token, then stores the new record', async () => {
+    const store = old();
+    const { fetchFn } = setup({ store });
+    fireEvent.click(await screen.findByRole('button', { name: 'Pair again' }));
+    await pairNow();
+    await screen.findByText(/this phone is paired/i);
+    const urls = fetchFn.mock.calls.map((c) => c[0]);
+    expect(urls).toEqual(['https://unstuck.sh/api/v1/devices/pair', 'https://unstuck.sh/api/v1/devices/self']);
+    const del = fetchFn.mock.calls[1]![1] as RequestInit;
+    expect(del.method).toBe('DELETE');
+    expect(del.headers).toMatchObject({ Authorization: 'Bearer oldtok' });
+    expect(store.rec?.deviceId).toBe('dev1');
+  });
+
+  it('still stores the new pairing when removing the old one fails', async () => {
+    const store = old();
+    const fetchFn = vi.fn(async (url: string) => (url.endsWith('/devices/pair') ? json(200, { deviceId: 'dev1', deviceToken: 'tok1' }) : Promise.reject(new Error('offline'))));
+    setup({ store, fetchFn: fetchFn as unknown as typeof fetch });
+    fireEvent.click(await screen.findByRole('button', { name: 'Pair again' }));
+    await pairNow();
+    await screen.findByText(/this phone is paired/i);
+    expect(store.rec?.deviceId).toBe('dev1');
+  });
+
+  it('a failed new pairing keeps the old record and never removes the old device', async () => {
+    const store = old();
+    const fetchFn = vi.fn(async () => json(410, { error: 'code_expired' }));
+    setup({ store, fetchFn: fetchFn as unknown as typeof fetch });
+    fireEvent.click(await screen.findByRole('button', { name: 'Pair again' }));
+    await pairNow();
+    await screen.findByText(/has expired/i);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(store.rec?.deviceId).toBe('old');
+  });
+
+  it('an old record without a label is asked about without one', async () => {
     setup({ store: memoryStore({ deviceId: 'd', deviceToken: 't', privateKey: {} as CryptoKey }) });
-    await screen.findByRole('button', { name: 'Pair this phone' });
+    await screen.findByText('This browser is already paired. Pair it again?');
+  });
+
+  it('opened without a code it shows the paired state with Telegram and push, not the code field', async () => {
+    setup({ code: null, store: old() });
+    await screen.findByText(/this phone is paired as Old Pixel/i);
+    expect(screen.queryByLabelText('Enter the pairing code from your dashboard')).toBeNull();
+    expect(screen.getByRole('button', { name: /connect telegram/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /turn on phone notifications/i })).toBeTruthy();
   });
 });
 

@@ -3,6 +3,10 @@ export interface DeviceRecord {
   deviceId: string;
   privateKey: CryptoKey;
   deviceToken: string;
+  /** The Cloud API this phone was paired with (records from before 0.1.6 have none: https://unstuck.sh). */
+  apiBase?: string;
+  /** The name it was paired as, for "already paired as …". */
+  label?: string;
 }
 
 export interface DeviceStore {

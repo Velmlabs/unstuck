@@ -1,4 +1,18 @@
-const CLOUD = 'https://unstuck.sh';
+export const CLOUD = 'https://unstuck.sh';
+
+/** The origin of an https URL (or http on this machine), without credentials; null otherwise. */
+export function cleanApiOrigin(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return null;
+  }
+  const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+  if (u.username || u.password || !(u.protocol === 'https:' || (u.protocol === 'http:' && local))) return null;
+  return u.origin;
+}
 
 /**
  * Where the pair page talks to. On view.unstuck.sh always Unstuck Cloud (a link can't point it elsewhere); on other
@@ -6,17 +20,7 @@ const CLOUD = 'https://unstuck.sh';
  */
 export function apiBaseFor(hostname: string, search: string): string {
   if (hostname === 'view.unstuck.sh') return CLOUD;
-  const raw = new URLSearchParams(search).get('api');
-  if (!raw) return CLOUD;
-  let u: URL;
-  try {
-    u = new URL(raw);
-  } catch {
-    return CLOUD;
-  }
-  const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
-  if (u.username || u.password || !(u.protocol === 'https:' || (u.protocol === 'http:' && local))) return CLOUD;
-  return u.origin;
+  return cleanApiOrigin(new URLSearchParams(search).get('api')) ?? CLOUD;
 }
 
 const isApple = (ua: string, touch: number) => /iPhone|iPad/.test(ua) || (/Macintosh/.test(ua) && touch > 1);

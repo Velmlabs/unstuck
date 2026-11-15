@@ -70,4 +70,22 @@ describe('the pair page is installable', () => {
     const sums = path.join(__dirname, '../dist-hosted/v', version, 'SHA256SUMS.json');
     if (fs.existsSync(sums)) expect(Object.keys(JSON.parse(fs.readFileSync(sums, 'utf8')).files)).toEqual(expect.arrayContaining(['manifest.webmanifest', 'icon.svg']));
   });
+
+  it('links a 180×180 PNG apple-touch-icon that matches its generator, and the hosted folder carries and links it', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const html = fs.readFileSync(path.join(__dirname, '../pair.html'), 'utf8');
+    expect(html).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png" />');
+    const png = fs.readFileSync(path.join(__dirname, '../public/apple-touch-icon.png'));
+    expect(png.subarray(1, 4).toString('ascii')).toBe('PNG');
+    expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([180, 180]);
+    // @ts-expect-error a plain .mjs script
+    const { iconPng } = await import('../scripts/apple-touch-icon.mjs');
+    expect(Buffer.compare(iconPng(), png)).toBe(0);
+    const { version } = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+    const out = path.join(__dirname, '../dist-hosted/v', version);
+    if (!fs.existsSync(path.join(out, 'SHA256SUMS.json'))) return;
+    expect(Object.keys(JSON.parse(fs.readFileSync(path.join(out, 'SHA256SUMS.json'), 'utf8')).files)).toContain('apple-touch-icon.png');
+    expect(fs.readFileSync(path.join(out, 'pair.html'), 'utf8')).toContain(`href="/v/${version}/apple-touch-icon.png"`);
+  });
 });

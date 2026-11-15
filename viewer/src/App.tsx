@@ -8,6 +8,7 @@ import { bridgeBox, fieldBox, hitField, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { clampToPage, toPagePoint } from './mapping';
 import { forgetFragment, parseFragment, relayFor, sessionIdFromPath } from './url';
+import { cleanLabel, type Sender } from './alert-link';
 
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string; search?: string };
@@ -16,8 +17,11 @@ export interface AppProps {
   now?: () => number;
   /** A sealed link this browser could not open: show the "phone you paired" page and never connect. */
   alertError?: 'no_device' | 'not_for_this_device';
-  /** What a sealed link said (shown before the relay's own answer arrives). */
-  alert?: { reason: string; site: string };
+  /**
+   * What a sealed link said (shown before the relay's own answer arrives). `sender` asks Cloud whether it really sent
+   * this alert to this phone: only then is the key named.
+   */
+  alert?: { reason: string; site: string; sender?: () => Promise<Sender> };
 }
 
 type Screen =
@@ -38,7 +42,14 @@ const PAIRED_PHONE_SCREEN: Screen = {
   tone: 'warn',
 };
 
-const MAX_BY = 64;
+const REPAIRED_SCREEN: Screen = {
+  kind: 'message',
+  title: "This link can't be opened here",
+  body: "This phone was paired again or removed, so alerts sent before that can't be opened here.",
+  tone: 'warn',
+};
+
+const NOT_SENT = "This link wasn't sent by Unstuck alerts. Only continue if you expected it.";
 
 const INCOMPLETE_SCREEN: Screen = {
   kind: 'message',
@@ -94,6 +105,12 @@ const resumeStore = {
 /** A press that moves less than this (CSS px) before release is a tap, not a drag. */
 const TAP_SLOP_PX = 10;
 
+/** "From your key <name> · <site>", both as plain text without control, zero-width or bidi characters. */
+function fromLine(keyName: string, sealedSite: string): string {
+  const site = cleanLabel(sealedSite, 253);
+  return `From your key ${cleanLabel(keyName)}${site ? ` · ${site}` : ''}`;
+}
+
 function formatRemaining(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -102,12 +119,12 @@ function formatRemaining(ms: number): string {
 export function App({ location, connectFn = defaultConnect, drawFrame = drawFrameOnCanvas, now = Date.now, alertError, alert }: AppProps) {
   const fragment = alertError ? null : parseFragment(location.hash);
   const link = fragment && 'token' in fragment ? fragment : null;
-  // The key's name comes from the link's query: a label to show as plain text, never markup.
-  const by = new URLSearchParams(location.search ?? '').get('by')?.slice(0, MAX_BY) || null;
+  // The key is named only when Cloud confirms it delivered this alert to this phone (never from the link's ?by=).
+  const [sender, setSender] = useState<Sender>(null);
   const token = link?.token;
   const sessionId = sessionIdFromPath(location.pathname);
   const [screen, setScreen] = useState<Screen>(
-    alertError ? PAIRED_PHONE_SCREEN : token && sessionId ? { kind: 'session' } : fragment && 'error' in fragment ? INCOMPLETE_SCREEN : ERROR_SCREENS.token_invalid,
+    alertError === 'not_for_this_device' ? REPAIRED_SCREEN : alertError ? PAIRED_PHONE_SCREEN : token && sessionId ? { kind: 'session' } : fragment && 'error' in fragment ? INCOMPLETE_SCREEN : ERROR_SCREENS.token_invalid,
   );
   const [codeAsk, setCodeAsk] = useState<{ invalid: boolean } | null>(null);
   const [code, setCode] = useState('');
@@ -217,6 +234,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       window.removeEventListener('pageshow', wake);
       sock.close();
     };
+  }, []);
+
+  useEffect(() => {
+    alert?.sender?.().then(setSender, () => setSender(null));
   }, []);
 
   useEffect(() => {
@@ -440,7 +461,12 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         <div class="topbar-text">
           <p class="reason">{info?.reason ?? alert?.reason ?? 'Connecting to the agent…'}</p>
           {site ? <p class="site">{site}</p> : null}
-          {by ? <p class="from">{`From your key ${by}${site ? ` · ${site}` : ''}`}</p> : null}
+          {sender && sender !== 'not_sent' ? <p class="from">{fromLine(sender.keyName, alert?.site ?? '')}</p> : null}
+          {sender === 'not_sent' ? (
+            <p class="not-sent" role="alert">
+              {NOT_SENT}
+            </p>
+          ) : null}
         </div>
         {info ? (
           <span class="countdown" data-testid="countdown" aria-label={`Time left ${remaining}`}>
