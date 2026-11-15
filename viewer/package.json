@@ -6,7 +6,7 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit && vite build && node scripts/integrity.mjs dist && node scripts/build-hosted.mjs",
+    "build": "tsc -p tsconfig.json --noEmit && vite build && vite build --mode pair && vite build --mode sw && node scripts/integrity.mjs dist && node scripts/build-hosted.mjs",
     "build:hosted": "node scripts/build-hosted.mjs",
     "test": "vitest run --coverage"
   },

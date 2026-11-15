@@ -346,3 +346,55 @@ input:focus-visible {
 
 .code-input { width: 100%; min-height: 48px; font-size: 24px; letter-spacing: 0.3em; text-align: center; font-family: var(--mono, ui-monospace, monospace); border-radius: var(--radius, 10px); border: 1px solid var(--color-border, #475569); background: var(--color-background, #0f172a); color: inherit; margin: 8px 0; }
 .code-error { color: var(--color-destructive, #ef4444); margin: 0 0 8px; }
+
+.pair {
+  margin: 16px auto;
+  text-align: left;
+}
+
+.pair h2 {
+  margin: 16px 0 4px;
+  font-size: 16px;
+}
+
+.pair label {
+  display: block;
+  margin: 16px 0 4px;
+  color: var(--color-muted-foreground);
+}
+
+.pair input {
+  width: 100%;
+  min-height: var(--touch);
+  padding: 0 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-border);
+  background: var(--color-muted);
+  color: var(--color-foreground);
+  font: 16px var(--font);
+}
+
+.pair section {
+  margin-top: 16px;
+}
+
+.pair p {
+  margin-top: 8px;
+}
+
+.pair-btn {
+  display: block;
+  width: 100%;
+  margin-top: 16px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+
+.pair-btn:disabled {
+  opacity: 0.6;
+}
+
+#app:has(.pair) {
+  height: auto;
+  padding: 0 16px;
+}

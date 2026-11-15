@@ -1,4 +1,4 @@
-// Pins the viewer's script and stylesheet in index.html with Subresource Integrity (SHA-384): a browser refuses an
+// Pins the viewer's script and stylesheet in index.html and pair.html with Subresource Integrity (SHA-384): a browser refuses an
 // asset that differs from the build, wherever it is served from.
 //   node scripts/integrity.mjs <dist dir> [base]
 import { createHash } from 'node:crypto';
@@ -17,8 +17,15 @@ export function withIntegrity(html, read, base = '/') {
   });
 }
 
+/** Pins the script and stylesheet of every page in a build folder (index.html, pair.html). */
+export function pinPages(dir, base = '/') {
+  for (const page of ['index.html', 'pair.html']) {
+    const file = path.join(dir, page);
+    fs.writeFileSync(file, withIntegrity(fs.readFileSync(file, 'utf8'), (rel) => fs.readFileSync(path.join(dir, rel)), base));
+  }
+}
+
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
   const [dir, base = '/'] = process.argv.slice(2);
-  const index = path.join(dir, 'index.html');
-  fs.writeFileSync(index, withIntegrity(fs.readFileSync(index, 'utf8'), (rel) => fs.readFileSync(path.join(dir, rel)), base));
+  pinPages(dir, base);
 }
