@@ -1,0 +1,14 @@
+{
+  "name": "unstuck",
+  "description": "Unstuck for Claude Code: a skill and an MCP server that hand stuck browser steps to a human.",
+  "owner": {
+    "name": "Velm Labs"
+  },
+  "plugins": [
+    {
+      "name": "unstuck",
+      "source": "./plugins/unstuck",
+      "description": "Hand a stuck browser step (CAPTCHA, login, 2FA) to a human on their phone, then carry on in the same session."
+    }
+  ]
+}

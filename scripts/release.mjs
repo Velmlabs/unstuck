@@ -134,6 +134,7 @@ async function takeover(cmd, args, cwd, env) {
   const browser = await chromium.launch();
   const page = await (await browser.newContext({ ...devices['iPhone 13'] })).newPage();
   await page.goto(link);
+  await page.getByRole('button', { name: 'Start takeover' }).click(); // the page connects only on this tap
   await page.waitForFunction(() => (document.querySelector('canvas')?.width ?? 0) > 300, null, { timeout: 60_000 });
   await page.getByRole('button', { name: 'Done' }).click();
   await new Promise((r) => child.on('exit', r));

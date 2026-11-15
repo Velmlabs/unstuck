@@ -1,0 +1,10 @@
+{
+  "name": "unstuck",
+  "description": "Hand a stuck browser step (CAPTCHA, login, 2FA) to a human on their phone, then carry on in the same session.",
+  "version": "0.1.7",
+  "author": { "name": "Velm Labs" },
+  "homepage": "https://unstuck.sh/docs/",
+  "repository": "https://github.com/velmlabs/unstuck",
+  "license": "Apache-2.0",
+  "keywords": ["browser", "captcha", "human-in-the-loop", "playwright", "mcp"]
+}
