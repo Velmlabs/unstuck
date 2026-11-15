@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 292 72" role="img" aria-label="Unstuck">
+  <rect x="4" y="4" width="64" height="64" rx="15" fill="#0F172A"/>
+  <path d="M24 21v17a12 12 0 0 0 24 0V25" fill="none" stroke="#22C55E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M39.5 26.5 48 17l8.5 9.5" fill="none" stroke="#22C55E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="84" y="50" fill="#22C55E" font-family="system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="40" font-weight="800" letter-spacing="-1">unstuck</text>
+</svg>

@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo-wordmark.svg" alt="Unstuck" width="260">
+</p>
+
 # Unstuck
 
 **Human takeover for AI browser agents.** When your agent gets stuck on a CAPTCHA, a login wall, a 2FA prompt or any page that needs a person, Unstuck pauses it, sends someone a link, lets them work the live browser from their phone, and hands control back.
