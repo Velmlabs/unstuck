@@ -8,6 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createCloudAlerter } from '../engine/src/cloud-alerts';
 
+/** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
+async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
+  const b = p.getByRole('button', { name: 'Start takeover' });
+  if (await b.isVisible()) await b.click();
+}
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { chromium } = createRequire(import.meta.url)('playwright');
 const ENGINE = path.resolve(here, '../engine/dist/unstuck-engine');
@@ -116,6 +122,7 @@ describe('a takeover alert reaches the paired phone, sealed', () => {
     // The paired browser opens the sealed link: unsealed, live, and Done resolves the agent.
     const human = await phone.newPage();
     await human.goto(sealedLink);
+    await tapStart(human);
     await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
     expect(await human.getByText('Solve the test CAPTCHA').count()).toBe(1);
     // The engine's own viewer page allows no other origin (CSP connect-src 'self'), so it can't ask Cloud who sent the

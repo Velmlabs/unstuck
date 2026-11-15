@@ -421,3 +421,33 @@ input:focus-visible {
   height: auto;
   padding: 0 16px;
 }
+
+/* Tap to start: the page connects only when a person taps Start (link previews and scanners never take the link). */
+.start .message-card {
+  border-top-color: var(--color-accent);
+  display: grid;
+  gap: 12px;
+}
+.start .message-card h1 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.start-kicker {
+  color: var(--color-accent) !important;
+  font: 600 13px/1 var(--font);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.start .site {
+  color: var(--color-foreground);
+  font-family: var(--mono, monospace);
+  overflow-wrap: anywhere;
+}
+.btn-start {
+  width: 100%;
+  min-height: 52px;
+  font-size: 17px;
+}
+.start-note {
+  font-size: 13px;
+}

@@ -126,6 +126,12 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const [screen, setScreen] = useState<Screen>(
     alertError === 'not_for_this_device' ? REPAIRED_SCREEN : alertError ? PAIRED_PHONE_SCREEN : token && sessionId ? { kind: 'session' } : fragment && 'error' in fragment ? INCOMPLETE_SCREEN : ERROR_SCREENS.token_invalid,
   );
+  /**
+   * Nothing connects until a person taps Start: a link preview or an email scanner that opens the page in a real
+   * browser never takes the link, never sees the screen and is never charged. The phone that already started this
+   * takeover (it holds the resume key) goes straight back in.
+   */
+  const [started, setStarted] = useState(() => !!(sessionId && resumeStore.get(sessionId)));
   const [codeAsk, setCodeAsk] = useState<{ invalid: boolean } | null>(null);
   const [code, setCode] = useState('');
   const [phase, setPhase] = useState<Phase>('connecting');
@@ -166,7 +172,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   }, []);
 
   useEffect(() => {
-    if (!link || !token || !sessionId) return;
+    if (!started || !link || !token || !sessionId) return;
     const saved = resumeStore.get(sessionId);
     // The relay serves this page, or (viewer on its own origin) is named in ?r=.
     const relay = relayFor(location.search ?? '', location.origin);
@@ -236,7 +242,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       window.removeEventListener('pageshow', wake);
       sock.close();
     };
-  }, []);
+  }, [started]);
 
   useEffect(() => {
     alert?.sender?.().then(setSender, () => setSender(null));
@@ -438,7 +444,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       detach();
       el.removeEventListener('blur', unlift);
     };
-  }, [screen.kind]);
+  }, [screen.kind, started]);
 
   // The mirror's area can change size while a field is outlined (Android resizes the page as the keyboard opens and
   // hides, a phone rotates): place the outline and the typing box over the field again.
@@ -455,7 +461,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       observer?.disconnect();
       window.removeEventListener('resize', reposition);
     };
-  }, [screen.kind]);
+  }, [screen.kind, started]);
 
   // Keep the field in view: when the keyboard shrinks the visible area, lift the mirror so the field sits above it.
   useEffect(() => {
@@ -464,7 +470,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const onResize = () => relift();
     vv.addEventListener('resize', onResize);
     return () => vv.removeEventListener('resize', onResize);
-  }, [screen.kind]);
+  }, [screen.kind, started]);
 
   if (screen.kind === 'message') {
     return (
@@ -472,6 +478,29 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         <div class="message-card">
           <h1>{screen.title}</h1>
           <p>{screen.body}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!started) {
+    return (
+      <main class="message start">
+        <div class="message-card">
+          <p class="start-kicker">Unstuck</p>
+          <h1>{alert?.reason ?? 'Someone needs your help in a browser'}</h1>
+          {alert?.site ? <p class="site">{cleanLabel(alert.site, 253)}</p> : null}
+          {sender && sender !== 'not_sent' ? <p class="from">{fromLine(sender.keyName, alert?.site ?? '')}</p> : null}
+          {sender === 'not_sent' ? (
+            <p class="not-sent" role="alert">
+              {NOT_SENT}
+            </p>
+          ) : null}
+          <p>{alert ? "Tap Start to see the agent's browser and solve it." : "An AI agent is stuck and asked a person to take over its browser for a moment. Tap Start to see it."}</p>
+          <button type="button" class="btn btn-primary btn-start" onClick={() => setStarted(true)}>
+            Start takeover
+          </button>
+          <p class="start-note">Only one person can take over. Opening this link in a preview doesn't use it.</p>
         </div>
       </main>
     );

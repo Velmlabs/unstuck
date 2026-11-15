@@ -7,6 +7,12 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 
+/** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
+async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
+  const b = p.getByRole('button', { name: 'Start takeover' });
+  if (await b.isVisible()) await b.click();
+}
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 // Pre-installed Playwright (see sdk-ts/test/helpers.ts for why it is not a workspace dependency).
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
@@ -70,6 +76,7 @@ async function openHuman(url: string, wire?: Buffer[]) {
   // Capture what actually travels on the viewer's socket.
   if (wire) human.on('websocket', (ws: any) => ws.on('framereceived', (f: any) => wire.push(Buffer.from(f.payload))));
   await human.goto(url);
+  await tapStart(human);
   return { ctx, human };
 }
 
@@ -229,6 +236,27 @@ describe('local takeover end to end', () => {
     await ctx.close();
     await unstuck.close();
     await page.close();
+  }, 60_000);
+
+  it('a link preview or scanner that opens the link in a real browser (never tapping Start) does not use it up', async () => {
+    const { unstuck, result, link } = await startTakeover();
+    // The "preview": a real browser loads the page with the full link, runs its scripts, and never taps.
+    const preview = await humanBrowser.newContext();
+    const bot = await preview.newPage();
+    const sockets: string[] = [];
+    bot.on('websocket', (ws: any) => sockets.push(ws.url()));
+    await bot.goto(link.url);
+    expect(await bot.getByRole('button', { name: 'Start takeover' }).isVisible()).toBe(true);
+    await bot.waitForTimeout(1500);
+    expect(sockets).toEqual([]); // it never connected, so it saw no screen and took nothing
+    await preview.close();
+    // The person opens the same link afterwards and gets in normally.
+    const { ctx, human } = await openHuman(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await unstuck.close();
+    await ctx.close();
   }, 60_000);
 
   it("Can't solve with a reason → cancelled with that reason", async () => {

@@ -11,6 +11,12 @@ import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
 import { cdpFor, freePort, RELAY_KEY, startRelay } from './relay-harness';
 
+/** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
+async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
+  const b = p.getByRole('button', { name: 'Start takeover' });
+  if (await b.isVisible()) await b.click();
+}
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
 const ENGINE = path.resolve(here, '../engine/dist/unstuck-engine');
@@ -49,6 +55,7 @@ async function humanSolves(url: string, page: any, code?: string) {
   const ctx = await humanBrowser.newContext({ ...devices['iPhone 13'] });
   const human = await ctx.newPage();
   await human.goto(url);
+  await tapStart(human);
   if (code) {
     await human.getByLabel('Enter the 6-digit code').fill(code);
     await human.getByRole('button', { name: 'Continue' }).click();
@@ -116,6 +123,7 @@ describe('takeover through a relay, end to end', () => {
       sockets.push(ws);
     });
     await human.goto(link.url);
+    await tapStart(human);
     await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
     away = true;
     for (const ws of sockets) await ws.close();
@@ -169,6 +177,7 @@ describe('takeover through a relay, end to end', () => {
       human.on('pageerror', (e: any) => errors.push(e.message));
       human.on('console', (m: any) => m.type() === 'error' && errors.push(m.text()));
       await human.goto(link.url);
+      await tapStart(human);
       await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
       expect(await human.evaluate(() => [...document.querySelectorAll('script[src], link[rel=stylesheet]')].every((e) => e.getAttribute('integrity')?.startsWith('sha384-')))).toBe(true);
       expect(new URL(human.url()).hash).toBe(''); // the secret left the address bar
@@ -197,6 +206,7 @@ describe('takeover through a relay, end to end', () => {
     const ctx = await humanBrowser.newContext({ ...devices['iPhone 13'] });
     const human = await ctx.newPage();
     await human.goto(lines[0].url);
+    await tapStart(human);
     await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
     await human.getByRole('button', { name: 'Done' }).click();
     await expect.poll(() => lines.length, { timeout: 20_000 }).toBe(2);

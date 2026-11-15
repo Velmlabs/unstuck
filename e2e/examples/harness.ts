@@ -8,6 +8,12 @@ import net, { type AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
+/** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
+async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
+  const b = p.getByRole('button', { name: 'Start takeover' });
+  if (await b.isVisible()) await b.click();
+}
+
 const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, '../..');
 export const ENGINE = path.join(REPO, 'engine/dist/unstuck-engine');
@@ -92,6 +98,7 @@ export async function actAsHuman(link: string, action: 'done' | 'cant-solve'): P
     const ctx = await browser.newContext({ ...devices['iPhone 13'] });
     const human = await ctx.newPage();
     await human.goto(link);
+    await tapStart(human);
     await human.waitForFunction(() => ((document.querySelector('canvas') as HTMLCanvasElement | null)?.width ?? 0) > 300, null, { timeout: 60_000 });
     await human.getByRole('button', { name: action === 'done' ? 'Done' : "Can't solve" }).click();
     await human.waitForTimeout(500);

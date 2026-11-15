@@ -27,8 +27,14 @@ function pointer(el: Element, type: 'pointerdown' | 'pointerup' | 'pointermove',
   act(() => void el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, ...init })));
 }
 
+/** Taps Start when the page shows it (a link opened for the first time on this device). */
+function start() {
+  const b = screen.queryByRole('button', { name: 'Start takeover' });
+  if (b) fireEvent.click(b);
+}
 function setup(hash?: string) {
   const r = render(<App location={loc(hash)} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+  start();
   return r;
 }
 function goLive() {
@@ -52,6 +58,33 @@ beforeEach(() => {
   drawFrame.mockClear();
 });
 afterEach(() => cleanup());
+
+describe('tap to start: link previews and scanners never use a link', () => {
+  it('opening the link connects nothing until a person taps Start', () => {
+    render(<App location={loc()} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    expect(connects).toBe(0);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Someone needs your help in a browser');
+    expect(screen.queryByTestId('screen')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Start takeover' }));
+    expect(connects).toBe(1);
+    goLive();
+    expect(screen.getByTestId('screen')).toBeTruthy();
+  });
+
+  it('an alert shows what the agent needs and where before Start', () => {
+    render(<App location={loc()} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} alert={{ reason: 'Log in to the supplier portal', site: 'portal.example', expiresAt: NOW + 600_000 } as never} />);
+    expect(connects).toBe(0);
+    expect(screen.getByText('Log in to the supplier portal')).toBeTruthy();
+    expect(screen.getByText('portal.example')).toBeTruthy();
+  });
+
+  it('the same phone coming back (it holds the resume key) goes straight in', () => {
+    localStorage.setItem('unstuck:resume:SESSION', 'k');
+    render(<App location={loc()} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    expect(connects).toBe(1);
+    expect(connectOpts?.resumeKey).toBe('k');
+  });
+});
 
 describe('the link secret kept for reloads', () => {
   it('is dropped from this tab when the takeover ends', () => {
@@ -78,6 +111,7 @@ describe('a viewer served from its own origin', () => {
     const fetchMock = vi.fn(async () => ({ status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     render(<App location={{ hash: `#t=TOK&k=${KEY}`, pathname: '/v/1.2.3/s/SESSION', origin: 'https://view.unstuck.sh', search: '?r=wss%3A%2F%2Frelay.unstuck.sh' }} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    start();
     expect(connectUrl).toBe('wss://relay.unstuck.sh/ws/SESSION');
     await connectOpts!.alive!();
     expect(fetchMock).toHaveBeenCalledWith('https://relay.unstuck.sh/s/SESSION', { method: 'HEAD', cache: 'no-store' });
@@ -147,6 +181,7 @@ describe('App', () => {
     let t = NOW;
     try {
       render(<App location={loc()} connectFn={connectFn} drawFrame={drawFrame} now={() => t} />);
+      start();
       act(() => handlers.onReady({ t: 'ready', reason: 'r', site: '', expiresAt: NOW + 2_000, resumeKey: 'k' }));
       t += 1_000;
       act(() => void vi.advanceTimersByTime(1_000));
@@ -700,13 +735,17 @@ describe('incomplete links and the six-digit code', () => {
 
 
 describe('sealed alert links', () => {
-  const withSearch = (search: string, extra: Partial<AppProps> = {}) =>
-    render(<App location={{ ...loc(), search }} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} {...extra} />);
+  const withSearch = (search: string, extra: Partial<AppProps> = {}) => {
+    const r = render(<App location={{ ...loc(), search }} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} {...extra} />);
+    start();
+    return r;
+  };
   const flush = () => act(async () => void (await new Promise((r) => setTimeout(r, 0))));
   const WARN = "This link wasn't sent by Unstuck alerts. Only continue if you expected it.";
 
   it('shows the paired-phone page for no_device and never connects', () => {
     render(<App location={{ ...loc(''), search: '?by=k' }} alertError="no_device" connectFn={connectFn} drawFrame={drawFrame} />);
+    start();
     expect(screen.getByText('Open this link on the phone you paired')).toBeTruthy();
     expect(screen.getByText(/In-App Browser/)).toBeTruthy();
     expect(screen.getByText(/Settings/)).toBeTruthy();
@@ -715,6 +754,7 @@ describe('sealed alert links', () => {
 
   it('says the phone was paired again or removed for not_for_this_device (this browser has a pairing), and never connects', () => {
     render(<App location={{ ...loc(''), search: '' }} alertError="not_for_this_device" connectFn={connectFn} drawFrame={drawFrame} />);
+    start();
     expect(screen.getByText("This phone was paired again or removed, so alerts sent before that can't be opened here.")).toBeTruthy();
     expect(screen.queryByText('Open this link on the phone you paired')).toBeNull();
     expect(connects).toBe(0);
