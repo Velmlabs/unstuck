@@ -28,7 +28,14 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "workerd": "./src/edge.ts",
+      "worker": "./src/edge.ts",
+      "deno": "./src/edge.ts",
+      "bun": "./src/edge.ts",
+      "browser": "./src/edge.ts",
+      "default": "./src/index.ts"
+    }
   },
   "files": [
     "dist"
@@ -52,6 +59,26 @@
     "types": "./dist/index.d.ts",
     "exports": {
       ".": {
+        "workerd": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "worker": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "deno": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "bun": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
+        "browser": {
+          "types": "./dist/edge.d.ts",
+          "default": "./dist/edge.js"
+        },
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js",
         "default": "./dist/index.js"
