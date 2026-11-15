@@ -311,7 +311,14 @@ describe('native typing on a simulated phone', () => {
     human.evaluate(() => {
       const b = document.querySelector('[data-testid="keyboard-bridge"]') as HTMLInputElement;
       const r = b.getBoundingClientRect();
-      return { focused: document.activeElement === b, inputMode: b.inputMode, autocomplete: b.getAttribute('autocomplete'), rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
+      const cs = getComputedStyle(b);
+      return {
+        focused: document.activeElement === b,
+        inputMode: b.inputMode,
+        autocomplete: b.getAttribute('autocomplete'),
+        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+        look: { opacity: cs.opacity, appearance: cs.appearance, boxShadow: cs.boxShadow },
+      };
     });
   /** Taps an agent-page element on the phone until the bridge has focus (the field map arrives with the first frames). */
   async function tapToType(human: any, page: any, selector: string) {
@@ -334,6 +341,8 @@ describe('native typing on a simulated phone', () => {
     const at = await tapToType(human, page, '#single');
     const s1 = await bridgeState(human);
     expect([s1.inputMode, s1.autocomplete]).toEqual(['numeric', 'one-time-code']);
+    // Never visible: some browsers (Samsung Internet) paint a faint box on a focused transparent input.
+    expect(s1.look).toEqual({ opacity: '0', appearance: 'none', boxShadow: 'none' });
     expect(at.x).toBeGreaterThanOrEqual(s1.rect.x);
     expect(at.x).toBeLessThanOrEqual(s1.rect.x + s1.rect.w);
     expect(at.y).toBeGreaterThanOrEqual(s1.rect.y);

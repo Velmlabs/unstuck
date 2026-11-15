@@ -172,8 +172,19 @@ body {
   background: transparent;
   color: transparent;
   caret-color: transparent;
+  -webkit-text-fill-color: transparent;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  box-shadow: none;
+  /* Fully invisible: some browsers (Samsung Internet) still paint a faint box on a focused transparent input.
+     An invisible input still takes focus and opens the keyboard, including on iOS. */
+  opacity: 0;
   font-size: 16px;
   pointer-events: none;
+}
+.keyboard-bridge::selection {
+  background: transparent;
 }
 
 /* Where the person is typing: drawn by Unstuck over the mirror, never part of the page. */
