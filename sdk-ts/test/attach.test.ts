@@ -227,10 +227,21 @@ describe('attachPage', () => {
     it("detach leaves an emit wrapped after ours (another library's) in place", async () => {
       const { page, session } = puppeteerPage();
       const a = await attachPage(page);
-      const theirs = vi.fn();
+      const closed = vi.fn();
+      a.onClose(closed);
+      const ours = session.emit;
+      // Another library wraps emit after us and keeps calling through to what it found (our wrapper).
+      const theirs = vi.fn((type: string | symbol, p?: unknown) => ours.call(session, type, p));
       session.emit = theirs;
       await a.detach();
       expect(session.emit).toBe(theirs);
+      // Our stale wrapper underneath still passes events on, but no longer reports them.
+      const listener = vi.fn();
+      session.on('x', listener);
+      session.emit('x', 1);
+      expect(listener).toHaveBeenCalledWith(1);
+      session.emit(Symbol('CDPSession.Disconnected'));
+      expect(closed).not.toHaveBeenCalled();
     });
 
     it('an emitter with removeListener instead of off is cleaned up too; an inherited emit is restored by removing ours', async () => {

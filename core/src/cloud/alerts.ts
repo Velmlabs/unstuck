@@ -34,6 +34,8 @@ interface Device {
 }
 
 const CACHE_MS = 60_000;
+/** Each call to Unstuck Cloud (devices lookup, notify) gives up after this, so `alerts: 'required'` fails promptly. */
+export const ALERT_TIMEOUT_MS = 10_000;
 /** The sealed payload's caps (code points): a long reason must not push the link past what push and Telegram carry. */
 export const MAX_REASON = 200;
 export const MAX_SITE = 253;
@@ -70,16 +72,37 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
   /** The phones the previous alert was sealed to (ids and labels), so the log line appears only when it changes. */
   let lastSet: string | null = null;
 
+  /**
+   * Runs one call to Cloud, reading its answer included, within ALERT_TIMEOUT_MS. The race also covers a custom fetch
+   * that ignores the abort signal (plain setTimeout + AbortController: works in workerd and with fake timers).
+   */
+  async function within<T>(what: string, call: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const ac = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        ac.abort();
+        reject(new AlertFailure(`${what} took longer than ${ALERT_TIMEOUT_MS / 1000} s`, 'error'));
+      }, ALERT_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([call(ac.signal), timeout]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function devices(): Promise<{ devices: Device[]; allowed: boolean }> {
     if (cache && now() - cache.at < CACHE_MS) return cache;
-    const res = await doFetch(`${base}/api/v1/agent/devices`, { headers });
-    let list: Device[] = [];
-    let allowed = true;
-    if (res.status === 403 && (await res.json().catch(() => null))?.error === 'alerts_not_allowed') {
-      log('[unstuck] alerts are not enabled for this API key (turn them on in your unstuck.sh dashboard)');
-      allowed = false;
-    } else if (!res.ok) throw new AlertFailure(`devices lookup answered ${res.status}`, res.status === 401 ? 'unauthorized' : 'error');
-    else list = ((await res.json()) as { devices: Device[] }).devices;
+    const { list, allowed } = await within('devices lookup', async (signal) => {
+      const res = await doFetch(`${base}/api/v1/agent/devices`, { headers, signal });
+      if (res.status === 403 && (await res.json().catch(() => null))?.error === 'alerts_not_allowed') {
+        log('[unstuck] alerts are not enabled for this API key (turn them on in your unstuck.sh dashboard)');
+        return { list: [] as Device[], allowed: false };
+      }
+      if (!res.ok) throw new AlertFailure(`devices lookup answered ${res.status}`, res.status === 401 ? 'unauthorized' : 'error');
+      return { list: ((await res.json()) as { devices: Device[] }).devices, allowed: true };
+    });
     cache = { at: now(), devices: list, allowed };
     return cache;
   }
@@ -113,11 +136,14 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
         log(`[unstuck] alert sealed to ${ok.length} phone(s): ${named}`);
       }
       const sealed = ok.map((r) => ({ device: r.d.id, blob: r.blob }));
-      const res = await doFetch(`${base}/api/v1/agent/notify`, {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: info.sessionId, viewerUrl: link.viewerUrl, sealed }),
-      });
+      const res = await within('notify', (signal) =>
+        doFetch(`${base}/api/v1/agent/notify`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: info.sessionId, viewerUrl: link.viewerUrl, sealed }),
+          signal,
+        }),
+      );
       if (!res.ok) throw new AlertFailure(`notify answered ${res.status}`, res.status === 401 ? 'unauthorized' : 'notify_failed');
       return { delivered: ok.length };
     } catch (e) {
@@ -130,7 +156,8 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
 
 /**
  * A takeover's alert, from its link handler: none with `alerts: false`; with `'required'`, a link that reached no paired
- * phone fails the takeover at once with `alert_failed` instead of letting it wait for its timeout.
+ * phone fails the takeover at once with `alert_failed` instead of letting it wait for its timeout, unless someone already
+ * joined through the link the handler passed on. An alerter that rejects counts as no phone reached.
  */
 export function sendTakeoverAlert(
   alerter: CloudAlerter | null | undefined,
@@ -140,6 +167,12 @@ export function sendTakeoverAlert(
   takeover: TakeoverControl,
 ): void {
   if (alerts === false || !alerter) return;
-  const sent = alerter(info, site);
-  if (alerts === 'required') void sent.then((r) => r.delivered === 0 && takeover.fail('alert_failed'));
+  const failed = (): AlertOutcome => ({ delivered: 0, problem: 'error' });
+  let sent: Promise<AlertOutcome>;
+  try {
+    sent = Promise.resolve(alerter(info, site)).catch(failed);
+  } catch {
+    sent = Promise.resolve(failed());
+  }
+  if (alerts === 'required') void sent.then((r) => r.delivered === 0 && !takeover.joined() && takeover.fail('alert_failed'));
 }

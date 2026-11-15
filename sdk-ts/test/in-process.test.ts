@@ -198,7 +198,7 @@ describe('InProcessUnstuck', () => {
     void u.takeover(new FakePage(), { reason: 'x' });
     await settle();
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0]).toEqual(['https://staging.example/api/v1/agent/devices', { headers: { Authorization: 'Bearer uk_live_secret' } }]);
+    expect(fetch.mock.calls[0]).toEqual(['https://staging.example/api/v1/agent/devices', { headers: { Authorization: 'Bearer uk_live_secret' }, signal: expect.any(AbortSignal) }]);
     await u.close();
   });
 
@@ -257,6 +257,23 @@ describe('InProcessUnstuck', () => {
       await settle();
       expect(box(t)).toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
     });
+    it('someone joined through onLink before the alert came back with no phone → the takeover goes on', async () => {
+      let answer!: (r: Response) => void;
+      const fetch = vi.fn(() => new Promise<Response>((r) => (answer = r))) as unknown as typeof globalThis.fetch;
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const links: TakeoverLink[] = [];
+      const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', onLink: (l) => links.push(l), fetch }, {});
+      const r = track(u.takeover(new FakePage(), { reason: 'x', alerts: 'required' }));
+      await settle();
+      const v = await join(lastTransport(), links[0]!.url);
+      answer(Response.json({ devices: [] }));
+      await settle();
+      expect(r.result).toBeUndefined();
+      v.push({ t: 'done' });
+      await settle();
+      expect(r.result).toMatchObject({ status: 'resolved' });
+      await u.close();
+    });
     it('alerts: true (the default) with no phone keeps waiting, as before', async () => {
       vi.spyOn(console, 'error').mockImplementation(() => {});
       const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', onLink: () => {}, fetch: cloud(() => Response.json({ devices: [] })) }, {});
@@ -272,7 +289,7 @@ describe('InProcessUnstuck', () => {
       const u = new InProcessUnstuck({ relay: 'wss://own.example', agentKey: 'ak', onLink: () => {} }, {});
       const p = u.takeover(page, { reason: 'x', alerts: 'required' });
       await expect(p).rejects.toThrow(UnstuckConfigError);
-      await expect(p).rejects.toThrow("alerts: 'required' needs apiKey (Unstuck Cloud)");
+      await expect(p).rejects.toThrow("alerts: 'required' needs Unstuck Cloud (apiKey): a self-hosted relay sends no phone alerts");
       expect(attach).not.toHaveBeenCalled();
       expect(buildRelayTransport).not.toHaveBeenCalled();
     });

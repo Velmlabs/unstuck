@@ -4,7 +4,7 @@ import readline from 'node:readline';
 import { createRpcPeer, Methods, PROTOCOL_VERSION, type RpcPeer } from '@velmlabs/unstuck-protocol';
 import { FakeTransport, FakeCdp } from '@velmlabs/unstuck-core/testing';
 import { MemoryEventLog } from '@velmlabs/unstuck-core';
-import { runStdioHost } from '../src/stdio-host';
+import { REQUIRED_WITHOUT_CLOUD, runStdioHost } from '../src/stdio-host';
 
 function start(alerter?: (info: any, site: string | undefined) => Promise<any>) {
   const input = new PassThrough();
@@ -103,7 +103,7 @@ describe('runStdioHost alerts', () => {
 
     it('no Cloud alerter (self-hosted relay, local server) → config_error before any takeover starts', async () => {
       const t = await required(undefined);
-      await expect(t.result).rejects.toMatchObject({ code: 'config_error', message: "alerts: 'required' needs apiKey (Unstuck Cloud)" });
+      await expect(t.result).rejects.toMatchObject({ code: 'config_error', message: REQUIRED_WITHOUT_CLOUD });
       expect(t.links).toHaveLength(0);
       expect(t.h.transport.published.size).toBe(0);
       await end(t.h);

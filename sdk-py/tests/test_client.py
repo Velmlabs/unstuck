@@ -324,7 +324,7 @@ async def test_alerts_required_without_unstuck_cloud_is_a_value_error(browser, m
     monkeypatch.delenv("UNSTUCK_RELAY_URL", raising=False)
     page = await browser.new_page()
     async with Unstuck(engine_path=str(ENGINE), on_link=lambda l: None) as u:
-        with pytest.raises(ValueError, match="alerts: 'required' needs apiKey"):
+        with pytest.raises(ValueError, match=r"alerts: 'required' needs Unstuck Cloud \(apiKey or UNSTUCK_API_KEY\)"):
             await u.takeover(page, reason="x", alerts="required")
     await page.close()
 

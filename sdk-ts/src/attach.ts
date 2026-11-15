@@ -46,12 +46,15 @@ function onSymbolDisconnect(session: object, cb: () => void): () => void {
   const original = s.emit;
   if (typeof original !== 'function') return () => {};
   const own = Object.prototype.hasOwnProperty.call(s, 'emit');
+  /** Cleared on restore: a wrapper left under someone else's (see below) still passes events on, but never reports. */
+  let active = true;
   const wrapped = function (this: unknown, type: unknown, ...rest: unknown[]) {
-    if (typeof type === 'symbol' && type.description === SESSION_DISCONNECTED_SYMBOL) cb();
+    if (active && typeof type === 'symbol' && type.description === SESSION_DISCONNECTED_SYMBOL) cb();
     return original.call(this, type, ...rest);
   };
   s.emit = wrapped;
   return () => {
+    active = false;
     if (s.emit !== wrapped) return; // someone wrapped it after us: leave theirs in place
     if (own) s.emit = original;
     else delete s.emit;

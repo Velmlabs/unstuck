@@ -11,6 +11,10 @@ import {
 import { createEngine, hostnames, sendTakeoverAlert, type CdpClient, type CloudAlerter, type EventLog, type Transport } from '@velmlabs/unstuck-core';
 import { createTunneledCdp } from './tunnel';
 
+/** The engine has a Cloud alerter only with UNSTUCK_API_KEY and no relay of its own (flags or UNSTUCK_RELAY_URL). */
+export const REQUIRED_WITHOUT_CLOUD =
+  "alerts: 'required' needs Unstuck Cloud (apiKey or UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts";
+
 export interface StdioHostOptions {
   input: NodeJS.ReadableStream;
   output: NodeJS.WritableStream;
@@ -64,7 +68,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
 
   peer.handle(Methods.takeover, (raw) => {
     const p = raw as TakeoverParams;
-    if (p.alerts === 'required' && !opts.alerter) throw Object.assign(new Error("alerts: 'required' needs apiKey (Unstuck Cloud)"), { code: 'config_error' });
+    if (p.alerts === 'required' && !opts.alerter) throw Object.assign(new Error(REQUIRED_WITHOUT_CLOUD), { code: 'config_error' });
     const listeners = new Set<(popup: CdpClient) => void>();
     popupListeners.set(p.pageId, listeners);
     return engine

@@ -35,7 +35,7 @@ describe('Unstuck alerts', () => {
     const unstuck = new Unstuck({ enginePath: ENGINE, onLink: () => {} });
     const p = unstuck.takeover(page, { reason: 'x', alerts: 'required' });
     await expect(p).rejects.toBeInstanceOf(UnstuckConfigError);
-    await expect(p).rejects.toThrow("alerts: 'required' needs apiKey (Unstuck Cloud)");
+    await expect(p).rejects.toThrow("alerts: 'required' needs Unstuck Cloud (apiKey or UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts");
     // Other engine errors are still passed through as they are.
     const other = scriptedEngine("out({ id: m.id, error: { code: 'boom', message: 'nope' } });");
     const u2 = new Unstuck({ enginePath: other, onLink: () => {} });

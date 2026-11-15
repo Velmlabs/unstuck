@@ -66,7 +66,9 @@ export class InProcessUnstuck {
 
   private async run(page: unknown, o: TakeoverOptions): Promise<TakeoverResult> {
     if (this.choice.kind !== 'relay') throw new UnstuckConfigError('in a Worker, Unstuck needs a relay: set apiKey or relay + agentKey');
-    if (o.alerts === 'required' && !this.alerter) throw new UnstuckConfigError("alerts: 'required' needs apiKey (Unstuck Cloud)");
+    // The choice is a relay here, so no alerter means the relay is not Unstuck Cloud's (relay, or UNSTUCK_RELAY_URL).
+    if (o.alerts === 'required' && !this.alerter)
+      throw new UnstuckConfigError("alerts: 'required' needs Unstuck Cloud (apiKey): a self-hosted relay sends no phone alerts");
     const requireCode = o.requireCode ?? this.opts.requireCode ?? this.env.UNSTUCK_REQUIRE_CODE === '1';
     if (requireCode && !this.opts.onLink)
       throw new TypeError('requireCode needs an onLink handler that sends the 6-digit code by a different channel than the link (printed together, the code protects nothing)');

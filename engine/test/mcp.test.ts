@@ -157,7 +157,7 @@ describe('MCP server', () => {
     const { client, server } = await connect({ transport: new FakeTransport(), connect: connectCdp as never });
     const res = (await client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: '127.0.0.1:1', alerts: 'required' } })) as { content: { text: string }[]; isError: boolean };
     expect(res.isError).toBe(true);
-    expect(res.content[0]!.text).toBe("alerts: 'required' needs UNSTUCK_API_KEY (Unstuck Cloud)");
+    expect(res.content[0]!.text).toBe("alerts: 'required' needs Unstuck Cloud (UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts");
     expect(connectCdp).not.toHaveBeenCalled();
     await server.close();
   });

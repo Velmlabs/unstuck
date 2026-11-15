@@ -48,6 +48,8 @@ export interface LinkInfo {
 export interface TakeoverControl {
   /** Ends the takeover at once as `failed` with this detail (e.g. `alert_failed`); nothing happens once it has ended. */
   fail(detail: string): void;
+  /** Someone has opened the link and joined (true from the first accepted hello on, also after they left). */
+  joined(): boolean;
 }
 
 export interface TakeoverDeps {
@@ -498,14 +500,17 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     // design, section 4.2 (docs/specs/2026-11-14-notifications-design.md in the unstuck-cloud repo). "notifying" completes immediately.
     go('notified');
     emit('link', { expiresAt });
-    opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail });
+    opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, joined });
   })();
 
   function fail(detail: string): void {
     finish('failed', detail);
   }
+  function joined(): boolean {
+    return redeemed;
+  }
 
-  return { result, cancel: (detail) => finish('cancelled', detail), fail };
+  return { result, cancel: (detail) => finish('cancelled', detail), fail, joined };
 }
 
 /** Uniform 000000–999999 from the CSPRNG (rejection sampling avoids modulo bias). */

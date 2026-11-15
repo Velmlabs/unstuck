@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { newDeviceKeyPair, exportDevicePublicKey, openAlert } from '@velmlabs/unstuck-protocol';
 import type { LinkInfo } from '../../src/engine';
-import { createCloudAlerter, sendTakeoverAlert } from '../../src/cloud/alerts';
+import { ALERT_TIMEOUT_MS, createCloudAlerter, sendTakeoverAlert } from '../../src/cloud/alerts';
+import { settle } from '../settle';
 
 const T = 'tok_SECRET_value';
 const K = 'key_SECRET_value';
@@ -233,6 +234,42 @@ describe('createCloudAlerter', () => {
     });
   });
 
+  describe('a Cloud call that never answers gives up after 10 s (error), so required fails promptly', () => {
+    afterEach(() => vi.useRealTimers());
+    const hang = (seen: (AbortSignal | undefined)[]) => (_url: string, init: RequestInit = {}) => {
+      seen.push(init.signal ?? undefined);
+      return new Promise<Response>(() => {}); // ignores the signal too
+    };
+    it('the devices lookup', async () => {
+      vi.useFakeTimers();
+      const signals: (AbortSignal | undefined)[] = [];
+      const lines: string[] = [];
+      const alert = createCloudAlerter({ apiBase: 'https://api.test', apiKey: 'APIKEY', fetch: hang(signals) as never, log: (l) => lines.push(l) });
+      const out = alert(info, 'x.com');
+      await vi.advanceTimersByTimeAsync(ALERT_TIMEOUT_MS - 1);
+      expect(signals[0]!.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(out).resolves.toEqual({ delivered: 0, problem: 'error' });
+      expect(signals[0]!.aborted).toBe(true);
+      expect(lines).toEqual(['[unstuck] could not send the phone alert: devices lookup took longer than 10 s']);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+    it('the notify call', async () => {
+      const a = await device('d1');
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+      const signals: (AbortSignal | undefined)[] = [];
+      const fetch = (url: string, init?: RequestInit) => (url.endsWith('/devices') ? Promise.resolve(json({ devices: [a] })) : hang(signals)(url, init));
+      const lines: string[] = [];
+      const alert = createCloudAlerter({ apiBase: 'https://api.test', apiKey: 'APIKEY', fetch: fetch as never, log: (l) => lines.push(l) });
+      const out = alert(info, 'x.com');
+      while (signals.length === 0) await new Promise((r) => setImmediate(r)); // sealing runs on real crypto
+      await vi.advanceTimersByTimeAsync(ALERT_TIMEOUT_MS);
+      await expect(out).resolves.toEqual({ delivered: 0, problem: 'error' });
+      expect(signals[0]!.aborted).toBe(true);
+      expect(lines.at(-1)).toBe('[unstuck] could not send the phone alert: notify took longer than 10 s');
+    });
+  });
+
   it('defaults: global fetch, console-free stderr log and Date.now; a trailing slash on the base is stripped', async () => {
     const orig = globalThis.fetch;
     const urls: string[] = [];
@@ -254,20 +291,51 @@ describe('createCloudAlerter', () => {
 describe('sendTakeoverAlert', () => {
   const ok = async () => ({ delivered: 1 });
   const none = async () => ({ delivered: 0 as const, problem: 'no_devices' as const });
+  const rejects = () => Promise.reject(new Error('custom alerter broke'));
+  const throws = () => {
+    throw new Error('custom alerter threw');
+  };
+  /** Runs it and waits until the alert (if any) has been looked at. */
+  const run = async (alerter: Parameters<typeof sendTakeoverAlert>[0], alerts: boolean | 'required' | undefined, joined = false) => {
+    const fail = vi.fn();
+    const spy = alerter && vi.fn(alerter);
+    let looked = false;
+    sendTakeoverAlert(spy, alerts, info, 'x.com', {
+      fail,
+      joined: () => {
+        looked = true;
+        return joined;
+      },
+    });
+    await settle();
+    return { sent: spy ? spy.mock.calls.length : 0, fail: fail.mock.calls, looked };
+  };
+
   it("alerts false or no alerter: nothing sent; true: sent, never fails; 'required': fails only when no phone got it", async () => {
-    const run = async (alerter: Parameters<typeof sendTakeoverAlert>[0], alerts: boolean | 'required' | undefined) => {
-      const fail = vi.fn();
-      const spy = alerter && vi.fn(alerter);
-      sendTakeoverAlert(spy, alerts, info, 'x.com', { fail });
-      await Promise.resolve();
-      await Promise.resolve();
-      return { sent: spy ? spy.mock.calls.length : 0, fail: fail.mock.calls };
-    };
-    expect(await run(none, false)).toEqual({ sent: 0, fail: [] });
-    expect(await run(null, 'required')).toEqual({ sent: 0, fail: [] });
-    expect(await run(none, undefined)).toEqual({ sent: 1, fail: [] });
-    expect(await run(none, true)).toEqual({ sent: 1, fail: [] });
-    expect(await run(ok, 'required')).toEqual({ sent: 1, fail: [] });
-    expect(await run(none, 'required')).toEqual({ sent: 1, fail: [['alert_failed']] });
+    expect(await run(none, false)).toMatchObject({ sent: 0, fail: [] });
+    expect(await run(null, 'required')).toMatchObject({ sent: 0, fail: [] });
+    expect(await run(none, undefined)).toMatchObject({ sent: 1, fail: [] });
+    expect(await run(none, true)).toMatchObject({ sent: 1, fail: [] });
+    expect(await run(ok, 'required')).toMatchObject({ sent: 1, fail: [] });
+    expect(await run(none, 'required')).toEqual({ sent: 1, fail: [['alert_failed']], looked: true });
+  });
+
+  it("a custom alerter that rejects or throws counts as no phone reached, with no unhandled rejection", async () => {
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+    try {
+      expect(await run(rejects, 'required')).toMatchObject({ sent: 1, fail: [['alert_failed']] });
+      expect(await run(throws, 'required')).toMatchObject({ sent: 1, fail: [['alert_failed']] });
+      expect(await run(rejects, true)).toMatchObject({ sent: 1, fail: [] });
+      expect(await run(throws, undefined)).toMatchObject({ sent: 1, fail: [] });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(unhandled).not.toHaveBeenCalled();
+    } finally {
+      process.off('unhandledRejection', unhandled);
+    }
+  });
+
+  it("'required' never fails a takeover someone already joined through the link", async () => {
+    expect(await run(none, 'required', true)).toEqual({ sent: 1, fail: [], looked: true });
   });
 });

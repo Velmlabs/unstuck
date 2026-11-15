@@ -76,7 +76,8 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
     async ({ reason, cdp_url, target_id, timeout_s, allowed_sites, alerts }, extra) => {
       const url = cdp_url ?? opts.env.UNSTUCK_CDP_URL;
       if (!url) return text('No browser to take over: pass cdp_url or set UNSTUCK_CDP_URL', true);
-      if (alerts === 'required' && !opts.alerter) return text("alerts: 'required' needs UNSTUCK_API_KEY (Unstuck Cloud)", true);
+      if (alerts === 'required' && !opts.alerter)
+        return text("alerts: 'required' needs Unstuck Cloud (UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts", true);
       let cdp;
       try {
         cdp = await connect(url, { targetId: target_id });

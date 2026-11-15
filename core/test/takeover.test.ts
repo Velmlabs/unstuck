@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakeCdp, FakeTransport, type FakeViewer } from '../src/testing';
-import { createEngine, type LinkInfo } from '../src/engine';
+import { createEngine, type LinkInfo, type TakeoverControl } from '../src/engine';
 import { MemoryEventLog } from '../src/events';
 import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
 import { settle } from './settle';
@@ -456,6 +456,24 @@ describe('takeover session', () => {
     await expect(p).resolves.toMatchObject({ status: 'failed', detail: 'alert_failed' });
     expect(transport.unpublished).toHaveLength(1);
     fail!('again'); // after the end: nothing changes
+  });
+
+  it('the link handler can tell whether someone has joined through the link (also after they left)', async () => {
+    const transport = new FakeTransport();
+    const engine = createEngine({ transport });
+    let control: TakeoverControl | undefined;
+    const links: LinkInfo[] = [];
+    void engine.takeover(new FakeCdp(), { reason: 'x', onLink: (l, c) => (links.push(l), (control = c)) });
+    await settle();
+    expect(control!.joined()).toBe(false);
+    const v = transport.connect(links[0]!.url);
+    v.push({ t: 'hello', token: new URLSearchParams(new URL(links[0]!.url).hash.slice(1)).get('t')! });
+    await settle();
+    expect(control!.joined()).toBe(true);
+    v.close();
+    await settle();
+    expect(control!.joined()).toBe(true);
+    await engine.close();
   });
 
   it('a publish failure becomes a failed result, never a rejection', async () => {
