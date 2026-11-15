@@ -51,7 +51,7 @@ export const ViewerToEngineSchema = Type.Union([
   Type.Object({ t: Lit('ping') }, { additionalProperties: false }),
   /**
    * Frame credit opt-in, sent only to an engine whose ready says `credit: 1` (older engines refuse unknown messages):
-   * from now on the engine sends type-2 frames and keeps at most two of them unacknowledged.
+   * from now on the engine sends type-2 frames and keeps at most a few (CREDIT_MAX_IN_FLIGHT in core) unacknowledged.
    */
   Type.Object({ t: Lit('credit'), v: Type.Literal(1) }, { additionalProperties: false }),
   /** This frame (and every earlier one) has been drawn. */

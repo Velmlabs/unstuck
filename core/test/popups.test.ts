@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakeCdp, FakePopups, FakeTransport } from '../src/testing';
 import { createEngine, type LinkInfo } from '../src/engine';
-import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import { decodeFrame, type TakeoverResult } from '@velmlabs/unstuck-protocol';
 import { settle } from './settle';
 
 const frame = (w: number) => ({ data: 'AQID', sessionId: 1, metadata: { deviceWidth: w, deviceHeight: 100 } });
@@ -200,3 +200,59 @@ describe('stream start is single-flight (Final I2)', () => {
     expect(popup.listenerCount('Page.screencastFrame')).toBe(1);
   });
 });
+
+describe('frame credit across popup switches', () => {
+  it('numbering continues and credit survives the switch to a popup and back', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'credit', v: 1 });
+    await settle();
+    const seqs = () => v.binary().map((b) => decodeFrame(b)!.seq);
+    const shot = (cdp: FakeCdp, w: number) => cdp.emit('Page.screencastFrame', frame(w));
+    shot(t.page, 100);
+    shot(t.page, 101);
+    await settle();
+    expect(seqs()).toEqual([1, 2]);
+
+    const popup = new FakeCdp();
+    t.popups.open(popup);
+    await settle();
+    shot(popup, 300); // seq 3: credit is now used up (1, 2, 3 unacknowledged)
+    shot(popup, 301); // waits
+    await settle();
+    expect(seqs()).toEqual([1, 2, 3]);
+    v.push({ t: 'ack', seq: 3 }); // an ack for a page frame and the popup frame alike
+    await settle();
+    expect(seqs()).toEqual([1, 2, 3, 4]);
+    expect(decodeFrame(v.binary().at(-1)!)!.width).toBe(301);
+
+    popup.close('target closed');
+    await settle();
+    shot(t.page, 102);
+    await settle();
+    expect(seqs().at(-1)).toBe(5); // still one number space, still credited
+    expect(decodeFrame(v.binary().at(-1)!)!.width).toBe(102);
+  });
+
+  it('a frame waiting for credit when the stream switches is dropped, not shown on the new page', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'credit', v: 1 });
+    await settle();
+    for (const w of [100, 101, 102, 103]) t.page.emit('Page.screencastFrame', frame(w)); // 103 waits
+    await settle();
+    expect(v.binary()).toHaveLength(3);
+    const popup = new FakeCdp();
+    t.popups.open(popup);
+    await settle();
+    v.push({ t: 'ack', seq: 3 });
+    await settle();
+    expect(v.binary()).toHaveLength(3); // 103 belonged to the page the human no longer sees
+    popup.emit('Page.screencastFrame', frame(300));
+    await settle();
+    expect(decodeFrame(v.binary().at(-1)!)).toMatchObject({ width: 300, seq: 4 });
+  });
+});
+

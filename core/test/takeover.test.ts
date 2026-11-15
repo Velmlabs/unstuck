@@ -428,8 +428,14 @@ describe('takeover session', () => {
     const shot = (n: number) => ({ ...frame, data: btoa(String.fromCharCode(n)) });
     /** [jpeg byte, seq] of every frame the viewer got; seq undefined for type-1 frames. */
     const got = (v: FakeViewer) => v.binary().map((b) => decodeFrame(b)!).map((f) => [f.jpeg[0], f.seq]);
-    const emit = async (t: ReturnType<typeof setup>, n: number) => {
-      t.cdp.emit('Page.screencastFrame', shot(n));
+    const emit = async (t: ReturnType<typeof setup>, ...ns: number[]) => {
+      for (const n of ns) {
+        t.cdp.emit('Page.screencastFrame', shot(n));
+        await settle();
+      }
+    };
+    const optIn = async (v: FakeViewer) => {
+      v.push({ t: 'credit', v: 1 });
       await settle();
     };
 
@@ -444,40 +450,35 @@ describe('takeover session', () => {
       const t = setup();
       await settle();
       const v = await t.join();
-      for (const n of [1, 2, 3, 4]) await emit(t, n);
-      expect(got(v)).toEqual([
-        [1, undefined],
-        [2, undefined],
-        [3, undefined],
-        [4, undefined],
-      ]);
+      await emit(t, 1, 2, 3, 4, 5);
+      expect(got(v)).toEqual([1, 2, 3, 4, 5].map((n) => [n, undefined]));
       v.push({ t: 'ack', seq: 1 }); // harmless without opting in
       await settle();
       expect(v.json().filter((m) => m.t === 'error')).toEqual([]);
     });
 
-    it('after the opt-in at most two frames are unacknowledged; an ack sends the newest waiting frame', async () => {
+    it('after the opt-in at most three frames are unacknowledged; an ack sends the newest waiting frame', async () => {
       const t = setup();
       await settle();
       const v = await t.join();
-      v.push({ t: 'credit', v: 1 });
-      await settle();
-      for (const n of [1, 2, 3, 4]) await emit(t, n);
+      await optIn(v);
+      await emit(t, 1, 2, 3, 4, 5);
       expect(got(v)).toEqual([
         [1, 1],
         [2, 2],
+        [3, 3],
       ]);
       await vi.advanceTimersByTimeAsync(200); // the drain timer doesn't bypass credit
-      expect(v.binary()).toHaveLength(2);
+      expect(v.binary()).toHaveLength(3);
       v.push({ t: 'ack', seq: 1 });
       await settle();
-      expect(got(v).at(-1)).toEqual([4, 3]);
-      v.push({ t: 'ack', seq: 1 }); // stale
-      await emit(t, 5);
-      expect(v.binary()).toHaveLength(3);
-      v.push({ t: 'ack', seq: 3 });
-      await settle();
       expect(got(v).at(-1)).toEqual([5, 4]);
+      v.push({ t: 'ack', seq: 1 }); // stale
+      await emit(t, 6);
+      expect(v.binary()).toHaveLength(4);
+      v.push({ t: 'ack', seq: 4 });
+      await settle();
+      expect(got(v).at(-1)).toEqual([6, 5]);
       expect(v.json().filter((m) => m.t === 'error')).toEqual([]);
     });
 
@@ -485,13 +486,34 @@ describe('takeover session', () => {
       const t = setup();
       await settle();
       const v = await t.join();
-      v.push({ t: 'credit', v: 1 });
-      await settle();
-      for (const n of [1, 2, 3]) await emit(t, n);
-      expect(v.binary()).toHaveLength(2);
+      await optIn(v);
+      await emit(t, 1, 2, 3, 4);
+      expect(v.binary()).toHaveLength(3);
       await vi.advanceTimersByTimeAsync(1_100);
       await settle();
-      expect(got(v).at(-1)).toEqual([3, 3]);
+      expect(got(v).at(-1)).toEqual([4, 4]);
+    });
+
+    it('screenshot-polling frames are gated by credit too', async () => {
+      let n = 0;
+      const t = setupWith((cdp) => {
+        cdp.respond('Page.startScreencast', () => Promise.reject(new Error('not supported')));
+        cdp.respond('Page.getLayoutMetrics', () => ({ cssVisualViewport: { clientWidth: 800, clientHeight: 600 } }));
+        cdp.respond('Page.captureScreenshot', () => ({ data: btoa(String.fromCharCode(++n)) }));
+      });
+      await settle();
+      const v = await t.join();
+      await optIn(v);
+      const before = v.binary().length; // frames polled before the opt-in are type 1 and not counted
+      await vi.advanceTimersByTimeAsync(2_000 / 5); // 5 fps: more ticks than credit allows
+      await vi.advanceTimersByTimeAsync(400);
+      await settle();
+      const credited = got(v).slice(before);
+      expect(credited.map((f) => f[1])).toEqual([1, 2, 3]);
+      expect(n).toBeGreaterThan(before + 3); // polling went on; the extra frames waited (newest only)
+      v.push({ t: 'ack', seq: 3 });
+      await settle();
+      expect(got(v).at(-1)).toEqual([n, 4]); // the newest polled frame
     });
 
     it('the first frame a joining viewer gets (the cached one) is not counted against credit', async () => {
@@ -504,30 +526,48 @@ describe('takeover session', () => {
       await settle();
       const v2 = await t.join({ resumeKey });
       expect(got(v2)).toEqual([[7, undefined]]);
-      v2.push({ t: 'credit', v: 1 });
-      await settle();
-      for (const n of [8, 9, 10]) await emit(t, n);
+      await optIn(v2);
+      await emit(t, 8, 9, 10, 11);
       expect(got(v2).slice(1)).toEqual([
         [8, 1],
         [9, 2],
+        [10, 3],
       ]);
+    });
+
+    it('a replaced viewer starts fresh: type-1 frames until its own opt-in, then numbers from 1', async () => {
+      const t = setup();
+      await settle();
+      const v1 = await t.join();
+      await optIn(v1);
+      await emit(t, 1, 2);
+      expect(got(v1)).toEqual([
+        [1, 1],
+        [2, 2],
+      ]);
+      const v2 = await t.join({ resumeKey: v1.json()[0].resumeKey });
+      expect(v1.closed).not.toBeNull();
+      expect(v2.json()[0]).toMatchObject({ t: 'ready', credit: 1 });
+      await emit(t, 3, 4, 5, 6);
+      expect(got(v2).slice(1)).toEqual([3, 4, 5, 6].map((n) => [n, undefined])); // not credited yet
+      await optIn(v2);
+      await emit(t, 7);
+      expect(got(v2).at(-1)).toEqual([7, 1]);
     });
 
     it('acks from a replaced viewer do not reach the new one', async () => {
       const t = setup();
       await settle();
       const v1 = await t.join();
-      v1.push({ t: 'credit', v: 1 });
-      await settle();
+      await optIn(v1);
       const resumeKey = v1.json()[0].resumeKey;
       const v2 = await t.join({ resumeKey });
-      v2.push({ t: 'credit', v: 1 });
+      await optIn(v2);
+      await emit(t, 1, 2, 3, 4);
+      expect(v2.binary()).toHaveLength(3);
+      v1.push({ t: 'ack', seq: 3 });
       await settle();
-      for (const n of [1, 2, 3]) await emit(t, n);
-      expect(v2.binary()).toHaveLength(2);
-      v1.push({ t: 'ack', seq: 2 });
-      await settle();
-      expect(v2.binary()).toHaveLength(2);
+      expect(v2.binary()).toHaveLength(3);
     });
   });
 

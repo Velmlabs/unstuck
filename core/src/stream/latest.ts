@@ -5,10 +5,15 @@ export interface FrameSink {
   readonly bufferedAmount: number;
 }
 
-/** Frames a credit-mode viewer may have unacknowledged (sent, not yet drawn). */
-export const CREDIT_MAX_IN_FLIGHT = 2;
+/**
+ * Frames a credit-mode viewer may have unacknowledged (sent, not yet drawn). Credit allows this many frames per round
+ * trip: 2 measurably capped fast links (~25 fps instead of ~36 on Browser Rendering), 3 doesn't.
+ */
+export const CREDIT_MAX_IN_FLIGHT = 3;
 /** With credit exhausted and no ack for this long, one more frame goes out: a lost ack must never freeze the stream. */
 export const CREDIT_ACK_TIMEOUT_MS = 1_000;
+/** Back-to-back grants without an ack back off (1 s, 2 s, 4 s, 8 s) up to this; the next accepted ack resets to 1 s. */
+export const CREDIT_GRANT_MAX_MS = 8_000;
 
 export interface LatestSenderOptions {
   highWaterMark?: number;
@@ -49,12 +54,15 @@ export function createLatestSender(conn: FrameSink, opts: LatestSenderOptions = 
   let ackedSeq = 0;
   /** Last send or accepted ack: the ack timeout counts from here. */
   let since = 0;
+  /** How long to wait before the next grant: doubles with each grant, back to CREDIT_ACK_TIMEOUT_MS on an ack. */
+  let grantAfter = CREDIT_ACK_TIMEOUT_MS;
 
   const room = (): boolean => {
     if (!(conn.bufferedAmount < mark)) return false;
     if (!credit || sentSeq - ackedSeq < CREDIT_MAX_IN_FLIGHT) return true;
-    if (now() - since < CREDIT_ACK_TIMEOUT_MS) return false;
+    if (now() - since < grantAfter) return false;
     ackedSeq = sentSeq - CREDIT_MAX_IN_FLIGHT + 1; // grant one frame
+    grantAfter = Math.min(grantAfter * 2, CREDIT_GRANT_MAX_MS);
     return true;
   };
   const send = (frame: Uint8Array): void => {
@@ -94,6 +102,7 @@ export function createLatestSender(conn: FrameSink, opts: LatestSenderOptions = 
       if (!credit || !Number.isInteger(seq) || seq <= ackedSeq || seq > sentSeq) return;
       ackedSeq = seq;
       since = now();
+      grantAfter = CREDIT_ACK_TIMEOUT_MS;
       drain();
     },
   };
