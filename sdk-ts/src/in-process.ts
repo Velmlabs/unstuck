@@ -38,6 +38,9 @@ export class InProcessUnstuck {
   private readonly choice: TransportChoice;
   private readonly alerter: ((info: LinkInfo, site: string | undefined) => Promise<void>) | null;
   private engine: Engine | null = null;
+  /** Bumped by close(): a takeover that was still attaching when it ran must not start a new engine. */
+  private generation = 0;
+  private readonly inFlight = new Set<Promise<TakeoverResult>>();
 
   constructor(
     private readonly opts: UnstuckOptions,
@@ -51,16 +54,32 @@ export class InProcessUnstuck {
   }
 
   async takeover(page: unknown, o: TakeoverOptions): Promise<TakeoverResult> {
+    const run = this.run(page, o);
+    this.inFlight.add(run);
+    try {
+      return await run;
+    } finally {
+      this.inFlight.delete(run);
+    }
+  }
+
+  private async run(page: unknown, o: TakeoverOptions): Promise<TakeoverResult> {
     if (this.choice.kind !== 'relay') throw new UnstuckConfigError('in a Worker, Unstuck needs a relay: set apiKey or relay + agentKey');
     const requireCode = o.requireCode ?? this.opts.requireCode ?? this.env.UNSTUCK_REQUIRE_CODE === '1';
     if (requireCode && !this.opts.onLink)
       throw new TypeError('requireCode needs an onLink handler that sends the 6-digit code by a different channel than the link (printed together, the code protects nothing)');
+    const generation = this.generation;
     let attached: AttachedPage;
     try {
       attached = await attachPage(page);
     } catch (e) {
       if (e instanceof PageClosedError) return { status: 'failed', sessionId: '', url: '', durationS: 0, detail: 'page_closed' };
       throw e;
+    }
+    if (generation !== this.generation) {
+      // close() ran while the page was attaching: cancelled like the takeovers it ended (core's engine_closed shape).
+      await attached.detach();
+      return { status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' };
     }
     const cdp = toCdpClient(attached);
     const stopKeepAlive = startKeepAlive(cdp);
@@ -112,11 +131,16 @@ export class InProcessUnstuck {
     }
   }
 
-  /** Cancels running takeovers (`engine_closed`) and closes the relay sockets. A later takeover starts a new engine. */
+  /**
+   * Cancels running takeovers (`engine_closed`), also those still attaching their page, closes the relay sockets and
+   * resolves once they have all ended. A later takeover starts a new engine.
+   */
   async close(): Promise<void> {
+    this.generation++;
     const engine = this.engine;
     this.engine = null;
     await engine?.close();
+    await Promise.allSettled([...this.inFlight]);
   }
 
   private ensureEngine(): Engine {

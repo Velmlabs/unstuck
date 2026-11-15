@@ -8,7 +8,7 @@ import { Unstuck, UnstuckConfigError } from '../src/index';
 import type { TakeoverLink } from '../src/options';
 
 // The relay is replaced by core's FakeTransport unless a test asks for the real one (h.real).
-const h = vi.hoisted(() => ({ real: false, transports: [] as unknown[], calls: [] as unknown[] }));
+const h = vi.hoisted(() => ({ real: false, transports: [] as unknown[], calls: [] as unknown[], onCall: null as null | (() => void) }));
 vi.mock('@velmlabs/unstuck-core', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@velmlabs/unstuck-core')>();
   const { FakeTransport } = await import('@velmlabs/unstuck-core/testing');
@@ -24,7 +24,9 @@ vi.mock('@velmlabs/unstuck-core', async (importOriginal) => {
       const takeover = engine.takeover.bind(engine);
       engine.takeover = (cdp, call) => {
         h.calls.push(call);
-        return takeover(cdp, call);
+        const result = takeover(cdp, call);
+        h.onCall?.();
+        return result;
       };
       return engine;
     }),
@@ -89,6 +91,7 @@ beforeEach(() => {
   h.real = false;
   h.transports.length = 0;
   h.calls.length = 0;
+  h.onCall = null;
   vi.mocked(buildRelayTransport).mockClear();
   vi.mocked(createEngine).mockClear();
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
@@ -320,8 +323,49 @@ describe('InProcessUnstuck', () => {
     await expect(u.close()).resolves.toBeUndefined();
   });
 
+  it('close() while the page is still attaching: the takeover ends with engine_closed and never starts an engine', async () => {
+    const page = new FakePage();
+    let attach!: () => void;
+    const create = page.createCDPSession.bind(page);
+    page.createCDPSession = () => new Promise((r) => (attach = () => r(create())));
+    const u = new InProcessUnstuck({ relay: 'wss://own.example', onLink: () => {} }, {});
+    const box = track(u.takeover(page, { reason: 'x' }));
+    await settle();
+    let closed = false;
+    const closing = u.close().then(() => (closed = true));
+    await settle();
+    expect(closed).toBe(false); // close() waits for the takeover it cancelled
+    attach();
+    await closing;
+    expect(box.result).toEqual({ status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' });
+    expect(createEngine).not.toHaveBeenCalled();
+    expect(page.detached).toBe(1);
+    expect(page.listenerCount('popup')).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    // The client still works afterwards.
+    void u.takeover(new FakePage(), { reason: 'y' });
+    await settle();
+    expect(lastTransport().published.size).toBe(1);
+    await u.close();
+  });
+
+  it('close() right after the engine got the takeover still cancels it (nothing published, nothing left running)', async () => {
+    const page = new FakePage();
+    const u = new InProcessUnstuck({ relay: 'wss://own.example', onLink: () => {} }, {});
+    let closing!: Promise<void>;
+    h.onCall = () => (closing = u.close()); // engine.takeover has started and is awaiting its key
+    const box = track(u.takeover(page, { reason: 'x' }));
+    await vi.waitFor(() => expect(closing).toBeDefined());
+    await closing;
+    expect(box.result).toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
+    expect(lastTransport().published.size).toBe(0);
+    expect(lastTransport().closed).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it('relay_unauthorized → failed/relay_unauthorized and one console.error line without the key', async () => {
     h.real = true;
+    RefusingWs.opened = 0;
     vi.stubGlobal('WebSocket', RefusingWs);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', cloudRelay: 'ws://127.0.0.1:1', onLink: () => {} }, {});
@@ -332,6 +376,17 @@ describe('InProcessUnstuck', () => {
     expect(box.result).toMatchObject({ status: 'failed', detail: 'relay_unauthorized' });
     expect(error.mock.calls).toEqual([['[unstuck] unstuck.sh rejected the API key: check the key in your dashboard']]);
     expect(error.mock.calls.flat().join()).not.toContain('uk_live_secret');
+    // The relay transport keeps no state from a refused publish: the next takeover on the same engine asks the relay
+    // again (a fixed key may now be accepted) and, refused again, says so again.
+    const again = track(u.takeover(new FakePage(), { reason: 'y' }));
+    await settle();
+    await vi.advanceTimersByTimeAsync(0);
+    await settle();
+    expect(again.result).toMatchObject({ status: 'failed', detail: 'relay_unauthorized' });
+    expect(createEngine).toHaveBeenCalledTimes(1);
+    expect(RefusingWs.opened).toBe(2);
+    expect(error).toHaveBeenCalledTimes(2);
+    expect(vi.getTimerCount()).toBe(0);
     await u.close();
   });
 
@@ -379,6 +434,7 @@ describe('Node Unstuck with mode: in-process', () => {
 
 /** A relay that refuses the key (close code 4401) as soon as the agent socket opens. */
 class RefusingWs {
+  static opened = 0;
   readyState = 0;
   binaryType = 'blob';
   bufferedAmount = 0;
@@ -387,6 +443,7 @@ class RefusingWs {
   onclose: ((e: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(readonly url: string) {
+    RefusingWs.opened++;
     queueMicrotask(() => {
       this.readyState = 1;
       this.onopen?.();

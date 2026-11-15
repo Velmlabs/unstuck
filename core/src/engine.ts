@@ -35,7 +35,7 @@ export interface TakeoverCallOptions {
 export interface Engine {
   /** Never rejects: every failure becomes a TakeoverResult. */
   takeover(cdp: CdpClient, opts: TakeoverCallOptions): Promise<TakeoverResult>;
-  /** Cancels in-flight takeovers (detail `engine_closed`) and closes the transport. */
+  /** Cancels in-flight takeovers (detail `engine_closed`) and closes the transport; later takeovers end the same way. */
   close(): Promise<void>;
 }
 
@@ -45,6 +45,7 @@ export function createEngine(opts: EngineOptions): Engine {
   const key = importSecret(opts.secret ?? newSecret());
   const now = opts.now ?? (() => Date.now());
   const running = new Set<RunningTakeover>();
+  let closed = false;
 
   return {
     async takeover(cdp, call) {
@@ -53,6 +54,8 @@ export function createEngine(opts: EngineOptions): Engine {
       const off = cdp.onClose((reason) => (closedBefore ??= reason));
       const k = await key;
       off();
+      // close() ran while this takeover was starting (or before it): it never publishes.
+      if (closed) return { status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' };
       const session = runTakeover({ transport: opts.transport, key: k, log: opts.log, now }, cdp, {
         closedBefore,
         reason: call.reason,
@@ -71,6 +74,7 @@ export function createEngine(opts: EngineOptions): Engine {
       }
     },
     async close() {
+      closed = true;
       const results = [...running].map((s) => {
         s.cancel('engine_closed');
         return s.result;

@@ -416,6 +416,18 @@ describe('takeover session', () => {
     expect(t.transport.closed).toBe(true);
   });
 
+  it('engine.close() while a takeover is still starting cancels it with engine_closed before it publishes', async () => {
+    const t = setup(); // close() in the same tick: the takeover is still awaiting the engine's key
+    await t.engine.close();
+    await settle();
+    expect(t.result()).toEqual({ status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' });
+    expect(t.transport.published.size).toBe(0);
+    expect(t.links).toHaveLength(0);
+    // A takeover on a closed engine ends the same way.
+    await expect(t.engine.takeover(new FakeCdp(), { reason: 'late' })).resolves.toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
+    expect(t.transport.published.size).toBe(0);
+  });
+
   it('a publish failure becomes a failed result, never a rejection', async () => {
     const transport = new FakeTransport();
     transport.publish = () => Promise.reject(new Error('port in use'));
