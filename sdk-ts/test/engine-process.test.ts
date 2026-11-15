@@ -70,9 +70,22 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
   });
 
   it('uses the process environment when no env is given', async () => {
-    const e = await spawnEngine(fakeEngine(ECHO_ENV), {});
-    expect(e.engineVersion).toMatch(/\|path$/);
-    e.kill();
+    process.env.UNSTUCK_TEST_MARKER = 'from-process-env';
+    try {
+      const e = await spawnEngine(
+        fakeEngine(`
+import readline from 'node:readline';
+readline.createInterface({ input: process.stdin }).on('line', (l) => {
+  const m = JSON.parse(l);
+  process.stdout.write(JSON.stringify({ id: m.id, result: { engineVersion: String(process.env.UNSTUCK_TEST_MARKER), protocolVersion: 1 } }) + '\\n');
+});`),
+        {},
+      );
+      expect(e.engineVersion).toBe('from-process-env');
+      e.kill();
+    } finally {
+      delete process.env.UNSTUCK_TEST_MARKER;
+    }
   });
 
   it('Review Focus 4: a missing binary rejects with UnstuckEngineError naming the path', async () => {

@@ -8,6 +8,10 @@ describe('validateOptions', () => {
     expect(() => new Unstuck({ apiKey: 'k', relay: 'wss://r' })).toThrow(UnstuckConfigError);
     expect(() => validateOptions({ apiKey: 'k', relay: 'wss://r' })).toThrow(/either apiKey .* or relay \+ agentKey .*not both/);
   });
+  it('rejects apiKey with agentKey', () => {
+    expect(() => validateOptions({ apiKey: 'k', agentKey: 'a' })).toThrow(UnstuckConfigError);
+    expect(() => validateOptions({ apiKey: 'k', agentKey: 'a' })).toThrow('agentKey is for your own relay (with relay); Unstuck Cloud only needs apiKey');
+  });
   it('rejects cloudApi or cloudRelay without apiKey', () => {
     expect(() => validateOptions({ cloudApi: 'https://staging' })).toThrow(/only apply with apiKey/);
     expect(() => validateOptions({ cloudRelay: 'wss://s' })).toThrow(UnstuckConfigError);

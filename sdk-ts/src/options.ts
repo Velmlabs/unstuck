@@ -55,6 +55,7 @@ export interface UnstuckOptions {
 
 export function validateOptions(o: UnstuckOptions): void {
   if (o.apiKey && o.relay) throw new UnstuckConfigError('use either apiKey (Unstuck Cloud) or relay + agentKey (your own relay), not both');
+  if (o.apiKey && o.agentKey) throw new UnstuckConfigError('agentKey is for your own relay (with relay); Unstuck Cloud only needs apiKey');
   if ((o.cloudRelay || o.cloudApi) && !o.apiKey) throw new UnstuckConfigError('cloudRelay and cloudApi only apply with apiKey');
 }
 
