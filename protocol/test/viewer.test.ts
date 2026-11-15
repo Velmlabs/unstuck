@@ -132,7 +132,7 @@ describe('padPlaintext', () => {
 });
 
 describe('frame credit', () => {
-  it('ready may announce frame credit (engine 0.2.2+); older viewers ignore the extra key', () => {
+  it('ready may announce frame credit (engine 0.2.1+); older viewers ignore the extra key', () => {
     expect(Value.Check(EngineToViewerSchema, { t: 'ready', reason: 'r', site: 's', expiresAt: 1, resumeKey: 'k', credit: 1 })).toBe(true);
     expect(Value.Check(EngineToViewerSchema, { t: 'ready', reason: 'r', site: 's', expiresAt: 1, resumeKey: 'k', credit: 'yes' })).toBe(false);
   });
