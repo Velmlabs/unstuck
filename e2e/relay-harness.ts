@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +18,8 @@ export async function freePort(): Promise<number> {
   return port;
 }
 
-export async function waitHealthy(url: string, ms: number) {
+/** Polls `${url}/healthz` until it answers 200; `label` names what failed to start. */
+export async function waitHealthy(url: string, ms: number, label = 'relay') {
   const end = Date.now() + ms;
   for (;;) {
     try {
@@ -26,9 +27,35 @@ export async function waitHealthy(url: string, ms: number) {
     } catch {
       // not up yet
     }
-    if (Date.now() > end) throw new Error(`relay at ${url} did not start`);
+    if (Date.now() > end) throw new Error(`${label} at ${url} did not start`);
     await new Promise((r) => setTimeout(r, 250));
   }
+}
+
+/** Stops a detached child's process group: SIGTERM, then SIGKILL if it hasn't exited within `ms`. Never throws. */
+export async function stopGroup(child: ChildProcess, ms = 5_000): Promise<void> {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((r) => child.once('exit', () => r()));
+  const kill = (sig: NodeJS.Signals) => {
+    try {
+      process.kill(-child.pid!, sig);
+    } catch {
+      // the group is already gone
+    }
+  };
+  kill('SIGTERM');
+  const timer = new Promise<'late'>((r) => setTimeout(() => r('late'), ms).unref());
+  if ((await Promise.race([exited, timer])) === 'late') {
+    kill('SIGKILL');
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 1_000).unref())]);
+  }
+}
+
+/** Taps Start on a takeover link (the page connects only then), waiting for the button to appear. */
+export async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { waitFor: (o: { timeout: number }) => Promise<void>; click: () => Promise<void> } }) {
+  const b = p.getByRole('button', { name: 'Start takeover' });
+  await b.waitFor({ timeout: 5_000 });
+  await b.click();
 }
 
 /** Starts a relay that accepts RELAY_KEY: the Node relay in-process, or the Cloudflare relay under `wrangler dev`. */
@@ -49,13 +76,15 @@ export async function startRelay(kind: 'node' | 'cloudflare'): Promise<{ url: st
     ['wrangler', 'dev', '--port', String(port), '--ip', '127.0.0.1', '--var', `AGENT_KEYS:${RELAY_KEY}`, '--persist-to', path.join(dir, '.wrangler/e2e')],
     { cwd: dir, stdio: ['ignore', process.env.RELAY_LOG ? 'inherit' : 'ignore', process.env.RELAY_LOG ? 'inherit' : 'ignore'], detached: true, env: { ...process.env, CI: '1' } },
   );
-  await waitHealthy(`http://127.0.0.1:${port}`, 90_000);
-  return {
-    url: `ws://127.0.0.1:${port}`,
-    stop: async () => {
-      if (child.pid) process.kill(-child.pid, 'SIGTERM');
-    },
-  };
+  const spawnFailed = new Promise<never>((_, reject) => child.once('error', reject));
+  spawnFailed.catch(() => {});
+  try {
+    await Promise.race([waitHealthy(`http://127.0.0.1:${port}`, 90_000, 'relay-cloudflare'), spawnFailed]);
+  } catch (e) {
+    await stopGroup(child);
+    throw e;
+  }
+  return { url: `ws://127.0.0.1:${port}`, stop: () => stopGroup(child) };
 }
 
 /** A Playwright page as the engine's CdpClient, for in-process mode (no engine binary). */

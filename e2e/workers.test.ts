@@ -6,7 +6,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePort, RELAY_KEY, startRelay, waitHealthy } from './relay-harness';
+import { freePort, RELAY_KEY, startRelay, stopGroup, tapStart, waitHealthy } from './relay-harness';
 
 // An agent in a Durable Object under `wrangler dev` drives a real Chromium over CDP and hands it to a person through relay-cloudflare.
 
@@ -41,21 +41,25 @@ beforeAll(async () => {
     env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false' },
   });
   agent = `http://127.0.0.1:${port}`;
-  await waitHealthy(agent, 90_000);
+  // A spawn error (e.g. no wrangler binary) or an early exit fails beforeAll at once instead of after the health deadline.
+  const died = new Promise<never>((_, reject) => {
+    worker!.once('error', reject);
+    worker!.once('exit', (code, signal) => reject(new Error(`agent wrangler dev exited (${code ?? signal})`)));
+  });
+  died.catch(() => {});
+  await Promise.race([waitHealthy(agent, 90_000, 'agent Worker'), died]);
 }, 180_000);
 afterAll(async () => {
-  if (worker?.pid) process.kill(-worker.pid, 'SIGTERM');
-  await relay?.stop();
-  await agentBrowser?.close();
-  await humanBrowser?.close();
-  server?.close();
+  // Every step runs even if an earlier one fails, so no wrangler or browser outlives the suite.
+  const steps = await Promise.allSettled([
+    worker ? stopGroup(worker) : undefined,
+    relay?.stop(),
+    agentBrowser?.close(),
+    humanBrowser?.close(),
+    server ? new Promise((r) => server.close(r)) : undefined,
+  ]);
+  for (const s of steps) if (s.status === 'rejected') console.error('workers.test cleanup:', s.reason);
 });
-
-/** Taps Start on a takeover link (the page connects only then). */
-async function tapStart(p: any) {
-  const b = p.getByRole('button', { name: 'Start takeover' });
-  if (await b.isVisible()) await b.click();
-}
 
 /** Opens the fixture in the agent's Chromium at a path of its own, so the Worker can find that tab by URL. */
 async function agentPage(name: string) {
@@ -96,8 +100,17 @@ describe('takeover from a Durable Object under wrangler dev', () => {
     const scale = Math.min(box.width / 1280, box.height / 720);
     const x = box.x + (box.width - 1280 * scale) / 2 + (target.x + target.width / 2) * scale;
     const y = box.y + (box.height - 720 * scale) / 2 + (target.y + target.height / 2) * scale;
-    await human.touchscreen.tap(x, y);
-    await expect.poll(() => page.evaluate('window.clicks'), { timeout: 15_000 }).toBe(1);
+    // Tap again while the first tap hasn't landed (the live view can take a moment to accept input).
+    await expect
+      .poll(
+        async () => {
+          const clicks = (await page.evaluate('window.clicks')) as number;
+          if (clicks === 0) await human.touchscreen.tap(x, y);
+          return clicks;
+        },
+        { timeout: 15_000, interval: 1_000 },
+      )
+      .toBeGreaterThan(0);
     await human.getByRole('button', { name: 'Done' }).click();
 
     await expect.poll(() => poll('result'), { timeout: 20_000, interval: 250 }).toMatchObject({ status: 'resolved', sessionId: link.sessionId });

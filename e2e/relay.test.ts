@@ -9,13 +9,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
-import { cdpFor, freePort, RELAY_KEY, startRelay } from './relay-harness';
-
-/** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
-async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
-  const b = p.getByRole('button', { name: 'Start takeover' });
-  if (await b.isVisible()) await b.click();
-}
+import { cdpFor, freePort, RELAY_KEY, startRelay, tapStart } from './relay-harness';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
