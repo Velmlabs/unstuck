@@ -11,5 +11,8 @@
     "@velmlabs/unstuck-relay": "workspace:*",
     "@velmlabs/unstuck-relay-core": "workspace:*",
     "@velmlabs/unstuck-viewer": "workspace:*"
+  },
+  "devDependencies": {
+    "wrangler": "^4.161.0"
   }
 }

@@ -18,7 +18,7 @@ export async function freePort(): Promise<number> {
   return port;
 }
 
-async function waitHealthy(url: string, ms: number) {
+export async function waitHealthy(url: string, ms: number) {
   const end = Date.now() + ms;
   for (;;) {
     try {

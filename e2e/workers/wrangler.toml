@@ -1,0 +1,13 @@
+# The e2e agent Worker (e2e/workers.test.ts runs it under `wrangler dev`).
+# No nodejs_compat: the SDK's edge entry must run on plain workerd.
+name = "unstuck-e2e-agent"
+main = "agent-worker.ts"
+compatibility_date = "2026-11-01"
+
+[[durable_objects.bindings]]
+name = "AGENT"
+class_name = "AgentDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AgentDO"]
