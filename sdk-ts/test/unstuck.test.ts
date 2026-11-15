@@ -42,6 +42,7 @@ describe('Unstuck', () => {
 
     const human = await browser.newPage();
     await human.goto(links[0]!.url);
+    await human.getByRole('button', { name: 'Start takeover' }).click(); // the page connects only on this tap
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved' });
     await unstuck.close();
@@ -60,6 +61,7 @@ describe('Unstuck', () => {
       await vi.waitFor(() => expect(links.length).toBeGreaterThan(0), { timeout: 10_000 });
       const human = await browser.newPage();
       await human.goto(links.shift()!.url);
+      await human.getByRole('button', { name: 'Start takeover' }).click(); // the page connects only on this tap
       await human.getByRole('button', { name: 'Done' }).click();
       await expect(result).resolves.toMatchObject({ status: 'resolved' });
       await human.close();

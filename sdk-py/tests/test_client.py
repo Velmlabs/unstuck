@@ -30,6 +30,7 @@ async def test_link_then_done_resolves(browser):
         assert links[0].url.startswith("http://127.0.0.1:") and "#t=" in links[0].url
         human = await browser.new_page()
         await human.goto(links[0].url)
+        await human.get_by_role("button", name="Start takeover").click()  # the page connects only on this tap
         await human.get_by_role("button", name="Done").click()
         result = await task
         assert isinstance(result, TakeoverResult) and result.status == "resolved"

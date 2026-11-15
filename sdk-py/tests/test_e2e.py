@@ -56,6 +56,7 @@ async def test_phone_human_solves_fixture_and_taps_done(pw, site):
         ctx = await human_browser.new_context(**pw.devices["iPhone 13"])
         human = await ctx.new_page()
         await human.goto(links[0].url)
+        await human.get_by_role("button", name="Start takeover").click()  # the page connects only on this tap
         await human.wait_for_function("() => document.querySelector('canvas')?.width > 100", timeout=15000)
         b = await page.locator("#robot").bounding_box()
         x, y = await canvas_point(human, (b["x"] + b["width"] / 2, b["y"] + b["height"] / 2))
