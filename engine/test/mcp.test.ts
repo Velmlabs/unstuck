@@ -125,9 +125,11 @@ describe('MCP server', () => {
 
   it.each([[undefined, 1], [true, 1], [false, 0]])('alerts=%s calls the alerter %i time(s)', async (alerts, calls) => {
     const alerter = vi.fn<(info: any, site: string | undefined) => Promise<void>>(async () => {});
-    const { client, server } = await connect({ transport: new FakeTransport(), alerter });
+    const { client, server, logs } = await connect({ transport: new FakeTransport(), alerter });
     const call = client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 10, ...(alerts === undefined ? {} : { alerts }) } });
-    await new Promise((r) => setTimeout(r, 1500));
+    // onLink runs the alerter right after it writes the link line, so once the link has reached the client the flag has been applied.
+    await vi.waitFor(() => expect(logs.some((l) => l.includes('→'))).toBe(true), { timeout: 15_000 });
+    if (calls) await vi.waitFor(() => expect(alerter).toHaveBeenCalledTimes(1), { timeout: 15_000 });
     expect(alerter).toHaveBeenCalledTimes(calls);
     if (calls) expect(alerter.mock.calls[0]![0]).toMatchObject({ reason: 'r' });
     await server.close();

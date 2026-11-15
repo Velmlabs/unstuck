@@ -121,6 +121,36 @@ describe('createCloudAlerter', () => {
     for (const s of [throwing, five, badNotify, badJson, badKey]) for (const l of s.lines) for (const secret of [T, K, 'APIKEY']) expect(l).not.toContain(secret);
   });
 
+  it('a thrown non-Error still resolves with one log line', async () => {
+    for (const thrown of ['just a string', undefined, null, 42]) {
+      const s = setup(() => Promise.reject(thrown));
+      await expect(s.alert(info, 'x.com')).resolves.toBeUndefined();
+      expect(s.lines).toHaveLength(1);
+    }
+    const masked = setup(() => Promise.reject('failed for APIKEY'));
+    await masked.alert(info, 'x.com');
+    expect(masked.lines[0]).not.toContain('APIKEY');
+  });
+
+  it('only 403 alerts_not_allowed is "not enabled" and cached; any other 403 is a failure and is not cached', async () => {
+    const other = setup(() => json({ error: 'suspended' }, 403));
+    await other.alert(info, 'x.com');
+    await other.alert(info, 'x.com');
+    expect(other.calls).toHaveLength(2); // not cached: asked again
+    expect(other.lines).toHaveLength(2);
+    expect(other.lines[0]).not.toMatch(/not enabled/);
+    const noBody = setup(() => new Response('', { status: 403 }));
+    await noBody.alert(info, 'x.com');
+    expect(noBody.lines[0]).not.toMatch(/not enabled/);
+
+    const denied = setup(() => json({ error: 'alerts_not_allowed' }, 403));
+    await denied.alert(info, 'x.com');
+    await denied.alert(info, 'x.com');
+    expect(denied.calls).toHaveLength(1); // cached
+    expect(denied.lines).toHaveLength(1);
+    expect(denied.lines[0]).toMatch(/not enabled/);
+  });
+
   it('defaults: global fetch, console-free stderr log and Date.now; a trailing slash on the base is stripped', async () => {
     const orig = globalThis.fetch;
     const urls: string[] = [];

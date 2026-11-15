@@ -44,7 +44,8 @@ export function createCloudAlerter(o: CloudAlerterOptions): (info: LinkInfo, sit
     if (cache && now() - cache.at < CACHE_MS) return cache.devices;
     const res = await doFetch(`${base}/api/v1/agent/devices`, { headers });
     let list: Device[] = [];
-    if (res.status === 403) log('[unstuck] alerts are not enabled for this API key (turn them on in your unstuck.sh dashboard)');
+    if (res.status === 403 && (await res.json().catch(() => null))?.error === 'alerts_not_allowed')
+      log('[unstuck] alerts are not enabled for this API key (turn them on in your unstuck.sh dashboard)');
     else if (!res.ok) throw new Error(`devices lookup answered ${res.status}`);
     else list = ((await res.json()) as { devices: Device[] }).devices;
     cache = { at: now(), devices: list };
@@ -67,7 +68,7 @@ export function createCloudAlerter(o: CloudAlerterOptions): (info: LinkInfo, sit
       if (!res.ok) throw new Error(`notify answered ${res.status}`);
     } catch (e) {
       // The message can come from fetch internals; the API key and link secret are never part of what we build here.
-      log(`[unstuck] could not send the phone alert: ${(e as Error).message.replaceAll(o.apiKey, '***')}`);
+      log(`[unstuck] could not send the phone alert: ${String((e as Error)?.message ?? e).replaceAll(o.apiKey, '***')}`);
     }
   };
 }
