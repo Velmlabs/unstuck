@@ -30,7 +30,11 @@ export async function drawFrameOnCanvas(canvas: HTMLCanvasElement, frame: Frame,
   } finally {
     s.busy = false;
   }
-  onDrawn?.(frame);
+  try {
+    onDrawn?.(frame);
+  } catch {
+    // A failing report must not leave the newest frame undrawn.
+  }
   const next = s.pending;
   s.pending = null;
   if (next) await drawFrameOnCanvas(canvas, next.frame, next.onDrawn);

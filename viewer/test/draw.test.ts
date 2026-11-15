@@ -72,4 +72,28 @@ describe('drawFrameOnCanvas', () => {
     await drawFrameOnCanvas(canvas, f, drawn);
     expect(drawn).toHaveBeenCalledWith(f);
   });
+
+  it('a report that throws does not stop the newest waiting frame from being drawn', async () => {
+    const drawImage = vi.fn();
+    const canvas = { width: 0, height: 0, getContext: () => ({ drawImage }) } as unknown as HTMLCanvasElement;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    vi.stubGlobal('createImageBitmap', vi.fn(async (b: Blob) => {
+      await gate;
+      return { width: b.size, height: 1, close() {} };
+    }));
+    const drawn: number[] = [];
+    const a = drawFrameOnCanvas(canvas, { width: 1, height: 1, jpeg: new Uint8Array(1), seq: 1 }, () => {
+      throw new Error('socket gone');
+    });
+    void drawFrameOnCanvas(canvas, { width: 1, height: 1, jpeg: new Uint8Array(2), seq: 2 }, (f) => void drawn.push(f.seq!));
+    release();
+    await expect(a).resolves.toBeUndefined();
+    expect(drawImage).toHaveBeenCalledTimes(2);
+    expect(drawn).toEqual([2]);
+    // The canvas isn't stuck busy: a later frame draws at once.
+    await drawFrameOnCanvas(canvas, { width: 1, height: 1, jpeg: new Uint8Array(3), seq: 3 }, (f) => void drawn.push(f.seq!));
+    expect(drawn).toEqual([2, 3]);
+  });
 });
+
