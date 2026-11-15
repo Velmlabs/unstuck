@@ -10,31 +10,9 @@ import {
 import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
 import { UnstuckEngineError } from './errors';
+import { optionEnv, validateOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
 
-export interface TakeoverLink {
-  url: string;
-  reason: string;
-  sessionId: string;
-  expiresAt: number;
-  /** The 6-digit code to give the human, when the takeover requires one. Never part of `url`. */
-  code?: string;
-}
-
-export interface UnstuckOptions {
-  enginePath?: string;
-  host?: string;
-  port?: number;
-  /** Default takeover timeout in seconds (engine default: 600). */
-  timeoutS?: number;
-  /** Called when a human is needed. Default: print the link to stderr. */
-  onLink?: (link: TakeoverLink) => void;
-  /** Relay to use instead of the local server, e.g. wss://relay.example.com (or set UNSTUCK_RELAY_URL). */
-  relay?: string;
-  /** Key for that relay (or UNSTUCK_AGENT_KEY). With only UNSTUCK_API_KEY set, Unstuck Cloud is used. */
-  agentKey?: string;
-  /** Ask the human for a 6-digit code delivered with the link (default false). */
-  requireCode?: boolean;
-}
+export type { TakeoverLink, UnstuckOptions };
 
 // Never prints a 6-digit code: requireCode needs its own onLink, so the code travels apart from the link.
 const defaultOnLink = (l: TakeoverLink) => process.stderr.write(`Unstuck: a human is needed (${l.reason}) → ${l.url}\n`);
@@ -58,7 +36,9 @@ export class Unstuck {
   private readonly pages = new Map<string, AttachedPage>();
   private inFlight = 0;
 
-  constructor(private readonly opts: UnstuckOptions = {}) {}
+  constructor(private readonly opts: UnstuckOptions = {}) {
+    validateOptions(opts);
+  }
 
   /**
    * Pauses your agent until a human finishes. Awaiting this IS the pause: don't drive the page meanwhile.
@@ -66,18 +46,7 @@ export class Unstuck {
    */
   async takeover(
     page: unknown,
-    opts: {
-      reason: string;
-      timeoutS?: number;
-      requireCode?: boolean;
-      /**
-       * The human can only navigate the page within its own site (example.com and its subdomains). List any other
-       * sites the flow needs, e.g. ['accounts.google.com'] for a Google sign-in or a 3-D Secure provider.
-       */
-      allowedSites?: string[];
-      /** With Unstuck Cloud, the link is also sent to your paired phones; false skips that for this takeover (default true). */
-      alerts?: boolean;
-    },
+    opts: TakeoverOptions,
   ): Promise<TakeoverResult> {
     // The engine also asks for a code when UNSTUCK_REQUIRE_CODE=1 (it inherits this environment).
     if ((opts.requireCode ?? this.opts.requireCode ?? process.env.UNSTUCK_REQUIRE_CODE === '1') && !this.opts.onLink)
@@ -175,7 +144,7 @@ export class Unstuck {
   private ensureEngine(): Promise<EngineProcess> {
     if (this.engine) return this.engine;
     const started = (async () => {
-      const engine = await spawnEngine(resolveEnginePath(this.opts), { host: this.opts.host, port: this.opts.port, relay: this.opts.relay, agentKey: this.opts.agentKey });
+      const engine = await spawnEngine(resolveEnginePath(this.opts), { host: this.opts.host, port: this.opts.port, env: { ...process.env, ...optionEnv(this.opts) } });
       engine.peer.handle(Methods.cdpSend, (raw) => {
         const p = raw as CdpSendParams;
         const page = this.pages.get(p.pageId);

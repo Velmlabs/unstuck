@@ -56,13 +56,13 @@ export const HANDSHAKE_TIMEOUT_MS = 15_000;
 
 export async function spawnEngine(
   path: string,
-  opts: { host?: string; port?: number; relay?: string; agentKey?: string; handshakeTimeoutMs?: number },
+  opts: { host?: string; port?: number; env?: Record<string, string | undefined>; handshakeTimeoutMs?: number },
 ): Promise<EngineProcess> {
   const args = ['--stdio'];
   if (opts.host) args.push('--host', opts.host);
   if (opts.port !== undefined) args.push('--port', String(opts.port));
-  // Relay mode is chosen by the engine from its environment (relay spec §5.6).
-  const env = { ...process.env, ...(opts.relay ? { UNSTUCK_RELAY_URL: opts.relay } : {}), ...(opts.agentKey ? { UNSTUCK_AGENT_KEY: opts.agentKey } : {}) };
+  // Relay and cloud mode are chosen by the engine from its environment; undefined values are removed.
+  const env = Object.fromEntries(Object.entries(opts.env ?? process.env).filter(([, v]) => v !== undefined)) as Record<string, string>;
   const child = spawn(path, args, { stdio: ['pipe', 'pipe', 'inherit'], env });
   const peer = createRpcPeer((line) => {
     if (child.stdin.writable) child.stdin.write(line + '\n');

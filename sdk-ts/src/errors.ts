@@ -8,3 +8,11 @@ export class UnstuckEngineError extends Error {
     this.name = 'UnstuckEngineError';
   }
 }
+
+/** The options passed to Unstuck are inconsistent. */
+export class UnstuckConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnstuckConfigError';
+  }
+}

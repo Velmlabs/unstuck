@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { resolveEnginePath, resolveViaEngine, spawnEngine } from '../src/engine-process';
 import { UnstuckEngineError } from '../src/errors';
+import { optionEnv } from '../src/options';
 import { ENGINE, fakeEngine } from './helpers';
 
 describe('resolveEnginePath', () => {
@@ -47,15 +48,30 @@ readline.createInterface({ input: process.stdin }).on('line', (l) => {
     e.kill();
   });
 
-  it('relay settings reach the engine as environment variables (merged over the parent environment)', async () => {
-    const e = await spawnEngine(fakeEngine(`
+  const ECHO_ENV = `
 import readline from 'node:readline';
 readline.createInterface({ input: process.stdin }).on('line', (l) => {
   const m = JSON.parse(l);
-  const v = [process.env.UNSTUCK_RELAY_URL, process.env.UNSTUCK_AGENT_KEY, process.env.PATH ? 'path' : 'nopath'].join('|');
+  const v = [process.env.UNSTUCK_RELAY_URL, process.env.UNSTUCK_AGENT_KEY, process.env.UNSTUCK_API_KEY, process.env.PATH ? 'path' : 'nopath'].join('|');
   process.stdout.write(JSON.stringify({ id: m.id, result: { engineVersion: v, protocolVersion: 1 } }) + '\\n');
-});`), { relay: 'wss://relay.example', agentKey: 'KEY' });
-    expect(e.engineVersion).toBe('wss://relay.example|KEY|path');
+});`;
+
+  it('passes relay/agentKey as before (merged over the parent environment)', async () => {
+    const e = await spawnEngine(fakeEngine(ECHO_ENV), { env: { ...process.env, ...optionEnv({ relay: 'wss://relay.example', agentKey: 'KEY' }) } });
+    expect(e.engineVersion).toBe('wss://relay.example|KEY||path');
+    e.kill();
+  });
+
+  it('apiKey option beats UNSTUCK_RELAY_URL in the environment', async () => {
+    const parent = { ...process.env, UNSTUCK_RELAY_URL: 'wss://from-env', UNSTUCK_AGENT_KEY: 'ENVKEY' };
+    const e = await spawnEngine(fakeEngine(ECHO_ENV), { env: { ...parent, ...optionEnv({ apiKey: 'k' }) } });
+    expect(e.engineVersion).toBe('||k|path');
+    e.kill();
+  });
+
+  it('uses the process environment when no env is given', async () => {
+    const e = await spawnEngine(fakeEngine(ECHO_ENV), {});
+    expect(e.engineVersion).toMatch(/\|path$/);
     e.kill();
   });
 
