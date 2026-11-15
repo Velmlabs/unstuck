@@ -670,3 +670,42 @@ describe('incomplete links and the six-digit code', () => {
   });
 });
 
+
+describe('sealed alert links', () => {
+  const withSearch = (search: string, extra: Partial<AppProps> = {}) =>
+    render(<App location={{ ...loc(), search }} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} {...extra} />);
+
+  it.each(['no_device', 'not_for_this_device'] as const)('shows the paired-phone page for %s and never connects', (alertError) => {
+    render(<App location={{ ...loc(''), search: '?by=k' }} alertError={alertError} connectFn={connectFn} drawFrame={drawFrame} />);
+    expect(screen.getByText('Open this link on the phone you paired')).toBeTruthy();
+    expect(screen.getByText(/In-App Browser/)).toBeTruthy();
+    expect(screen.getByText(/Settings/)).toBeTruthy();
+    expect(connects).toBe(0);
+  });
+
+  it('shows the key and site while waiting (from the sealed payload) and when live', () => {
+    withSearch('?by=crawler-prod', { alert: { reason: 'Solve the CAPTCHA', site: 'news.example.com' } });
+    expect(screen.getByText('From your key crawler-prod · news.example.com')).toBeTruthy();
+    expect(screen.getByText('Solve the CAPTCHA')).toBeTruthy();
+    goLive();
+    expect(screen.getByText('From your key crawler-prod · shop.example')).toBeTruthy();
+  });
+
+  it('shows the key alone when no site is known yet', () => {
+    withSearch('?by=crawler-prod');
+    expect(screen.getByText('From your key crawler-prod')).toBeTruthy();
+  });
+
+  it('shows nothing about a key without ?by=', () => {
+    withSearch('');
+    expect(screen.queryByText(/From your key/)).toBeNull();
+  });
+
+  it('cuts a long key name to 64 characters and shows markup as plain text', () => {
+    const by = '<b>' + 'x'.repeat(100);
+    const { container } = withSearch(`?by=${encodeURIComponent(by)}`);
+    const p = container.querySelector('.from')!;
+    expect(p.textContent).toBe('From your key ' + by.slice(0, 64));
+    expect(container.querySelector('.from b')).toBeNull();
+  });
+});

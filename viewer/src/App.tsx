@@ -14,6 +14,10 @@ export interface AppProps {
   connectFn?: (url: string, token: string, codec: Codec, h: ConnectionHandlers, opts: { resumeKey?: string; alive?: () => Promise<boolean> }) => ViewerSocket;
   drawFrame?: (canvas: HTMLCanvasElement, frame: Frame) => void;
   now?: () => number;
+  /** A sealed link this browser could not open: show the "phone you paired" page and never connect. */
+  alertError?: 'no_device' | 'not_for_this_device';
+  /** What a sealed link said (shown before the relay's own answer arrives). */
+  alert?: { reason: string; site: string };
 }
 
 type Screen =
@@ -26,6 +30,15 @@ const ERROR_SCREENS: Record<Exclude<ViewerErrorCode, 'bad_message' | 'code_requi
   expired: { kind: 'message', title: 'This link has expired', body: 'The takeover window closed before anyone joined.', tone: 'warn' },
   session_closed: { kind: 'message', title: 'This takeover has ended', body: 'You can close this tab.', tone: 'ok' },
 };
+
+const PAIRED_PHONE_SCREEN: Screen = {
+  kind: 'message',
+  title: 'Open this link on the phone you paired',
+  body: 'This link was sealed for your paired phone and can only be opened there. Using Telegram? Its in-app browser has no access to the pairing: in Telegram, go to Settings → Chat Settings, turn off "In-App Browser", then tap the link again.',
+  tone: 'warn',
+};
+
+const MAX_BY = 64;
 
 const INCOMPLETE_SCREEN: Screen = {
   kind: 'message',
@@ -86,13 +99,15 @@ function formatRemaining(ms: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function App({ location, connectFn = defaultConnect, drawFrame = drawFrameOnCanvas, now = Date.now }: AppProps) {
-  const fragment = parseFragment(location.hash);
+export function App({ location, connectFn = defaultConnect, drawFrame = drawFrameOnCanvas, now = Date.now, alertError, alert }: AppProps) {
+  const fragment = alertError ? null : parseFragment(location.hash);
   const link = fragment && 'token' in fragment ? fragment : null;
+  // The key's name comes from the link's query: a label to show as plain text, never markup.
+  const by = new URLSearchParams(location.search ?? '').get('by')?.slice(0, MAX_BY) || null;
   const token = link?.token;
   const sessionId = sessionIdFromPath(location.pathname);
   const [screen, setScreen] = useState<Screen>(
-    token && sessionId ? { kind: 'session' } : fragment && 'error' in fragment ? INCOMPLETE_SCREEN : ERROR_SCREENS.token_invalid,
+    alertError ? PAIRED_PHONE_SCREEN : token && sessionId ? { kind: 'session' } : fragment && 'error' in fragment ? INCOMPLETE_SCREEN : ERROR_SCREENS.token_invalid,
   );
   const [codeAsk, setCodeAsk] = useState<{ invalid: boolean } | null>(null);
   const [code, setCode] = useState('');
@@ -120,6 +135,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const pageSize = useRef({ width: 0, height: 0 });
   const moveQueued = useRef(false);
   const pressed = useRef<'left' | 'middle' | 'right' | null>(null);
+  const site = info?.site || alert?.site || '';
   const live = screen.kind === 'session' && phase === 'live';
   const liveRef = useRef(live);
   liveRef.current = live && !asking;
@@ -422,8 +438,9 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     <div class="app">
       <header class="topbar">
         <div class="topbar-text">
-          <p class="reason">{info?.reason ?? 'Connecting to the agent…'}</p>
-          {info?.site ? <p class="site">{info.site}</p> : null}
+          <p class="reason">{info?.reason ?? alert?.reason ?? 'Connecting to the agent…'}</p>
+          {site ? <p class="site">{site}</p> : null}
+          {by ? <p class="from">{`From your key ${by}${site ? ` · ${site}` : ''}`}</p> : null}
         </div>
         {info ? (
           <span class="countdown" data-testid="countdown" aria-label={`Time left ${remaining}`}>
