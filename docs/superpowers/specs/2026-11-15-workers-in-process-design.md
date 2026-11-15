@@ -33,7 +33,7 @@ so agents built on Workers, the Cloudflare Agents SDK and Browser Rendering can 
 | Page lock: `Fetch.enable` (Document, Request stage) → `Fetch.requestPaused` | ✅ off-site navigation paused and failed (`Aborted`), page stayed; same-site navigation continued |
 | `Page.getFrameTree`, `Network.setBypassServiceWorker` | ✅ |
 | Popups: `page.on('popup')`, `Target.getTargets` | ✅ |
-| A Durable Object keeping a busy browser session for 10 minutes with **no incoming requests** | HOLD_RESULT |
+| A Durable Object keeping a busy browser session for 10 minutes with **no incoming requests** | ✅ 119 of 120 heartbeats (every 5 s) over 10 minutes, finished cleanly, no error, with no request to the object during the run |
 
 Earlier spike (`docs/spikes/cloudflare-browser-rendering.md`): screencast, input, paste, cross-origin CAPTCHA iframes
 all work.
