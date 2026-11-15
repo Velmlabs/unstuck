@@ -116,6 +116,148 @@ describe('attachPage', () => {
     expect(a.url()).toBe('');
   });
 
+  describe('a dropped browser connection (page close never fires)', () => {
+    /** A minimal event emitter like Puppeteer's: listeners keyed by string or symbol, with `emit`. */
+    function emitter() {
+      const map = new Map<string | symbol, Set<(p?: unknown) => void>>();
+      return {
+        map,
+        on(e: string | symbol, cb: (p?: unknown) => void) {
+          (map.get(e) ?? map.set(e, new Set()).get(e)!).add(cb);
+          return this;
+        },
+        off(e: string | symbol, cb: (p?: unknown) => void) {
+          map.get(e)?.delete(cb);
+          return this;
+        },
+        emit(e: string | symbol, p?: unknown) {
+          for (const cb of [...(map.get(e) ?? [])]) cb(p);
+          return true;
+        },
+        count() {
+          let n = 0;
+          for (const s of map.values()) n += s.size;
+          return n;
+        },
+      };
+    }
+    function puppeteerPage() {
+      const session = Object.assign(emitter(), { send: vi.fn(async () => ({})), detach: vi.fn(async () => {}) });
+      const browser = emitter();
+      const page = Object.assign(emitter(), { createCDPSession: async () => session, browser: () => browser, url: () => 'https://x.test/' });
+      return { page, session, browser };
+    }
+
+    it('Puppeteer: the session emits the Disconnected symbol (current Puppeteer, @cloudflare/puppeteer)', async () => {
+      const { page, session } = puppeteerPage();
+      const a = await attachPage(page);
+      const closed = vi.fn();
+      a.onClose(closed);
+      // A symbol of its own, like Puppeteer's CDPSessionEvent.Disconnected (never imported here).
+      session.emit(Symbol('CDPSession.Disconnected'));
+      expect(closed).toHaveBeenCalledWith('browser disconnected');
+      session.emit(Symbol('CDPSession.Other'));
+      expect(closed).toHaveBeenCalledTimes(1);
+      await a.detach();
+    });
+
+    it('Puppeteer: the session emits the string event (older Puppeteer)', async () => {
+      for (const event of ['CDPSession.Disconnected', 'Disconnected']) {
+        const { page, session } = puppeteerPage();
+        const a = await attachPage(page);
+        const closed = vi.fn();
+        a.onClose(closed);
+        session.emit(event);
+        expect(closed, event).toHaveBeenCalledWith('browser disconnected');
+        await a.detach();
+      }
+    });
+
+    it("Puppeteer: the browser emits 'disconnected'", async () => {
+      const { page, browser } = puppeteerPage();
+      const a = await attachPage(page);
+      const closed = vi.fn();
+      a.onClose(closed);
+      browser.emit('disconnected');
+      expect(closed).toHaveBeenCalledWith('browser disconnected');
+      page.emit('close');
+      expect(closed).toHaveBeenCalledTimes(1);
+      await a.detach();
+    });
+
+    it("Playwright: the context's browser emits 'disconnected'", async () => {
+      const session = Object.assign(emitter(), { send: vi.fn(async () => ({})), detach: vi.fn(async () => {}) });
+      const browser = emitter();
+      const context = { newCDPSession: async () => session, browser: () => browser };
+      const page = Object.assign(emitter(), { context: () => context, url: () => 'https://x.test/' });
+      const a = await attachPage(page);
+      const closed = vi.fn();
+      a.onClose(closed);
+      browser.emit('disconnected');
+      expect(closed).toHaveBeenCalledWith('browser disconnected');
+      await a.detach();
+      expect(browser.count()).toBe(0);
+    });
+
+    it('a Playwright context without a browser (persistent context) still attaches', async () => {
+      const session = Object.assign(emitter(), { send: vi.fn(async () => ({})), detach: vi.fn(async () => {}) });
+      const page = Object.assign(emitter(), { context: () => ({ newCDPSession: async () => session, browser: () => null }) });
+      const a = await attachPage(page);
+      await expect(a.detach()).resolves.toBeUndefined();
+    });
+
+    it('detach removes every listener and restores the session', async () => {
+      const { page, session, browser } = puppeteerPage();
+      const emit = session.emit;
+      const a = await attachPage(page);
+      expect(session.count() + browser.count() + page.count()).toBeGreaterThan(0);
+      const closed = vi.fn();
+      a.onClose(closed);
+      await a.detach();
+      expect(session.count()).toBe(0);
+      expect(browser.count()).toBe(0);
+      expect(page.count()).toBe(0);
+      expect(session.emit).toBe(emit);
+      expect(Object.prototype.hasOwnProperty.call(session, 'emit')).toBe(true);
+      session.emit(Symbol('CDPSession.Disconnected'));
+      browser.emit('disconnected');
+      expect(closed).not.toHaveBeenCalled();
+    });
+
+    it("detach leaves an emit wrapped after ours (another library's) in place", async () => {
+      const { page, session } = puppeteerPage();
+      const a = await attachPage(page);
+      const theirs = vi.fn();
+      session.emit = theirs;
+      await a.detach();
+      expect(session.emit).toBe(theirs);
+    });
+
+    it('an emitter with removeListener instead of off is cleaned up too; an inherited emit is restored by removing ours', async () => {
+      class Session {
+        listeners = new Map<string | symbol, (p?: unknown) => void>();
+        on(e: string | symbol, cb: (p?: unknown) => void) {
+          this.listeners.set(e, cb);
+        }
+        removeListener(e: string | symbol) {
+          this.listeners.delete(e);
+        }
+        emit(e: string | symbol) {
+          this.listeners.get(e)?.();
+        }
+        send = vi.fn(async () => ({}));
+        detach = vi.fn(async () => {});
+      }
+      const session = new Session();
+      const page = { createCDPSession: async () => session, on: () => {} };
+      const a = await attachPage(page);
+      expect(Object.prototype.hasOwnProperty.call(session, 'emit')).toBe(true);
+      await a.detach();
+      expect(session.listeners.size).toBe(0);
+      expect(Object.prototype.hasOwnProperty.call(session, 'emit')).toBe(false);
+    });
+  });
+
   it('rejects objects that are not pages', async () => {
     await expect(attachPage({})).rejects.toThrow(new TypeError('Unsupported page object: pass a Playwright or Puppeteer Page'));
     await expect(attachPage(null)).rejects.toThrow(TypeError);
