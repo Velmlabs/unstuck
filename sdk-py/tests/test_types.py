@@ -27,4 +27,4 @@ def test_errors_and_versions():
     assert str(e) == "boom" and e.engine_path == "/x"
     assert UnstuckEngineError("b").engine_path is None
     assert str(PageClosedError()) == "page closed"
-    assert PROTOCOL_VERSION == 1 and __version__ == "0.1.6"
+    assert PROTOCOL_VERSION == 1 and __version__ == "0.1.7"
