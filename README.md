@@ -141,11 +141,11 @@ Full docs: **https://unstuck.sh/docs**
 Everything that makes a takeover work is open source, the relay included. Run it on your own server and links open on any phone with no Unstuck account:
 
 ```bash
-git clone https://github.com/velmlabs/unstuck.git && cd unstuck
-docker build -f relay-node/Dockerfile -t unstuck-relay .
 KEY=$(openssl rand -hex 24) && echo "agent key: $KEY"   # keep it: your agents need it
-docker run -d -p 127.0.0.1:8787:8787 -e UNSTUCK_AGENT_KEYS="$KEY" unstuck-relay
+docker run -d -p 127.0.0.1:8787:8787 -e UNSTUCK_AGENT_KEYS="$KEY" ghcr.io/velmlabs/unstuck-relay:latest
 ```
+
+The image (`linux/amd64` and `linux/arm64`) is built from this repository by GitHub Actions, with signed provenance: `gh attestation verify oci://ghcr.io/velmlabs/unstuck-relay:latest --owner velmlabs`. To build it yourself: `docker build -f relay-node/Dockerfile -t unstuck-relay .`
 
 Put it behind HTTPS (phones only decrypt the screen on `https://` pages; with Caddy it's `reverse_proxy 127.0.0.1:8787`), then point agents at it:
 

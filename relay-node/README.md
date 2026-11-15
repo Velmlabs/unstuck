@@ -5,9 +5,10 @@ Self-hosted Unstuck relay for Node and Docker (AGPL-3.0). Your agents and the hu
 ## Run with Docker
 
 ```bash
-docker build -f relay-node/Dockerfile -t unstuck-relay .
-docker run -p 8787:8787 -e UNSTUCK_AGENT_KEYS=change-me unstuck-relay
+docker run -p 8787:8787 -e UNSTUCK_AGENT_KEYS=change-me ghcr.io/velmlabs/unstuck-relay:latest
 ```
+
+`ghcr.io/velmlabs/unstuck-relay` is published for `linux/amd64` and `linux/arm64` on every release, tagged with its version and `latest`, with signed build provenance (`gh attestation verify oci://ghcr.io/velmlabs/unstuck-relay:latest --owner velmlabs`). To build it yourself, from the repository root: `docker build -f relay-node/Dockerfile -t unstuck-relay .`
 
 Put it behind HTTPS (any reverse proxy; with Caddy, `reverse_proxy 127.0.0.1:8787`). HTTPS is required: phones only allow the Web Crypto API that decrypts the screen on `https://` pages. Then point agents at it:
 
