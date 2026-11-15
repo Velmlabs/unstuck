@@ -21,7 +21,10 @@ describe('buildTransport', () => {
     let err = '';
     const { transport, description } = buildTransport({}, { UNSTUCK_API_KEY: 'uk_live_bad', UNSTUCK_CLOUD_URL: `ws://127.0.0.1:${port}` }, { write: (s: string) => (err += s) })!;
     expect(description).toBe(`relay ws://127.0.0.1:${port}`);
+    expect(description).not.toContain('uk_live_bad');
+    const t0 = Date.now();
     const r = await createEngine({ transport }).takeover(new FakeCdp(), { reason: 'x', timeoutS: 600 });
+    expect(Date.now() - t0).toBeLessThan(5000);
     expect(r).toMatchObject({ status: 'failed', detail: 'relay_unauthorized' });
     expect(err).toBe('[unstuck] unstuck.sh rejected the API key: check the key in your dashboard\n');
     expect(err).not.toContain('uk_live_bad');

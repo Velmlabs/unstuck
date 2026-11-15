@@ -56,7 +56,6 @@ describe('cloudAlertsFor', () => {
   });
 });
 
-
 describe('buildRelayTransport', () => {
   beforeEach(() => {
     FakeWs.all = [];
@@ -64,14 +63,14 @@ describe('buildRelayTransport', () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  const refuse = async (source: 'UNSTUCK_API_KEY' | 'UNSTUCK_RELAY_URL', warn: (l: string) => void) => {
+  const refuse = async (source: 'UNSTUCK_API_KEY' | 'UNSTUCK_RELAY_URL', warn: (l: string) => void, code = 4401, detail = 'relay_unauthorized') => {
     const t = buildRelayTransport({ kind: 'relay', url: 'ws://127.0.0.1:1', agentKey: 'sk_secret', source }, { env: {}, version: '0.2.0', warn });
     const p = t.publish('SESSION_0123456789ab', { expiresAt: 1 });
-    const rejected = expect(p).rejects.toMatchObject({ detail: 'relay_unauthorized' });
+    const rejected = expect(p).rejects.toMatchObject({ detail });
     await until(() => FakeWs.all.length > 0);
     FakeWs.all[0]!.readyState = 1;
     FakeWs.all[0]!.onopen?.();
-    FakeWs.all[0]!.close(4401);
+    FakeWs.all[0]!.close(code);
     await rejected;
   };
 
@@ -81,6 +80,12 @@ describe('buildRelayTransport', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('[unstuck] unstuck.sh rejected the API key: check the key in your dashboard');
     expect(warn.mock.calls.flat().join()).not.toContain('sk_secret');
+  });
+
+  it('does not warn for a Cloud key refused for another reason', async () => {
+    const warn = vi.fn();
+    await refuse('UNSTUCK_API_KEY', warn, 4429, 'relay_rate_limited');
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it('does not warn for a self-hosted relay key', async () => {
@@ -112,5 +117,4 @@ describe('viewerUrlFor', () => {
     expect(viewerUrlFor({ kind: 'relay', url: 'wss://own.example', source: 'UNSTUCK_RELAY_URL' }, { UNSTUCK_VIEWER_URL: 'http://evil.example' }, '9.8.7')).toBeUndefined(); // https only
     expect(viewerUrlFor({ kind: 'relay', url: 'ws://127.0.0.1:1', source: 'flag' }, { UNSTUCK_VIEWER_URL: 'http://127.0.0.1:5000/v/x' }, '9.8.7')).toBe('http://127.0.0.1:5000/v/x'); // or http on this machine
   });
-
 });
