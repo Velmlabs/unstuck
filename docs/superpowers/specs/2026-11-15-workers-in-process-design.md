@@ -86,9 +86,32 @@ These live in `engine/` today but are web-standard; they move to `core/src/cloud
 6. Results identical to binary mode (`resolved` / `cancelled` / `timed_out` / `failed`, `durationS`, `detail`).
 7. `close()`: closes the engine and relay sockets.
 
+### Options (decided after the builder check)
+
+One shared `UnstuckOptions` type for both entries; precedence is option → environment variable → default.
+
+| Option | Meaning | Node binary mode | Edge (Worker) |
+|---|---|---|---|
+| `apiKey` | Unstuck Cloud API key: Cloud relay, hosted viewer pinned to the SDK version, phone alerts | Passed to the engine as `UNSTUCK_API_KEY` (env still works) | Required for Cloud |
+| `cloudRelay`, `cloudApi` | Overrides for Cloud's relay and API origins (staging); only with `apiKey` | Passed as `UNSTUCK_CLOUD_URL` / `UNSTUCK_CLOUD_API` | Options only |
+| `viewerUrl` | Viewer origin override (https, or http on localhost) | Passed as `UNSTUCK_VIEWER_URL` | Options only |
+| `relay` + `agentKey` | Self-hosted relay (no alerts, the relay serves the viewer) | As today | Options only |
+| `enginePath`, `host`, `port` | Binary mode only | As today | Ignored (documented as Node-only in their JSDoc) |
+| `mode` | `'binary'` (Node default) or `'in-process'` (edge default; opt-in on Node) | Selects | Always in-process |
+
+- `apiKey` and `relay` together → `UnstuckConfigError` (ambiguous: the Cloud key must never be sent to an unexpected
+  relay). `cloudRelay`/`cloudApi` without `apiKey` → `UnstuckConfigError`.
+- On Node, `mode: 'in-process'` reads `process.env` as a fallback, exactly like binary mode; in a Worker there is no
+  environment, so options only.
+- Node binary mode needs no engine changes: the new options become the environment variables the engine already reads
+  (the same way `relay`/`agentKey` work today).
+
 ### Timers and lifetime
 
-The engine uses `setTimeout`/`setInterval`, the global `WebSocket` and Web Crypto: all available in Workers. The
+The engine uses `setTimeout`/`setInterval`, the global `WebSocket` and Web Crypto: all available in Workers. Browser Rendering closes a browser after at most 10 minutes **without activity** (`keep_alive`), and before
+a person opens the link nothing touches the page. So the edge entry **pings the page every 60 s** (`Runtime.evaluate`
+of a constant) for the whole takeover, which keeps takeovers up to the engine's maximum (1 hour) alive. Docs still
+recommend `keep_alive: 600000` on `puppeteer.launch`. The
 takeover holds an outbound WebSocket to the relay and the CDP connection to the browser. In a Durable Object this keeps
 the object alive (spike). Docs recommend: run takeovers from a Durable Object or an Agents SDK agent; `keep_alive` on
 Browser Rendering sessions longer than the takeover timeout.
