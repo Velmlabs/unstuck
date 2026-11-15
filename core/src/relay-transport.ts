@@ -89,7 +89,9 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
     send(d) {
       if (!conn.closed && ws.readyState === 1) ws.send(encodeEnvelope(c, typeof d === 'string' ? enc.encode(d) : d));
     },
-    // Workers' client WebSocket has no bufferedAmount: undefined would make every backpressure check fail (NaN < mark).
+    // Workers' client WebSocket has no bufferedAmount. Reporting 0 for it disables backpressure on the engine-to-relay hop
+    // for such sockets: frames are always sent rather than coalesced. The alternative, undefined, turns into NaN in the
+    // sealed layer, and `NaN < mark` is never true, so the screencast would never send a frame at all.
     get bufferedAmount() {
       return ws.bufferedAmount ?? 0;
     },

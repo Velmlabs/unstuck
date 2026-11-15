@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { decodeEnvelope, encodeEnvelope } from '@velmlabs/unstuck-protocol';
+import { decodeEnvelope, encodeEnvelope, importE2eKey, newE2eKey, openMsg } from '@velmlabs/unstuck-protocol';
 import { createRelayTransport, RelayError } from '../src/relay-transport';
 import { createEngine, type LinkInfo } from '../src/engine';
 import { FakeCdp } from '../src/testing';
+import { sealConnection } from '../src/session/sealed';
+import { createLatestSender } from '../src/stream/latest';
 import type { ViewerConnection } from '../src/transport';
 
 class FakeWs {
@@ -133,6 +135,25 @@ describe('createRelayTransport', () => {
     t.onConnection(ID, (c) => conns.push(c));
     ws.text({ t: 'open', c: 3 });
     expect(conns[0]!.bufferedAmount).toBe(0);
+  });
+
+  it('frames flow through sealConnection and createLatestSender on a socket without bufferedAmount (no NaN stall)', async () => {
+    const { t, ws } = await published();
+    (ws as { bufferedAmount?: number }).bufferedAmount = undefined;
+    const conns: ViewerConnection[] = [];
+    t.onConnection(ID, (c) => conns.push(c));
+    ws.text({ t: 'open', c: 3 });
+    const key = await importE2eKey(newE2eKey());
+    const sealed = sealConnection(conns[0]!, key, ID);
+    const frames = createLatestSender(sealed);
+    frames.push(new Uint8Array([1, 2, 3]));
+    frames.push(new Uint8Array([4, 5]));
+    const envelopes = () => ws.sent.filter((d): d is Uint8Array => d instanceof Uint8Array).map((d) => decodeEnvelope(d)!);
+    await until(() => envelopes().length === 3); // challenge + both frames
+    const challenge = await openMsg(key, ID, 'e2v', '', envelopes()[0]!.payload);
+    const n = JSON.parse(new TextDecoder().decode(challenge!.plain)).n as string;
+    const last = await openMsg(key, ID, 'e2v', n, envelopes()[2]!.payload);
+    expect(last!.plain).toEqual(new Uint8Array([4, 5]));
   });
 
   it('binary messages delivered as Blob (Workers client sockets) are handled, in order with text', async () => {
