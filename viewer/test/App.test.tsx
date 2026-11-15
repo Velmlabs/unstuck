@@ -572,6 +572,34 @@ describe('incomplete links and the six-digit code', () => {
       expect(document.activeElement).toBe(bridge);
     });
 
+    it('the outline and the typing box follow the mirror when its area changes size (Android resizes the page as the keyboard hides)', () => {
+      const observers: ((entries: unknown[]) => void)[] = [];
+      vi.stubGlobal('ResizeObserver', class {
+        constructor(cb: (entries: unknown[]) => void) {
+          observers.push(cb);
+        }
+        observe() {}
+        disconnect() {}
+      });
+      try {
+        const { canvas, bridge } = live();
+        tap(canvas, 150, 170);
+        act(() => handlers.onFocus?.('otp', otp));
+        expect(boxOf(ring()!)).toEqual(['100px', '150px', '200px', '40px']);
+        // The keyboard hides: the page grows and the mirror is centred 58 px lower in its area.
+        canvas.getBoundingClientRect = () => ({ left: 0, top: 58, width: 640, height: 360, right: 640, bottom: 418, x: 0, y: 58, toJSON: () => ({}) });
+        act(() => observers.forEach((cb) => cb([])));
+        expect(boxOf(ring()!)).toEqual(['100px', '208px', '200px', '40px']);
+        expect(boxOf(bridge)!.slice(0, 2)).toEqual(['100px', '208px']);
+        // The same after a window resize, for browsers without ResizeObserver callbacks on that change.
+        canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0, toJSON: () => ({}) });
+        act(() => void window.dispatchEvent(new Event('resize')));
+        expect(boxOf(ring()!)).toEqual(['100px', '150px', '200px', '40px']);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    });
+
     it('no outline once the keyboard closes; the Keyboard button shows one only when the page reports a field', () => {
       const { canvas, bridge } = live();
       tap(canvas, 150, 170);

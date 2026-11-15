@@ -148,6 +148,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const [chip, setChip] = useState<FieldKind | null>(null);
   /** The green outline around the field being typed into (Unstuck's own layer, never the page). */
   const [ring, setRing] = useState<Box | null>(null);
+  /** The field the outline and typing box sit over, so they can be placed again when the mirror's area resizes. */
+  const ringField = useRef<Field | null>(null);
   const sockRef = useRef<ViewerSocket | null>(null);
   const pageSize = useRef({ width: 0, height: 0 });
   const moveQueued = useRef(false);
@@ -288,6 +290,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
     el.focus({ preventScroll: true }); // inside the tap's own handler, or iOS won't open the keyboard
     setChip(null);
+    ringField.current = field;
     setRing(field ? ringOver(field) : null);
     relift(); // the keyboard may already be open (another field was being typed into)
   };
@@ -307,6 +310,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const box = boxOver(field);
     Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
     bridgeBoxRef.current = box;
+    ringField.current = field;
     setRing(ringOver(field));
     relift();
   };
@@ -426,12 +430,30 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const detach = attachBridge(el, form, { send, kind: () => bridgeKind.current });
     const unlift = () => {
       if (stageRef.current) stageRef.current.style.transform = '';
+      ringField.current = null;
       setRing(null);
     };
     el.addEventListener('blur', unlift);
     return () => {
       detach();
       el.removeEventListener('blur', unlift);
+    };
+  }, [screen.kind]);
+
+  // The mirror's area can change size while a field is outlined (Android resizes the page as the keyboard opens and
+  // hides, a phone rotates): place the outline and the typing box over the field again.
+  useEffect(() => {
+    const reposition = () => {
+      const field = ringField.current;
+      if (field && canvasRef.current && stageRef.current) placeOver(field);
+    };
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(reposition) : null;
+    if (canvasRef.current) observer?.observe(canvasRef.current);
+    if (stageRef.current) observer?.observe(stageRef.current);
+    window.addEventListener('resize', reposition);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', reposition);
     };
   }, [screen.kind]);
 
