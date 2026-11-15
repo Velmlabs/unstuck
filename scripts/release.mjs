@@ -46,6 +46,8 @@ if (!host) throw new Error(`the dry run needs to run a takeover; ${process.platf
 step('versions');
 for (const { dir } of TS) if (JSON.parse(fs.readFileSync(path.join(root, dir, 'package.json'), 'utf8')).version !== VERSION) throw new Error(`${dir} is not ${VERSION}`);
 if (!fs.readFileSync(path.join(root, 'sdk-py/pyproject.toml'), 'utf8').includes(`version = "${VERSION}"`)) throw new Error(`sdk-py is not ${VERSION}`);
+// The relay's Docker image (ghcr.io/velmlabs/unstuck-relay) is tagged with relay-node's version: keep it the release's.
+if (JSON.parse(fs.readFileSync(path.join(root, 'relay-node/package.json'), 'utf8')).version !== VERSION) throw new Error(`relay-node is not ${VERSION}`);
 console.log(`all ${VERSION}`);
 
 // ── 2. Build ─────────────────────────────────────────────────────────────────────────────────────────────────────────

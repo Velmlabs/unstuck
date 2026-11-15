@@ -8,6 +8,10 @@ const json = (p) => JSON.parse(read(p));
 const dockerfile = read('relay-node/Dockerfile');
 
 describe('relay Docker image', () => {
+  it('is tagged with the release version (the image workflow reads relay-node/package.json)', () => {
+    expect(json('relay-node/package.json').version).toBe(json('sdk-ts/package.json').version);
+  });
+
   it('copies every workspace package the relay and the viewer depend on (dev ones too: pnpm resolves them)', () => {
     const wanted = new Set();
     for (const pkg of ['relay-node', 'viewer', 'relay-core', 'protocol', 'core']) {
