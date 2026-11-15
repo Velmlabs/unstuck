@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { optionEnv, validateOptions } from '../src/options';
+import { describe, it, expect, vi } from 'vitest';
+import { callUserOnLink, optionEnv, validateOptions } from '../src/options';
 import { UnstuckConfigError } from '../src/errors';
 import { Unstuck } from '../src/unstuck';
 
@@ -70,4 +70,35 @@ describe('optionEnv', () => {
     }));
   it('maps relay and agentKey', () => expect(optionEnv({ relay: 'wss://r', agentKey: 'a' })).toEqual({ UNSTUCK_RELAY_URL: 'wss://r', UNSTUCK_AGENT_KEY: 'a' }));
   it('adds no key for unset options', () => expect(optionEnv({})).toEqual({}));
+});
+
+describe('callUserOnLink', () => {
+  const link = { url: 'https://view.example/s/abc?r=x#t=TOKEN123&k=KEY4567&x=extra', reason: 'r', sessionId: 'abc', expiresAt: 0 };
+  const lines = () => {
+    const out: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((l: unknown) => void out.push(String(l)));
+    return out;
+  };
+  it('redacts the link, the fragment and each fragment value, also when quoted alone', () => {
+    const out = lines();
+    callUserOnLink(() => {
+      throw new Error(`a ${link.url} b t=TOKEN123&k=KEY4567&x=extra c TOKEN123 d KEY4567 e extra`);
+    }, link);
+    expect(out).toEqual(['Unstuck: your onLink handler threw (a <link> b <link secret> c <link secret> d <link secret> e <link secret>); the takeover goes on (session abc)']);
+    vi.restoreAllMocks();
+  });
+  it('a link with no fragment: only the URL is replaced', () => {
+    const out = lines();
+    callUserOnLink(() => {
+      throw new Error('bad http://127.0.0.1:1/s/x');
+    }, { ...link, url: 'http://127.0.0.1:1/s/x' });
+    expect(out[0]).toBe('Unstuck: your onLink handler threw (bad <link>); the takeover goes on (session abc)');
+    vi.restoreAllMocks();
+  });
+  it('a handler that returns a non-promise value is fine', () => {
+    const out = lines();
+    callUserOnLink(() => 42 as unknown as void, link);
+    expect(out).toEqual([]);
+    vi.restoreAllMocks();
+  });
 });

@@ -48,7 +48,7 @@ Phone alerts (below) work in both modes.
 | `mode` | `'binary'` or `'in-process'`. See Runtimes. `'binary'` on the in-process entry (Workers) throws `UnstuckConfigError` |
 | `timeoutS` | Default takeover timeout in seconds (default 600) |
 | `requireCode` | Ask the person for a 6-digit code. It needs an `onLink` that sends the code by another channel than the link |
-| `onLink` | Called with `{ url, reason, sessionId, expiresAt, code? }` when a person is needed. Default: see below. A handler that throws is logged (without the link) and the takeover goes on |
+| `onLink` | Called with `{ url, reason, sessionId, expiresAt, code? }` when a person is needed. Default: see below. A handler that throws (or an async one that rejects) is logged without the link, and the takeover goes on |
 | `enginePath`, `host`, `port` | Node binary mode only: the engine binary, and the host and port of its local server |
 
 `takeover(page, options)` takes `reason` (required), `timeoutS`, `requireCode`, `allowedSites` and `alerts`.
@@ -77,8 +77,9 @@ With Unstuck Cloud, the link is also sent to your paired phones. The link is sea
 | `cancelled` | `engine_closed` | You called `close()` while the takeover ran |
 | `timed_out` | | Nobody finished in `timeoutS` |
 | `failed` | `page_closed` | The page closed, or the browser connection dropped (Browser Rendering ended the session) |
-| `failed` | `alert_failed` | `alerts: 'required'` and no paired phone got the link |
+| `failed` | `alert_failed` | `alerts: 'required'` and Unstuck Cloud couldn't accept the link for at least one paired phone |
 | `failed` | `relay_unauthorized` | The relay refused your key. Check `apiKey`, or `relay` and `agentKey` |
+| `failed` | `internal_error: …` | An unexpected engine error; please report it |
 
 Other relay refusals use the details `relay_quota_exceeded`, `relay_rate_limited` and `relay_unreachable`.
 

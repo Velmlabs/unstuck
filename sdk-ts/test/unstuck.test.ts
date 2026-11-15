@@ -89,6 +89,24 @@ describe('Unstuck', () => {
     await page.close();
   });
 
+  it('an async onLink that rejects is logged without the link (no unhandled rejection) and the takeover goes on', async () => {
+    const page = await browser.newPage();
+    await page.setContent('<p>hello</p>');
+    const lines: string[] = [];
+    const error = vi.spyOn(console, 'error').mockImplementation((l: unknown) => void lines.push(String(l)));
+    const unstuck = new Unstuck({
+      enginePath: ENGINE,
+      onLink: async (l) => {
+        throw new Error(`key ${new URLSearchParams(l.url.split('#')[1]).get('k')}`);
+      },
+    });
+    await expect(unstuck.takeover(page, { reason: 'x', timeoutS: 1 })).resolves.toMatchObject({ status: 'timed_out' });
+    expect(lines).toEqual([expect.stringMatching(/^Unstuck: your onLink handler threw \(key <link secret>\); the takeover goes on \(session [A-Za-z0-9_-]+\)$/)]);
+    error.mockRestore();
+    await unstuck.close();
+    await page.close();
+  });
+
   it('allowedSites reaches the engine: the page stays put on an off-site link but may go to a listed site', async () => {
     const page = await browser.newPage();
     await page.goto('data:text/html,<p>x</p>').catch(() => {});

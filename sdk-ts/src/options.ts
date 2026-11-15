@@ -39,8 +39,8 @@ export interface UnstuckOptions {
   /**
    * Called when a human is needed. Default: binary mode prints the link to stderr. In-process mode uses console.log: with
    * Unstuck Cloud phone alerts on, it waits for the alert and logs the link only if no paired phone got it (otherwise one
-   * line without the link); with a self-hosted relay or `alerts: false` it logs the link. A handler that throws is
-   * logged (without the link) and the takeover goes on.
+   * line without the link); with a self-hosted relay or `alerts: false` it logs the link. A handler that throws (or
+   * returns a promise that rejects) is logged without the link, and the takeover goes on.
    */
   onLink?: (link: TakeoverLink) => void;
   /** Relay to use instead of the local server, e.g. wss://relay.example.com (or set UNSTUCK_RELAY_URL); ws:// only to localhost. */
@@ -105,14 +105,28 @@ export function optionEnv(o: UnstuckOptions): Record<string, string | undefined>
   return env;
 }
 
-/** A user link handler that throws must not stop the takeover: one line, without the link (its message may quote it). */
-export function callUserOnLink(onLink: (l: TakeoverLink) => void, l: TakeoverLink): void {
+/** `text` with the link, its fragment and each fragment value (the token, the key, ...) replaced, longest first. */
+function redactLink(text: string, url: string): string {
+  const hash = url.indexOf('#');
+  const fragment = hash < 0 ? '' : url.slice(hash + 1);
+  const values = [...new URLSearchParams(fragment).values()].filter(Boolean).sort((a, b) => b.length - a.length);
+  let out = text.replaceAll(url, '<link>');
+  if (fragment) out = out.replaceAll(fragment, '<link secret>');
+  for (const v of values) out = out.replaceAll(v, '<link secret>');
+  return out;
+}
+
+/**
+ * A user link handler that throws, or returns a promise that rejects, must not stop the takeover (nor crash Node with an
+ * unhandled rejection): one line, without the link (its message may quote it).
+ */
+export function callUserOnLink(onLink: (l: TakeoverLink) => unknown, l: TakeoverLink): void {
+  const report = (e: unknown) =>
+    console.error(`Unstuck: your onLink handler threw (${redactLink(String((e as Error)?.message ?? e), l.url)}); the takeover goes on (session ${l.sessionId})`);
   try {
-    onLink(l);
+    const returned = onLink(l);
+    if (typeof (returned as PromiseLike<unknown> | undefined)?.then === 'function') (returned as PromiseLike<unknown>).then(undefined, report);
   } catch (e) {
-    const secret = l.url.slice(l.url.indexOf('#') + 1);
-    let msg = String((e as Error)?.message ?? e).replaceAll(l.url, '<link>');
-    if (secret) msg = msg.replaceAll(secret, '<link secret>');
-    console.error(`Unstuck: your onLink handler threw (${msg}); the takeover goes on (session ${l.sessionId})`);
+    report(e);
   }
 }

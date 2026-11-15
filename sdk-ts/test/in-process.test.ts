@@ -562,6 +562,27 @@ describe('link handlers and the phone alert', () => {
     await u.close();
   });
 
+  it('an async onLink that rejects: one redacted console.error line, no unhandled rejection, the takeover goes on', async () => {
+    const l = logs();
+    let url = '';
+    const u = new InProcessUnstuck(
+      {
+        relay: 'wss://own.example',
+        onLink: async (link) => {
+          url = link.url;
+          throw new Error(`webhook refused token ${new URLSearchParams(link.url.split('#')[1]).get('t')}`);
+        },
+      },
+      {},
+    );
+    const r = track(u.takeover(new FakePage(), { reason: 'x' }));
+    await settle();
+    expect(l.err).toEqual([expect.stringMatching(/^Unstuck: your onLink handler threw \(webhook refused token <link secret>\); the takeover goes on \(session [A-Za-z0-9_-]+\)$/)]);
+    expect(r.result).toBeUndefined();
+    await join(lastTransport(), url);
+    await u.close();
+  });
+
   it('default handler, alert delivered: one line naming the phones and the session, never the link', async () => {
     const l = logs();
     const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', fetch: cloud(async () => Response.json({ devices: [await phone()] })) }, {});
