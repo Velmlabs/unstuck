@@ -46,3 +46,11 @@ export function buildTransport(
     });
   return { transport: relay, description: `relay ${choice.url}` };
 }
+
+export const CLOUD_API_URL = 'https://unstuck.sh';
+
+/** Where to send phone alerts: only for Unstuck Cloud via UNSTUCK_API_KEY, not for self-hosted relays or embedded mode. */
+export function cloudAlertsFor(choice: TransportChoice, env: Record<string, string | undefined>): { apiBase: string; apiKey: string } | null {
+  if (choice.kind !== 'relay' || choice.source !== 'UNSTUCK_API_KEY' || !choice.agentKey) return null;
+  return { apiBase: (env.UNSTUCK_CLOUD_API || CLOUD_API_URL).replace(/\/+$/, ''), apiKey: choice.agentKey };
+}

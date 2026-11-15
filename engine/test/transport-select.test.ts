@@ -3,7 +3,7 @@ import { WebSocketServer } from 'ws';
 import type { AddressInfo } from 'node:net';
 import { createEngine } from '@velmlabs/unstuck-core';
 import { FakeCdp } from '@velmlabs/unstuck-core/testing';
-import { buildTransport, selectTransport, viewerUrlFor } from '../src/transport-select';
+import { buildTransport, cloudAlertsFor, selectTransport, viewerUrlFor } from '../src/transport-select';
 
 describe('selectTransport', () => {
   it('flags beat UNSTUCK_RELAY_URL, which beats UNSTUCK_API_KEY, which beats embedded', () => {
@@ -14,6 +14,19 @@ describe('selectTransport', () => {
     expect(selectTransport({}, { UNSTUCK_API_KEY: 'uk_live_x', UNSTUCK_CLOUD_URL: 'wss://staging.example' })).toMatchObject({ url: 'wss://staging.example' });
     expect(selectTransport({}, {})).toEqual({ kind: 'embedded' });
     expect(selectTransport({}, { UNSTUCK_RELAY_URL: 'wss://open.example' })).toEqual({ kind: 'relay', url: 'wss://open.example', agentKey: undefined, source: 'UNSTUCK_RELAY_URL' });
+  });
+});
+
+describe('cloudAlertsFor', () => {
+  it('only an UNSTUCK_API_KEY relay gets alerts; the API base defaults to unstuck.sh and UNSTUCK_CLOUD_API overrides it', () => {
+    const env = { UNSTUCK_API_KEY: 'uk_live_x' };
+    expect(cloudAlertsFor(selectTransport({}, env), env)).toEqual({ apiBase: 'https://unstuck.sh', apiKey: 'uk_live_x' });
+    const own = { ...env, UNSTUCK_CLOUD_API: 'https://staging.unstuck.sh/' };
+    expect(cloudAlertsFor(selectTransport({}, own), own)).toEqual({ apiBase: 'https://staging.unstuck.sh', apiKey: 'uk_live_x' });
+    const selfHosted = { ...env, UNSTUCK_RELAY_URL: 'wss://own.example' };
+    expect(cloudAlertsFor(selectTransport({}, selfHosted), selfHosted)).toBeNull();
+    expect(cloudAlertsFor(selectTransport({ relay: 'wss://f.example' }, env), env)).toBeNull();
+    expect(cloudAlertsFor(selectTransport({}, {}), {})).toBeNull();
   });
 });
 

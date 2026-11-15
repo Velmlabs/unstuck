@@ -222,6 +222,8 @@ JSON files shared by every runtime:
 
 ## 8. Notifications
 
+> **Superseded (2026-11-14).** The `Notifier` channels below were never built. Takeover notifications are now Unstuck Cloud alerts: the engine seals the link to the user's paired phones and Cloud delivers it by Web Push, Telegram or email. See the notifications design (`docs/specs/2026-11-14-notifications-design.md` in the unstuck-cloud repo, sections 4.2 and 4.8). Developers can still send the link anywhere from `onLink`. The text below is kept as the record of the original plan.
+
 Interface: `Notifier.send(notice: TakeoverNotice) → { ok, error? }`. A notice carries the reason, site domain, an optional thumbnail (redacted; per-channel `thumbnail: false`), the link, the expiry, the session ID and the 6-digit code when enabled.
 
 | # | Channel | Runtime | Config |

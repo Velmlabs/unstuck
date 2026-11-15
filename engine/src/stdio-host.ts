@@ -8,7 +8,7 @@ import {
   type HelloResult,
   type TakeoverParams,
 } from '@velmlabs/unstuck-protocol';
-import { createEngine, isPublicSuffix, type CdpClient, type EventLog, type Transport } from '@velmlabs/unstuck-core';
+import { createEngine, isPublicSuffix, type CdpClient, type EventLog, type LinkInfo, type Transport } from '@velmlabs/unstuck-core';
 import { createTunneledCdp } from './tunnel';
 
 export interface StdioHostOptions {
@@ -19,6 +19,8 @@ export interface StdioHostOptions {
   version: string;
   /** Default for takeovers that don't say (UNSTUCK_REQUIRE_CODE=1). */
   requireCode?: boolean;
+  /** Sends the link to the user's paired phones (Cloud only); skipped per takeover by `alerts: false`. */
+  alerter?: (info: LinkInfo, site: string | undefined) => Promise<void>;
 }
 
 /**
@@ -71,7 +73,10 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
         site: p.site,
         requireCode: p.requireCode,
         allowedSites: hostnames(p.allowedSites),
-        onLink: (info) => peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId }),
+        onLink: (info) => {
+          peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId });
+          if (p.alerts !== false) void opts.alerter?.(info, p.site);
+        },
         popups: {
           onPopup(cb) {
             listeners.add(cb);

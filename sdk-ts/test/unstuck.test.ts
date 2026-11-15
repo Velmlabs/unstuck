@@ -14,6 +14,21 @@ afterAll(async () => {
   await browser.close();
 });
 
+describe('Unstuck alerts', () => {
+  it('alerts reaches the engine in TakeoverParams only when given (undefined means the engine default)', async () => {
+    const page = await browser.newPage();
+    const engine = scriptedEngine(
+      "out({ id: m.id, result: { status: 'resolved', sessionId: 's', url: 'u', durationS: 0, detail: JSON.stringify('alerts' in m.params ? m.params.alerts : 'absent') } });",
+    );
+    const unstuck = new Unstuck({ enginePath: engine, onLink: () => {} });
+    const seen: unknown[] = [];
+    for (const alerts of [false, true, undefined]) seen.push((await unstuck.takeover(page, { reason: 'x', ...(alerts === undefined ? {} : { alerts }) })).detail);
+    expect(seen).toEqual(['false', 'true', '"absent"']);
+    await unstuck.close();
+    await page.close();
+  });
+});
+
 describe('Unstuck', () => {
   it('calls onLink once with a localhost takeover URL, and resolves when the human taps Done', async () => {
     const page = await browser.newPage();

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { createEngine, type EventLog, type Transport } from '@velmlabs/unstuck-core';
+import { createEngine, type EventLog, type LinkInfo, type Transport } from '@velmlabs/unstuck-core';
 import { connectCdp } from './direct-cdp';
 import { hostnames } from './stdio-host';
 import { VERSION } from './version';
@@ -17,6 +17,8 @@ export interface McpServerOptions {
   open?: boolean;
   openUrl?: (url: string) => void;
   connect?: typeof connectCdp;
+  /** Sends the link to the user's paired phones (Cloud only). */
+  alerter?: (info: LinkInfo, site: string | undefined) => Promise<void>;
 }
 
 /** Opens a URL with the desktop's default browser, detached. */
@@ -63,9 +65,10 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           .max(20)
           .optional()
           .describe("The human can only navigate within the page's own site. Other sites the flow needs, e.g. [\"accounts.google.com\"]."),
+        alerts: z.boolean().optional().describe("Send this takeover to the user's paired phones (default true)"),
       },
     },
-    async ({ reason, cdp_url, target_id, timeout_s, allowed_sites }, extra) => {
+    async ({ reason, cdp_url, target_id, timeout_s, allowed_sites, alerts }, extra) => {
       const url = cdp_url ?? opts.env.UNSTUCK_CDP_URL;
       if (!url) return text('No browser to take over: pass cdp_url or set UNSTUCK_CDP_URL', true);
       let cdp;
@@ -88,13 +91,15 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           site,
           allowedSites: hostnames(allowed_sites),
           popups: cdp.popups,
-          onLink: ({ url: link, code }) => {
+          onLink: (info) => {
+            const { url: link, code } = info;
             const line = `Unstuck: a human is needed (${reason}) → ${link}`;
             opts.stderr.write(line + '\n');
             // The code goes to the agent in its own message (never to stderr), to deliver by a different channel.
             for (const data of code ? [line, `Unstuck: the 6-digit code for that link (send it separately from the link): ${code}`] : [line])
               void server.sendLoggingMessage({ level: 'notice', logger: 'unstuck', data }).catch(ignore);
             if (opts.open) openUrl(link);
+            if (alerts !== false) void opts.alerter?.(info, site);
           },
         });
         const out = { status: r.status, session_id: r.sessionId, url: r.url, duration_s: r.durationS, ...(r.detail ? { detail: r.detail } : {}) };

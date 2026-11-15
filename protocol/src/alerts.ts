@@ -24,11 +24,12 @@ export function newDeviceKeyPair(): Promise<CryptoKeyPair> {
 
 /** The raw 65-byte uncompressed public key, base64url. */
 export async function exportDevicePublicKey(k: CryptoKey): Promise<string> {
-  return b64urlEncode(new Uint8Array(await crypto.subtle.exportKey('raw', k)));
+  return b64urlEncode(new Uint8Array((await crypto.subtle.exportKey('raw', k)) as ArrayBuffer));
 }
 
-async function deriveAesKey(priv: CryptoKey, pub: CryptoKey, deviceId: string, sessionId: string, usage: KeyUsage): Promise<CryptoKey> {
-  const secret = await crypto.subtle.deriveBits({ name: 'ECDH', public: pub }, priv, 256);
+async function deriveAesKey(priv: CryptoKey, pub: CryptoKey, deviceId: string, sessionId: string, usage: 'encrypt' | 'decrypt'): Promise<CryptoKey> {
+  // The Workers typings call this field `$public`; the runtime (and the DOM typings) call it `public`.
+  const secret = await crypto.subtle.deriveBits({ name: 'ECDH', public: pub } as never, priv, 256);
   const hkdf = await crypto.subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
     { name: 'HKDF', hash: 'SHA-256', salt: enc.encode(sessionId), info: enc.encode(`unstuck/notify/1|${deviceId}`) },
@@ -53,7 +54,7 @@ export async function sealAlert(devicePublicKey: string, deviceId: string, sessi
   const ct = new Uint8Array(
     await crypto.subtle.encrypt({ name: 'AES-GCM', iv, additionalData: aad(sessionId, deviceId) }, key, enc.encode(JSON.stringify(p))),
   );
-  const ephPub = new Uint8Array(await crypto.subtle.exportKey('raw', eph.publicKey));
+  const ephPub = new Uint8Array((await crypto.subtle.exportKey('raw', eph.publicKey)) as ArrayBuffer);
   const out = new Uint8Array(PUB_BYTES + IV_BYTES + ct.length);
   out.set(ephPub);
   out.set(iv, PUB_BYTES);

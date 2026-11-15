@@ -299,3 +299,18 @@ async def test_require_code_needs_an_on_link_handler(browser):
     finally:
         del os.environ["UNSTUCK_REQUIRE_CODE"]
     await page.close()
+
+
+async def test_alerts_false_is_sent_and_otherwise_left_to_the_engine(browser, tmp_path):
+    page = await browser.new_page()
+    engine = scripted_engine(
+        tmp_path,
+        '''out({"id": m["id"], "result": {"status": "resolved", "sessionId": "s", "url": "u", "durationS": 0, "detail": json.dumps(m["params"].get("alerts", "absent"))}})''',
+    )
+    async with Unstuck(engine_path=engine, on_link=lambda l: None) as u:
+        seen = [
+            (await u.takeover(page, reason="x", **kw)).detail
+            for kw in ({"alerts": False}, {"alerts": True}, {"alerts": None}, {})
+        ]
+    assert seen == ["false", '"absent"', '"absent"', '"absent"']  # on is the engine default: only False is sent
+    await page.close()

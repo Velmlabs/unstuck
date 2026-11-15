@@ -75,6 +75,8 @@ export class Unstuck {
        * sites the flow needs, e.g. ['accounts.google.com'] for a Google sign-in or a 3-D Secure provider.
        */
       allowedSites?: string[];
+      /** With Unstuck Cloud, the link is also sent to your paired phones; false skips that for this takeover (default true). */
+      alerts?: boolean;
     },
   ): Promise<TakeoverResult> {
     // The engine also asks for a code when UNSTUCK_REQUIRE_CODE=1 (it inherits this environment).
@@ -131,6 +133,7 @@ export class Unstuck {
         site: siteOf(attached.url()),
         ...(requireCode !== undefined ? { requireCode } : {}),
         ...(opts.allowedSites?.length ? { allowedSites: opts.allowedSites } : {}),
+        ...(opts.alerts !== undefined ? { alerts: opts.alerts } : {}),
       };
       const died = engine.exited.then((code): never => {
         throw new UnstuckEngineError(`engine exited with code ${code}`);

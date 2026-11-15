@@ -6,7 +6,7 @@ import { FakeTransport, FakeCdp } from '@velmlabs/unstuck-core/testing';
 import { MemoryEventLog } from '@velmlabs/unstuck-core';
 import { runStdioHost } from '../src/stdio-host';
 
-function start() {
+function start(alerter?: (info: any, site: string | undefined) => Promise<void>) {
   const input = new PassThrough();
   const output = new PassThrough();
   const transport = new FakeTransport();
@@ -17,9 +17,52 @@ function start() {
     raw.push(l);
     sdk.receive(l);
   });
-  const done = runStdioHost({ input, output, transport, log, version: '9.9.9' });
+  const done = runStdioHost({ input, output, transport, log, version: '9.9.9', alerter });
   return { input, output, transport, sdk, done, raw, log };
 }
+
+describe('runStdioHost alerts', () => {
+  async function run(alerter: ((info: any, site: string | undefined) => Promise<void>) | undefined, params: object) {
+    const h = start(alerter);
+    const cdp = new FakeCdp();
+    h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
+    h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'CAPTCHA', timeoutS: 30, site: 'news.example.com', ...params });
+    await vi.waitFor(() => expect(links).toHaveLength(1));
+    const viewer = h.transport.connect(links[0].url);
+    viewer.push({ t: 'hello', token: new URLSearchParams(new URL(links[0].url).hash.slice(1)).get('t') });
+    await new Promise((r) => setTimeout(r, 30));
+    viewer.push({ t: 'done' });
+    await result;
+    h.input.end();
+    await h.done;
+    return links;
+  }
+
+  it('sends an alert with the link and the takeover site by default (the link notification is unchanged)', async () => {
+    const alerter = vi.fn<(info: any, site: string | undefined) => Promise<void>>(async () => {});
+    const links = await run(alerter, {});
+    expect(alerter).toHaveBeenCalledTimes(1);
+    expect(alerter.mock.calls[0]![0]).toMatchObject({ sessionId: links[0].sessionId, url: links[0].url, reason: 'CAPTCHA' });
+    expect(alerter.mock.calls[0]![1]).toBe('news.example.com');
+  });
+
+  it('alerts: false skips the alerter, and the link notification still arrives', async () => {
+    const alerter = vi.fn<(info: any, site: string | undefined) => Promise<void>>(async () => {});
+    const links = await run(alerter, { alerts: false });
+    expect(alerter).not.toHaveBeenCalled();
+    expect(links[0].url).toContain('#t=');
+  });
+
+  it('alerts: true sends, and no alerter configured is fine', async () => {
+    const alerter = vi.fn<(info: any, site: string | undefined) => Promise<void>>(async () => {});
+    await run(alerter, { alerts: true });
+    expect(alerter).toHaveBeenCalledTimes(1);
+    await run(undefined as any, {});
+  });
+});
 
 describe('runStdioHost', () => {
   it('answers engine.hello with versions', async () => {

@@ -488,7 +488,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (isTerminal(status)) return;
     go('published');
     emit('published');
-    // Notifiers arrive in Plan 4; until then "notifying" completes immediately.
+    // Notifications are Unstuck Cloud alerts sent by the engine from onLink (sealed to paired phones); see the notifications
+    // design, section 4.2 (docs/specs/2026-11-14-notifications-design.md in the unstuck-cloud repo). "notifying" completes immediately.
     go('notified');
     emit('link', { expiresAt });
     opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) });

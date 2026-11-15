@@ -5,7 +5,8 @@ import { JsonlFileEventLog, defaultLogPath } from './jsonl-log';
 import { VERSION } from './version';
 import { createMcpServer } from './mcp';
 import { formatReport, runDoctor } from './doctor';
-import { buildTransport } from './transport-select';
+import { buildTransport, cloudAlertsFor, selectTransport } from './transport-select';
+import { createCloudAlerter } from './cloud-alerts';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { Readable, Writable } from 'node:stream';
 
@@ -101,8 +102,10 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
       return 1;
     }
   }
+  const cloud = cloudAlertsFor(selectTransport({ relay: values.relay, agentKey: values['agent-key'] }, io.env), io.env);
+  const alerter = cloud ? createCloudAlerter({ ...cloud, log: (l) => void io.stderr.write(l + '\n') }) : undefined;
   if (values.mcp) {
-    const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open });
+    const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open, alerter });
     const closed = new Promise<void>((r) => io.stdin.once('end', () => r()));
     await server.connect(new StdioServerTransport(io.stdin as Readable, io.stdout as Writable));
     io.stderr.write('[unstuck] MCP server ready (tool: request_human_takeover)\n');
@@ -110,6 +113,6 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
     await server.close();
     return 0;
   }
-  await runStdioHost({ input: io.stdin, output: io.stdout, transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), version: VERSION, requireCode });
+  await runStdioHost({ input: io.stdin, output: io.stdout, transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), version: VERSION, requireCode, alerter });
   return 0;
 }

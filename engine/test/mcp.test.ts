@@ -48,7 +48,8 @@ describe('MCP server', () => {
     expect(TOOL_NAME).toBe('request_human_takeover');
     const tool = tools.find((t) => t.name === TOOL_NAME)!;
     expect(tool.inputSchema.required).toEqual(['reason']);
-    expect(Object.keys(tool.inputSchema.properties!)).toEqual(['reason', 'cdp_url', 'target_id', 'timeout_s', 'allowed_sites']);
+    expect(Object.keys(tool.inputSchema.properties!)).toEqual(['reason', 'cdp_url', 'target_id', 'timeout_s', 'allowed_sites', 'alerts']);
+    expect((tool.inputSchema.properties as any).alerts).toMatchObject({ type: 'boolean', description: "Send this takeover to the user's paired phones (default true)" });
     await server.close();
   });
 
@@ -118,6 +119,17 @@ describe('MCP server', () => {
     expect(linkLine).not.toContain(code);
     expect(err()).not.toContain(code);
     expect(/→ (\S+)/.exec(err())![1]).not.toContain(code);
+    await server.close();
+    await call.catch(() => {});
+  }, 30_000);
+
+  it.each([[undefined, 1], [true, 1], [false, 0]])('alerts=%s calls the alerter %i time(s)', async (alerts, calls) => {
+    const alerter = vi.fn<(info: any, site: string | undefined) => Promise<void>>(async () => {});
+    const { client, server } = await connect({ transport: new FakeTransport(), alerter });
+    const call = client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 10, ...(alerts === undefined ? {} : { alerts }) } });
+    await new Promise((r) => setTimeout(r, 1500));
+    expect(alerter).toHaveBeenCalledTimes(calls);
+    if (calls) expect(alerter.mock.calls[0]![0]).toMatchObject({ reason: 'r' });
     await server.close();
     await call.catch(() => {});
   }, 30_000);

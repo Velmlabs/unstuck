@@ -73,11 +73,14 @@ class Unstuck:
         timeout_s: int | None = None,
         require_code: bool | None = None,
         allowed_sites: list[str] | None = None,
+        alerts: bool | None = None,
     ) -> TakeoverResult:
         """Returns the outcome; raises only UnstuckEngineError when the engine can't run (and ValueError for misuse).
 
         The human can only navigate the page within its own site (example.com and its subdomains); list any other
         sites the flow needs in ``allowed_sites``, e.g. ``["accounts.google.com"]``.
+
+        With Unstuck Cloud (``UNSTUCK_API_KEY``) the link is also sent to your paired phones; ``alerts=False`` skips that.
         """
         wants_code = self._require_code if require_code is None else require_code
         if wants_code is None:
@@ -136,6 +139,8 @@ class Unstuck:
                 params["requireCode"] = code
             if allowed_sites:
                 params["allowedSites"] = list(allowed_sites)
+            if alerts is False:
+                params["alerts"] = False
             try:
                 result = TakeoverResult.from_wire(await engine.peer.request("takeover", params))
                 answered.append(True)
