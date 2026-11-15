@@ -25,7 +25,8 @@ Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTU
 |---|---|---|
 | Node.js 20+ | binary (default) | The engine runs as a child process and serves the link on your machine, or through a relay |
 | Node.js 20+ | in-process | Pass `mode: 'in-process'`. The engine runs inside your process and needs a relay |
-| Cloudflare Workers, Deno, Bun | in-process | Picked by the package's `exports` conditions (`workerd`, `worker`, `deno`, `bun`). Needs a relay |
+| Cloudflare Workers | in-process | Picked by the package's `exports` conditions (`workerd`, `worker`). Needs a relay |
+| Deno, Bun | binary (default) or in-process | They load the Node entry: binary mode works as on Node. On Deno and Bun, opt in with `mode: 'in-process'` (needs a relay) |
 
 The `browser` condition (Vite, webpack and other web targets) picks the in-process entry too.
 
@@ -42,22 +43,27 @@ Phone alerts (below) work in both modes.
 | `apiKey` | Unstuck Cloud API key. Takes precedence over `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY`. Not combinable with `relay` or `agentKey` |
 | `cloudRelay` | Override Unstuck Cloud's relay URL. Only with `apiKey` |
 | `cloudApi` | Override Unstuck Cloud's API URL. Only with `apiKey` |
-| `viewerUrl` | Override the viewer URL used in takeover links |
-| `relay`, `agentKey` | Your own relay (`wss://…`) and its agent key |
-| `mode` | `'binary'` or `'in-process'`. See Runtimes |
+| `viewerUrl` | Override the viewer URL used in takeover links (`https://`, or `http://` to localhost) |
+| `relay`, `agentKey` | Your own relay (`wss://…`, or `ws://` to localhost) and its agent key |
+| `mode` | `'binary'` or `'in-process'`. See Runtimes. `'binary'` on the in-process entry (Workers) throws `UnstuckConfigError` |
 | `timeoutS` | Default takeover timeout in seconds (default 600) |
 | `requireCode` | Ask the person for a 6-digit code. It needs an `onLink` that sends the code by another channel than the link |
-| `onLink` | Called with `{ url, reason, sessionId, expiresAt, code? }` when a person is needed. Default: prints the link (stderr on Node, `console.log` in-process) |
+| `onLink` | Called with `{ url, reason, sessionId, expiresAt, code? }` when a person is needed. Default: see below. A handler that throws is logged (without the link) and the takeover goes on |
 | `enginePath`, `host`, `port` | Node binary mode only: the engine binary, and the host and port of its local server |
 
 `takeover(page, options)` takes `reason` (required), `timeoutS`, `requireCode`, `allowedSites` and `alerts`.
+
+The default `onLink`:
+
+- Node binary mode prints the link to stderr.
+- In-process mode logs with `console.log` (on Workers that lands in Workers Logs, which are stored). With Unstuck Cloud and phone alerts on, it waits for the alert. If at least one paired phone got the link it logs `Unstuck: a human is needed (<reason>), link sent to <N> paired phone(s) (session <id>)`, with no link in it. If none did, it logs the full link as the fallback, except with `alerts: 'required'`, where the takeover has already failed with `alert_failed`. With a relay you host, or `alerts: false`, the log is the only channel, so it logs the full link at once. Pass your own `onLink` to send the link somewhere else.
 
 ## Phone alerts
 
 With Unstuck Cloud, the link is also sent to your paired phones. The link is sealed to each phone's key, so Cloud only sees ciphertext.
 
 - `alerts: false` skips the alert for one takeover.
-- `alerts: 'required'` is for unattended agents. If no paired phone gets the link, the takeover ends at once as `failed` with detail `alert_failed`, instead of waiting for its timeout. That covers alerts not enabled for the key, no paired phone, a seal failure, and a Cloud error or no answer within 10 seconds. It does not fire once a person has already joined through a link your own `onLink` sent.
+- `alerts: 'required'` is for unattended agents. If Unstuck Cloud can't accept the link for at least one paired phone, the takeover ends at once as `failed` with detail `alert_failed`, instead of waiting for its timeout. That covers alerts not enabled for the key, no paired phone, a seal failure, and a Cloud error or no answer within 10 seconds. It does not fire once a person has already joined through a link your own `onLink` sent.
 - `alerts: 'required'` without Unstuck Cloud throws. A relay you host sends no phone alerts. In Node binary mode (local viewer server, or a relay you host) the error comes from the engine: `alerts: 'required' needs Unstuck Cloud (apiKey or UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts`. In-process it is the `UnstuckConfigError` below.
 
 ## Results
@@ -82,11 +88,13 @@ In in-process mode (Workers), Unstuck pings the page every 60 seconds for the wh
 
 `takeover()` resolves for every outcome above. It rejects only for setup mistakes:
 
-- `UnstuckConfigError`: the options don't fit together. The messages are:
+- `UnstuckConfigError`: the options don't fit together or a URL option is not allowed. The messages are:
   - `use either apiKey (Unstuck Cloud) or relay + agentKey (your own relay), not both`
   - `agentKey is for your own relay (with relay); Unstuck Cloud only needs apiKey`
   - `cloudRelay and cloudApi only apply with apiKey`
-  - `in a Worker, Unstuck needs a relay: set apiKey or relay + agentKey`
+  - `in a Worker, Unstuck needs a relay: set apiKey or relay + agentKey` (on Node, Deno or Bun with `mode: 'in-process'`: `in-process mode needs a relay: set apiKey or relay + agentKey`)
+  - `binary mode needs Node.js: this runtime loaded the in-process entry, which has no engine binary`
+  - `relay must be a wss:// URL (ws:// only to localhost, 127.0.0.1 or [::1])`, and the same for `cloudRelay`; `cloudApi` and `viewerUrl` must be `https://` (`http://` only to those hosts)
   - `alerts: 'required' needs Unstuck Cloud (apiKey): a self-hosted relay sends no phone alerts`
 - `TypeError`: `requireCode` is on but there is no `onLink` handler. The code must travel by another channel than the link.
 - `UnstuckEngineError`: Node binary mode only. The engine binary can't be found, started or kept running.

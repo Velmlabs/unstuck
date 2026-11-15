@@ -46,12 +46,12 @@ deferred so Node, Python and MCP could ship first.
 `new Unstuck()` picks its mode from the runtime:
 
 - **Binary mode** (today): Node, where the engine runs as a separate process.
-- **In-process mode** (new): Workers, Deno, Bun or when forced with an option. The SDK calls `createEngine()` from
-  `@velmlabs/unstuck-core` directly, with `createRelayTransport()` from the same package.
+- **In-process mode** (new): Workers (and browser bundles), or when forced with an option. The SDK calls `createEngine()`
+  from `@velmlabs/unstuck-core` directly, with `createRelayTransport()` from the same package.
 
-Detection: `navigator.userAgent === 'Cloudflare-Workers'`, or no `process.versions.node`, or an explicit
-`new Unstuck({ mode: 'in-process' })`. The package's `exports` gets a `workerd` condition (plus `worker` and `deno`)
-pointing at an entry that never imports Node built-ins, so bundlers never pull in `node:child_process`.
+Selection: the package's `exports` has `workerd`, `worker` and `browser` conditions pointing at an entry that never
+imports Node built-ins, so bundlers never pull in `node:child_process`. Node, Deno and Bun load the Node entry, where
+binary mode keeps working; on Deno and Bun, opt in with `new Unstuck({ mode: 'in-process' })`.
 
 Configuration in a Worker comes from bindings, not `process.env`:
 
@@ -144,7 +144,7 @@ the public internet. Nice-to-have for Phase 2, not needed to ship.
 - **CDP coverage in `@cloudflare/puppeteer`:** the spike confirmed what Unstuck uses today; re-check `Fetch.*` (page
   lock) and `Target.*` (popups), which came later.
 - **Bundle size:** the in-process entry must stay small enough for Workers' script size limits (core + protocol only).
-- **Open question:** should in-process mode also be the default on Bun and Deno, or opt-in there at first?
+- **Decided (0.2.0):** on Bun and Deno in-process mode is opt-in (`mode: 'in-process'`); binary mode stays the default there.
 
 ## Why it matters
 

@@ -126,7 +126,7 @@ Set `UNSTUCK_API_KEY` (from [your dashboard](https://unstuck.sh/dashboard/keys))
 | browser-use, Stagehand | [unstuck.sh/docs/ai-agents](https://unstuck.sh/docs/ai-agents) | [`examples/browser-use`](examples/browser-use), [`examples/stagehand`](examples/stagehand) |
 | Any Chromium over CDP, Selenium, hosted browsers | [unstuck.sh/docs/any-browser](https://unstuck.sh/docs/any-browser) | [`examples/cdp`](examples/cdp), [`examples/selenium`](examples/selenium) |
 | Cloudflare Workers: Durable Objects, Agents SDK, Browser Rendering | [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) | the example below |
-| Deno and Bun (in-process mode) | [unstuck.sh/docs/requirements](https://unstuck.sh/docs/requirements/) | |
+| Deno and Bun (binary mode, or opt in with `mode: 'in-process'`) | [unstuck.sh/docs/requirements](https://unstuck.sh/docs/requirements/) | |
 
 ### Cloudflare Workers
 
@@ -149,10 +149,14 @@ interface Env {
   UNSTUCK_API_KEY: string;
 }
 
+const TIMEOUT_S = 900;
+
 export class PortalAgent extends DurableObject<Env> {
   async fetch(): Promise<Response> {
-    if ((await this.ctx.storage.get('running')) !== true) {
-      await this.ctx.storage.put('running', true);
+    const startedAt = await this.ctx.storage.get<number>('startedAt');
+    // A run older than its timeout + 2 minutes is stale: the object was evicted mid-run and never reached `finally`.
+    if (startedAt === undefined || Date.now() - startedAt > (TIMEOUT_S + 120) * 1000) {
+      await this.ctx.storage.put('startedAt', Date.now());
       this.ctx.waitUntil(this.run()); // returns at once; the takeover runs on
     }
     return new Response('started', { status: 202 });
@@ -168,17 +172,21 @@ export class PortalAgent extends DurableObject<Env> {
       const unstuck = new Unstuck({ apiKey: this.env.UNSTUCK_API_KEY });
       const result = await unstuck.takeover(page, {
         reason: 'Log in with your 2FA code',
-        timeoutS: 900,
-        alerts: 'required', // fail at once if no paired phone gets the link
+        timeoutS: TIMEOUT_S,
+        alerts: 'required', // fail at once if Unstuck Cloud can't accept the link for at least one paired phone
       });
       await this.ctx.storage.put('result', { status: result.status, detail: result.detail });
     } finally {
-      await this.ctx.storage.put('running', false);
+      await this.ctx.storage.delete('startedAt');
       await browser?.close();
     }
   }
 }
 ```
+
+A Durable Object stays alive while the takeover holds its sockets open; `ctx.waitUntil` is there for clarity, and an alarm is a sturdier trigger if you need retries.
+
+Without an `onLink`, the link goes to your paired phones and the Worker logs one line naming them (no link). The link itself is logged with `console.log` only when no phone got it, or when there is no phone alert (a relay you host, or `alerts: false`).
 
 The full guide (status endpoint, Workflows, timeouts, CPU limits, a self-hosted relay): [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/).
 
@@ -219,7 +227,7 @@ It also runs on plain Node (`relay-node/`) and on Cloudflare Workers (`relay-clo
 - With Unstuck Cloud, the page the person opens doesn't come from the relay. Your engine links to a viewer on its own origin (`view.unstuck.sh/v/<engine version>/`), with an integrity hash on every script and a published `SHA256SUMS.json` you can compare against this repository's build. So the relay can't swap in code that reads the key. A self-hosted relay serves the viewer itself; set `UNSTUCK_VIEWER_URL` to use a separately hosted one.
 - One person at a time; an optional 6-digit code means a forwarded link alone isn't enough.
 - The person can only use the page they were handed. The tab stays on the page's own site (example.com and its subdomains), so the agent browser's other logins are out of reach: links to other sites don't open, and a tab the page opens on another site is closed before the person sees it (its first page load still reaches that site). If the flow needs another site, such as a Google sign-in or a bank's 3-D Secure page, list it: `allowedSites: ['accounts.google.com']` (Python: `allowed_sites=[...]`, MCP: `allowed_sites`).
-- With Unstuck Cloud, your engine can also send the link to your paired phones as a push, Telegram or email alert. The link is sealed on your machine to each phone's own key, so Unstuck Cloud only relays ciphertext and never sees the token or key. Turn it off per takeover with `alerts: false` (Python: `alerts=False`, MCP: `alerts: false`); the API key must have alerts enabled. With `alerts: 'required'` (Python: `alerts="required"`) a takeover whose link reaches no paired phone ends at once as `failed` with detail `alert_failed`, instead of waiting for its timeout.
+- With Unstuck Cloud, your engine can also send the link to your paired phones as a push, Telegram or email alert. The link is sealed on your machine to each phone's own key, so Unstuck Cloud only relays ciphertext and never sees the token or key. Turn it off per takeover with `alerts: false` (Python: `alerts=False`, MCP: `alerts: false`); the API key must have alerts enabled. With `alerts: 'required'` (Python: `alerts="required"`) a takeover ends at once as `failed` with detail `alert_failed` if Unstuck Cloud can't accept its link for at least one paired phone, instead of waiting for its timeout.
 - The audit log records states and input counts, never what was typed.
 
 ## Develop

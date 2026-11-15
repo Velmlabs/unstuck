@@ -19,6 +19,6 @@ if result.status != "resolved":
 
 The engine comes in the wheel for your platform (macOS 13+ on Apple silicon or Intel, Linux with glibc 2.17+, Windows x64). To use another binary, set `UNSTUCK_ENGINE_PATH` or `Unstuck(engine_path=...)`.
 
-Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_...`. With Cloud, `takeover(..., alerts=False)` skips the phone alert for one takeover, and `alerts="required"` ends the takeover at once as `failed` with detail `alert_failed` if no paired phone gets the link. Tutorials: https://unstuck.sh/docs
+Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_...`. With Cloud, `takeover(..., alerts=False)` skips the phone alert for one takeover, and `alerts="required"` ends the takeover at once as `failed` with detail `alert_failed` if Unstuck Cloud can't accept the link for at least one paired phone. Tutorials: https://unstuck.sh/docs
 
 License: Apache-2.0, including the bundled engine.

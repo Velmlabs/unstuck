@@ -67,7 +67,7 @@ Options (TypeScript name / Python name):
 
 - `timeoutS` / `timeout_s`: seconds to wait, default 600.
 - `allowedSites` / `allowed_sites`: extra sites the step may visit.
-- `alerts`: `false` to skip phone alerts for this call; `'required'` (Python `"required"`) to fail at once with `alert_failed` if no paired phone gets the link (Unstuck Cloud only).
+- `alerts`: `false` to skip phone alerts for this call; `'required'` (Python `"required"`) to fail at once with `alert_failed` if Unstuck Cloud can't accept the link for at least one paired phone (Unstuck Cloud only).
 - `requireCode` / `require_code`: also ask for a 6-digit code delivered separately from the link (needs its own `onLink` / `on_link` handler).
 
 Without an API key the link works on the agent's own machine only. With `UNSTUCK_API_KEY` set (from https://unstuck.sh/dashboard/keys) the link works on any phone, and the user's paired phones get an alert. Teams that run their own relay set `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY` instead (https://unstuck.sh/docs/self-host/).
@@ -84,7 +84,9 @@ const result = await unstuck.takeover(page, { reason: 'Solve the CAPTCHA', alert
 - Pass settings as options: a Worker has no `process.env`. Unstuck itself needs no Node compatibility flag, but `@cloudflare/puppeteer` does: keep `nodejs_compat`.
 - Run the takeover in a Durable Object (or a Workflow step), not a plain request handler: a person can take minutes. Start it and return at once (`ctx.waitUntil`), then store the result; don't hold the caller's request open.
 - Launch the browser with a generous `keep_alive` (Browser Rendering's limit is 20 minutes at the time of writing). Unstuck pings the page every 60 seconds during a takeover.
-- Use `alerts: 'required'` for unattended runs: if no paired phone can get the link, the result is `failed` with `detail: 'alert_failed'` at once, not a silent wait.
+- Use `alerts: 'required'` for unattended runs: if Unstuck Cloud can't accept the link for at least one paired phone, the result is `failed` with `detail: 'alert_failed'` at once, not a silent wait.
+- Without your own `onLink`, the link goes to `console.log` (Workers Logs) only when no paired phone got it; otherwise the log line names the phones and the session, not the link. With a relay you host, or `alerts: false`, the link is logged.
+- On Deno and Bun the SDK runs in binary mode, as on Node; opt in with `mode: 'in-process'` (needs a relay).
 - A browser connection that drops ends the takeover as `failed` with `page_closed`.
 
 Guide: https://unstuck.sh/docs/cloudflare-workers/
