@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import { exportDevicePublicKey, newDeviceKeyPair } from '@velmlabs/unstuck-protocol';
 import type { DeviceRecord, DeviceStore } from '../device-store';
 import { defaultLabel, normalizeCode, pushNeedsHomeScreen } from './env';
@@ -36,7 +36,7 @@ type Note = { kind: 'ok' | 'error'; text: string } | null;
 const EXPIRED = 'This pairing code has expired. Make a new one in your dashboard.';
 const REJECTED = 'Could not pair this phone. Make a new code in your dashboard and try again.';
 const ANY_BROWSER_COPY =
-  'Telegram links then carry the key that opens them, so Unstuck Cloud and Telegram could open your takeovers. Phone notifications stay locked to this browser.';
+  'Telegram links then carry the key that opens them, so Unstuck Cloud, Telegram and anyone you forward the message to could open your takeovers. Phone notifications stay locked to this browser.';
 
 function parseStatus(v: unknown): Status | null {
   const s = v as Partial<Status> | null;
@@ -55,6 +55,9 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
   const [codeError, setCodeError] = useState(false);
   const [status, setStatus] = useState<Status | null>(null);
   const [anyNote, setAnyNote] = useState<Note>(null);
+  // Only the latest status answer applies: every read and every toggle takes a new number.
+  const seq = useRef(0);
+  const reading = useRef(false);
 
   useEffect(() => {
     // The code is a credential: it leaves the address bar (and so history and sync) as soon as it is read.
@@ -82,18 +85,26 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
     if (!token) return;
     let live = true;
     const load = async () => {
+      if (reading.current) return; // one read at a time
+      reading.current = true;
+      const mine = ++seq.current;
       try {
         const res = await doFetch(`${apiBase}/api/v1/devices/self`, { headers: { Authorization: `Bearer ${token}` } });
         const next = res.ok ? parseStatus(await res.json()) : null;
-        if (live && next) setStatus(next);
+        if (live && next && mine === seq.current) setStatus(next);
       } catch {
         // offline: keep what is shown
+      } finally {
+        reading.current = false;
       }
     };
     const onVisible = () => {
       if (document.visibilityState === 'visible') void load();
     };
-    const onShow = () => void load();
+    // Back/forward cache restores only: a normal load already ran the read above.
+    const onShow = (e: Event) => {
+      if ((e as PageTransitionEvent).persisted) void load();
+    };
     void load();
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('pageshow', onShow);
@@ -171,11 +182,12 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
 
   async function setAnyBrowser(enabled: boolean) {
     setAnyNote(null);
+    const mine = ++seq.current; // a status read still in flight no longer applies
     try {
       const res = await doFetch(`${apiBase}/api/v1/devices/self/telegram-any-browser`, { method: 'PUT', headers: auth(), body: JSON.stringify({ enabled }) });
       const next = res.ok ? parseStatus(await res.json()) : null;
       if (!next) throw new Error('any-browser');
-      setStatus(next);
+      if (mine === seq.current) setStatus(next);
     } catch {
       setAnyNote({ kind: 'error', text: 'Could not change this setting. Try again.' });
     }

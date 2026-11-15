@@ -373,8 +373,45 @@ describe('status once paired (what Cloud says is really set up)', () => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     document.dispatchEvent(new Event('visibilitychange'));
     expect(await screen.findByText(/Telegram is connected/)).toBeTruthy();
-    window.dispatchEvent(new Event('pageshow'));
+    expect(statusCalls(fetchFn)).toHaveLength(2);
+    // pageshow only matters when restored from the back/forward cache.
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: false }));
+    expect(statusCalls(fetchFn)).toHaveLength(2);
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
     await waitFor(() => expect(statusCalls(fetchFn)).toHaveLength(3));
+  });
+
+  it('skips a refresh while one is in flight', async () => {
+    let answer: (r: Response) => void = () => {};
+    const fetchFn = vi.fn(() => new Promise<Response>((r) => (answer = r)));
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(1));
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }));
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    answer(json(200, st({ telegram: true })));
+    expect(await screen.findByText(/Telegram is connected/)).toBeTruthy();
+    document.dispatchEvent(new Event('visibilitychange'));
+    await waitFor(() => expect(fetchFn).toHaveBeenCalledTimes(2));
+  });
+
+  it('only the latest answer applies: a status read that started before a toggle cannot undo it', async () => {
+    const answers: ((r: Response) => void)[] = [];
+    const fetchFn = vi.fn((url: string) => {
+      if (url.endsWith('/telegram-any-browser')) return Promise.resolve(json(200, st({ telegram: true, telegramAnyBrowser: true })));
+      return new Promise<Response>((r) => answers.push(r));
+    });
+    setup({ code: null, store: paired(), fetchFn: fetchFn as unknown as typeof fetch });
+    await waitFor(() => expect(answers).toHaveLength(1));
+    answers[0]!(json(200, st({ telegram: true })));
+    const box = (await screen.findByRole('checkbox', { name: 'Telegram links open in any browser' })) as HTMLInputElement;
+    document.dispatchEvent(new Event('visibilitychange')); // a read in flight…
+    await waitFor(() => expect(answers).toHaveLength(2));
+    fireEvent.click(box); // …then the toggle
+    await waitFor(() => expect(box.checked).toBe(true));
+    answers[1]!(json(200, st({ telegram: true, telegramAnyBrowser: false }))); // the stale read lands last
+    await new Promise((r) => setTimeout(r, 20));
+    expect(box.checked).toBe(true);
   });
 
   it('stops listening once the page is gone', async () => {
@@ -410,7 +447,7 @@ describe('status once paired (what Cloud says is really set up)', () => {
 
 describe('"Telegram links open in any browser"', () => {
   const paired = () => memoryStore({ deviceId: 'dev9', deviceToken: 'tok9', privateKey: {} as CryptoKey, label: 'Galaxy' });
-  const COPY = 'Telegram links then carry the key that opens them, so Unstuck Cloud and Telegram could open your takeovers. Phone notifications stay locked to this browser.';
+  const COPY = 'Telegram links then carry the key that opens them, so Unstuck Cloud, Telegram and anyone you forward the message to could open your takeovers. Phone notifications stay locked to this browser.';
   function server(initial: boolean, put: (enabled: boolean) => Response = (enabled) => json(200, { label: 'Galaxy', push: false, telegram: true, telegramAnyBrowser: enabled })) {
     return vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/devices/self/telegram-any-browser')) return put(JSON.parse(String(init!.body)).enabled);
