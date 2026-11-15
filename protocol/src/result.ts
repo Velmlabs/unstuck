@@ -5,5 +5,9 @@ export interface TakeoverResult {
   sessionId: string;
   url: string;
   durationS: number;
+  /**
+   * Why it ended, when there is more to say: e.g. `page_closed`, `viewer_left`, `engine_closed`, `alert_failed` (with
+   * `alerts: 'required'`, the link reached no paired phone), or the human's own words after Can't solve.
+   */
   detail?: string;
 }

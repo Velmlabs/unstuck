@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Unstuck, UnstuckEngineError } from '../src/index';
+import { Unstuck, UnstuckConfigError, UnstuckEngineError } from '../src/index';
 import { ENGINE, fakeEngine, launch, scriptedEngine } from './helpers';
 import type { Browser } from './helpers';
 
@@ -22,10 +22,28 @@ describe('Unstuck alerts', () => {
     );
     const unstuck = new Unstuck({ enginePath: engine, onLink: () => {} });
     const seen: unknown[] = [];
-    for (const alerts of [false, true, undefined]) seen.push((await unstuck.takeover(page, { reason: 'x', ...(alerts === undefined ? {} : { alerts }) })).detail);
-    expect(seen).toEqual(['false', 'true', '"absent"']);
+    for (const alerts of [false, true, 'required' as const, undefined]) seen.push((await unstuck.takeover(page, { reason: 'x', ...(alerts === undefined ? {} : { alerts }) })).detail);
+    expect(seen).toEqual(['false', 'true', '"required"', '"absent"']);
     await unstuck.close();
     await page.close();
+  });
+
+  it("alerts: 'required' on an engine without Unstuck Cloud (local server) → UnstuckConfigError; the page is released", async () => {
+    vi.stubEnv('UNSTUCK_API_KEY', '');
+    vi.stubEnv('UNSTUCK_RELAY_URL', '');
+    const page = await browser.newPage();
+    const unstuck = new Unstuck({ enginePath: ENGINE, onLink: () => {} });
+    const p = unstuck.takeover(page, { reason: 'x', alerts: 'required' });
+    await expect(p).rejects.toBeInstanceOf(UnstuckConfigError);
+    await expect(p).rejects.toThrow("alerts: 'required' needs apiKey (Unstuck Cloud)");
+    // Other engine errors are still passed through as they are.
+    const other = scriptedEngine("out({ id: m.id, error: { code: 'boom', message: 'nope' } });");
+    const u2 = new Unstuck({ enginePath: other, onLink: () => {} });
+    await expect(u2.takeover(page, { reason: 'x' })).rejects.toMatchObject({ code: 'boom', message: 'nope' });
+    await u2.close();
+    await unstuck.close();
+    await page.close();
+    vi.unstubAllEnvs();
   });
 });
 

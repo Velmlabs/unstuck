@@ -18,8 +18,13 @@ export interface TakeoverOptions {
    * sites the flow needs, e.g. ['accounts.google.com'] for a Google sign-in or a 3-D Secure provider.
    */
   allowedSites?: string[];
-  /** With Unstuck Cloud, the link is also sent to your paired phones; false skips that for this takeover (default true). */
-  alerts?: boolean;
+  /**
+   * With Unstuck Cloud, the link is also sent to your paired phones; false skips that for this takeover (default true).
+   * 'required': with Unstuck Cloud, end the takeover at once with status `failed`, detail `alert_failed`, if the link
+   * cannot be delivered to at least one paired phone (alerts not allowed for the key, no paired phone, every seal
+   * failed, or notify answered non-2xx). Without Unstuck Cloud (a self-hosted relay) it throws UnstuckConfigError.
+   */
+  alerts?: boolean | 'required';
 }
 
 export interface UnstuckOptions {

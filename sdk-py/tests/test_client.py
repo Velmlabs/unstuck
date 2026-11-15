@@ -9,6 +9,7 @@ import pytest
 
 from conftest import ENGINE, scripted_engine, write_engine
 from unstuck import TakeoverResult, Unstuck, UnstuckEngineError
+from unstuck._rpc import RpcCallError
 
 
 async def wait_for(pred, timeout=10.0):
@@ -311,7 +312,28 @@ async def test_alerts_false_is_sent_and_otherwise_left_to_the_engine(browser, tm
     async with Unstuck(engine_path=engine, on_link=lambda l: None) as u:
         seen = [
             (await u.takeover(page, reason="x", **kw)).detail
-            for kw in ({"alerts": False}, {"alerts": True}, {"alerts": None}, {})
+            for kw in ({"alerts": False}, {"alerts": True}, {"alerts": "required"}, {"alerts": None}, {})
         ]
-    assert seen == ["false", '"absent"', '"absent"', '"absent"']  # on is the engine default: only False is sent
+    # On is the engine default: only False and "required" are sent.
+    assert seen == ["false", '"absent"', '"required"', '"absent"', '"absent"']
+    await page.close()
+
+
+async def test_alerts_required_without_unstuck_cloud_is_a_value_error(browser, monkeypatch):
+    monkeypatch.delenv("UNSTUCK_API_KEY", raising=False)
+    monkeypatch.delenv("UNSTUCK_RELAY_URL", raising=False)
+    page = await browser.new_page()
+    async with Unstuck(engine_path=str(ENGINE), on_link=lambda l: None) as u:
+        with pytest.raises(ValueError, match="alerts: 'required' needs apiKey"):
+            await u.takeover(page, reason="x", alerts="required")
+    await page.close()
+
+
+async def test_other_engine_errors_are_raised_as_they_are(browser, tmp_path):
+    page = await browser.new_page()
+    engine = scripted_engine(tmp_path, '''out({"id": m["id"], "error": {"code": "boom", "message": "nope"}})''')
+    async with Unstuck(engine_path=engine, on_link=lambda l: None) as u:
+        with pytest.raises(RpcCallError) as e:
+            await u.takeover(page, reason="x")
+        assert e.value.code == "boom"
     await page.close()

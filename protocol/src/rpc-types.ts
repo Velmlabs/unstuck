@@ -55,8 +55,12 @@ export interface TakeoverParams {
   requireCode?: boolean;
   /** Sites besides the page's own the human may navigate to, e.g. ["accounts.google.com"] (page lock). */
   allowedSites?: string[];
-  /** Send this takeover to the user's paired phones (Unstuck Cloud); undefined means yes, false skips it. */
-  alerts?: boolean;
+  /**
+   * Send this takeover to the user's paired phones (Unstuck Cloud); undefined means yes, false skips it. 'required' fails
+   * the takeover with `alert_failed` when no paired phone gets the link; without Unstuck Cloud the engine answers the
+   * request with error code `config_error`.
+   */
+  alerts?: boolean | 'required';
 }
 export interface CdpSendParams {
   pageId: string;

@@ -428,6 +428,19 @@ describe('takeover session', () => {
     expect(t.transport.published.size).toBe(0);
   });
 
+  it('the link handler can fail the takeover (e.g. alert_failed): failed at once, the link stops working', async () => {
+    const transport = new FakeTransport();
+    const engine = createEngine({ transport });
+    let fail: ((detail: string) => void) | undefined;
+    const p = engine.takeover(new FakeCdp(), { reason: 'x', onLink: (_l, takeover) => (fail = takeover.fail) });
+    await settle();
+    fail!('alert_failed');
+    await settle();
+    await expect(p).resolves.toMatchObject({ status: 'failed', detail: 'alert_failed' });
+    expect(transport.unpublished).toHaveLength(1);
+    fail!('again'); // after the end: nothing changes
+  });
+
   it('a publish failure becomes a failed result, never a rejection', async () => {
     const transport = new FakeTransport();
     transport.publish = () => Promise.reject(new Error('port in use'));

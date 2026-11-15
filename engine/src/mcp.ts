@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
-import { createEngine, type EventLog, type LinkInfo, type Transport } from '@velmlabs/unstuck-core';
+import { createEngine, sendTakeoverAlert, type CloudAlerter, type EventLog, type Transport } from '@velmlabs/unstuck-core';
 import { connectCdp } from './direct-cdp';
 import { hostnames } from '@velmlabs/unstuck-core';
 import { VERSION } from './version';
@@ -18,7 +18,7 @@ export interface McpServerOptions {
   openUrl?: (url: string) => void;
   connect?: typeof connectCdp;
   /** Sends the link to the user's paired phones (Cloud only). */
-  alerter?: (info: LinkInfo, site: string | undefined) => Promise<void>;
+  alerter?: CloudAlerter;
 }
 
 /** Opens a URL with the desktop's default browser, detached. */
@@ -65,12 +65,18 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           .max(20)
           .optional()
           .describe("The human can only navigate within the page's own site. Other sites the flow needs, e.g. [\"accounts.google.com\"]."),
-        alerts: z.boolean().optional().describe("Send this takeover to the user's paired phones (default true)"),
+        alerts: z
+          .union([z.boolean(), z.literal('required')])
+          .optional()
+          .describe(
+            "Send this takeover to the user's paired phones (default true). \"required\" ends it at once as failed (alert_failed) if no paired phone gets the link (Unstuck Cloud only).",
+          ),
       },
     },
     async ({ reason, cdp_url, target_id, timeout_s, allowed_sites, alerts }, extra) => {
       const url = cdp_url ?? opts.env.UNSTUCK_CDP_URL;
       if (!url) return text('No browser to take over: pass cdp_url or set UNSTUCK_CDP_URL', true);
+      if (alerts === 'required' && !opts.alerter) return text("alerts: 'required' needs UNSTUCK_API_KEY (Unstuck Cloud)", true);
       let cdp;
       try {
         cdp = await connect(url, { targetId: target_id });
@@ -91,7 +97,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           site,
           allowedSites: hostnames(allowed_sites),
           popups: cdp.popups,
-          onLink: (info) => {
+          onLink: (info, takeover) => {
             const { url: link, code } = info;
             const line = `Unstuck: a human is needed (${reason}) → ${link}`;
             opts.stderr.write(line + '\n');
@@ -99,7 +105,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
             for (const data of code ? [line, `Unstuck: the 6-digit code for that link (send it separately from the link): ${code}`] : [line])
               void server.sendLoggingMessage({ level: 'notice', logger: 'unstuck', data }).catch(ignore);
             if (opts.open) openUrl(link);
-            if (alerts !== false) void opts.alerter?.(info, site);
+            sendTakeoverAlert(opts.alerter, alerts, info, site, takeover);
           },
         });
         const out = { status: r.status, session_id: r.sessionId, url: r.url, duration_s: r.durationS, ...(r.detail ? { detail: r.detail } : {}) };

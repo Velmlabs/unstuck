@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any, Callable
+from typing import Any, Callable, Literal
 from urllib.parse import urlparse
 
 from ._attach import AttachedPage, attach_page
@@ -73,7 +73,7 @@ class Unstuck:
         timeout_s: int | None = None,
         require_code: bool | None = None,
         allowed_sites: list[str] | None = None,
-        alerts: bool | None = None,
+        alerts: bool | Literal["required"] | None = None,
     ) -> TakeoverResult:
         """Returns the outcome; raises only UnstuckEngineError when the engine can't run (and ValueError for misuse).
 
@@ -81,6 +81,9 @@ class Unstuck:
         sites the flow needs in ``allowed_sites``, e.g. ``["accounts.google.com"]``.
 
         With Unstuck Cloud (``UNSTUCK_API_KEY``) the link is also sent to your paired phones; ``alerts=False`` skips that.
+        ``alerts="required"`` ends the takeover at once with status ``failed``, detail ``alert_failed``, if the link
+        cannot be delivered to at least one paired phone (alerts not allowed for the key, no paired phone, every seal
+        failed, or Cloud refused it); without Unstuck Cloud it raises ValueError.
         """
         wants_code = self._require_code if require_code is None else require_code
         if wants_code is None:
@@ -139,8 +142,8 @@ class Unstuck:
                 params["requireCode"] = code
             if allowed_sites:
                 params["allowedSites"] = list(allowed_sites)
-            if alerts is False:
-                params["alerts"] = False
+            if alerts is False or alerts == "required":
+                params["alerts"] = alerts
             try:
                 result = TakeoverResult.from_wire(await engine.peer.request("takeover", params))
                 answered.append(True)
@@ -148,6 +151,8 @@ class Unstuck:
             except RpcCallError as e:
                 if e.code == "closed":
                     raise UnstuckEngineError(f"engine exited with code {await engine.wait()}") from None
+                if e.code == "config_error":  # the engine refused the options, e.g. alerts="required" without Unstuck Cloud
+                    raise ValueError(e.message) from None
                 raise
         finally:
             if notify_close and not answered:

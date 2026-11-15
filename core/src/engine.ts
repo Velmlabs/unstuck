@@ -3,10 +3,11 @@ import type { CdpClient } from './cdp';
 import type { EventLog } from './events';
 import type { Transport } from './transport';
 import { importSecret, newSecret } from './session/tokens';
-import { runTakeover, type LinkInfo, type PopupSource, type RunningTakeover } from './session/takeover';
+import { runTakeover, type LinkInfo, type PopupSource, type RunningTakeover, type TakeoverControl } from './session/takeover';
 
-export type { LinkInfo, PopupSource } from './session/takeover';
-export type LinkHandler = (info: LinkInfo) => void;
+export type { LinkInfo, PopupSource, TakeoverControl } from './session/takeover';
+/** Gets each takeover's link; `takeover.fail(detail)` ends that takeover as failed (e.g. when the link can't be delivered). */
+export type LinkHandler = (info: LinkInfo, takeover: TakeoverControl) => void;
 
 export interface EngineOptions {
   transport: Transport;

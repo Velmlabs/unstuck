@@ -8,7 +8,7 @@ import {
   type HelloResult,
   type TakeoverParams,
 } from '@velmlabs/unstuck-protocol';
-import { createEngine, hostnames, type CdpClient, type EventLog, type LinkInfo, type Transport } from '@velmlabs/unstuck-core';
+import { createEngine, hostnames, sendTakeoverAlert, type CdpClient, type CloudAlerter, type EventLog, type Transport } from '@velmlabs/unstuck-core';
 import { createTunneledCdp } from './tunnel';
 
 export interface StdioHostOptions {
@@ -20,7 +20,7 @@ export interface StdioHostOptions {
   /** Default for takeovers that don't say (UNSTUCK_REQUIRE_CODE=1). */
   requireCode?: boolean;
   /** Sends the link to the user's paired phones (Cloud only); skipped per takeover by `alerts: false`. */
-  alerter?: (info: LinkInfo, site: string | undefined) => Promise<void>;
+  alerter?: CloudAlerter;
 }
 
 /**
@@ -64,6 +64,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
 
   peer.handle(Methods.takeover, (raw) => {
     const p = raw as TakeoverParams;
+    if (p.alerts === 'required' && !opts.alerter) throw Object.assign(new Error("alerts: 'required' needs apiKey (Unstuck Cloud)"), { code: 'config_error' });
     const listeners = new Set<(popup: CdpClient) => void>();
     popupListeners.set(p.pageId, listeners);
     return engine
@@ -73,9 +74,9 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
         site: p.site,
         requireCode: p.requireCode,
         allowedSites: hostnames(p.allowedSites),
-        onLink: (info) => {
+        onLink: (info, takeover) => {
           peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId });
-          if (p.alerts !== false) void opts.alerter?.(info, p.site);
+          sendTakeoverAlert(opts.alerter, p.alerts, info, p.site, takeover);
         },
         popups: {
           onPopup(cb) {

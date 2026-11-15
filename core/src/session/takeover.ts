@@ -44,6 +44,12 @@ export interface LinkInfo {
   code?: string;
 }
 
+/** What a link handler can do to the takeover it got the link for. */
+export interface TakeoverControl {
+  /** Ends the takeover at once as `failed` with this detail (e.g. `alert_failed`); nothing happens once it has ended. */
+  fail(detail: string): void;
+}
+
 export interface TakeoverDeps {
   transport: Transport;
   key: CryptoKey;
@@ -68,7 +74,7 @@ export interface TakeoverOptions {
   reason: string;
   timeoutS: number;
   site?: string;
-  onLink?: (info: LinkInfo) => void;
+  onLink?: (info: LinkInfo, takeover: TakeoverControl) => void;
   /** Set when the page closed before the session started (caller subscribed earlier). */
   closedBefore?: string;
   /** Popups to follow: the newest open popup is what the human sees and controls. */
@@ -79,7 +85,7 @@ export interface TakeoverOptions {
   allowedSites?: string[];
 }
 
-export interface RunningTakeover {
+export interface RunningTakeover extends TakeoverControl {
   result: Promise<TakeoverResult>;
   cancel(detail: string): void;
 }
@@ -492,10 +498,14 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     // design, section 4.2 (docs/specs/2026-11-14-notifications-design.md in the unstuck-cloud repo). "notifying" completes immediately.
     go('notified');
     emit('link', { expiresAt });
-    opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) });
+    opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail });
   })();
 
-  return { result, cancel: (detail) => finish('cancelled', detail) };
+  function fail(detail: string): void {
+    finish('failed', detail);
+  }
+
+  return { result, cancel: (detail) => finish('cancelled', detail), fail };
 }
 
 /** Uniform 000000–999999 from the CSPRNG (rejection sampling avoids modulo bias). */

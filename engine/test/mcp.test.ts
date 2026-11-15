@@ -49,7 +49,9 @@ describe('MCP server', () => {
     const tool = tools.find((t) => t.name === TOOL_NAME)!;
     expect(tool.inputSchema.required).toEqual(['reason']);
     expect(Object.keys(tool.inputSchema.properties!)).toEqual(['reason', 'cdp_url', 'target_id', 'timeout_s', 'allowed_sites', 'alerts']);
-    expect((tool.inputSchema.properties as any).alerts).toMatchObject({ type: 'boolean', description: "Send this takeover to the user's paired phones (default true)" });
+    const alerts = (tool.inputSchema.properties as any).alerts;
+    expect(alerts.anyOf).toEqual([{ type: 'boolean' }, { type: 'string', const: 'required' }]);
+    expect(alerts.description).toMatch(/^Send this takeover to the user's paired phones \(default true\)\. "required" ends it at once as failed \(alert_failed\)/);
     await server.close();
   });
 
@@ -126,7 +128,7 @@ describe('MCP server', () => {
   }, 30_000);
 
   it.each([[undefined, 1], [true, 1], [false, 0]])('alerts=%s calls the alerter %i time(s)', async (alerts, calls) => {
-    const alerter = vi.fn<(info: any, site: string | undefined) => Promise<void>>(async () => {});
+    const alerter = vi.fn<(info: any, site: string | undefined) => Promise<any>>(async () => ({ delivered: 1 }));
     const { client, server, logs } = await connect({ transport: new FakeTransport(), alerter });
     const call = client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 10, ...(alerts === undefined ? {} : { alerts }) } });
     // onLink runs the alerter right after it writes the link line, so once the link has reached the client the flag has been applied.
@@ -137,6 +139,28 @@ describe('MCP server', () => {
     await server.close();
     await call.catch(() => {});
   }, 30_000);
+
+  it("alerts: 'required' with no phone reached → the tool returns failed/alert_failed at once", async () => {
+    const alerter = vi.fn(async () => ({ delivered: 0 as const, problem: 'no_devices' as const }));
+    const { client, server } = await connect({ transport: new FakeTransport(), alerter });
+    const res = (await client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 600, alerts: 'required' } })) as {
+      content: { text: string }[];
+      isError: boolean;
+    };
+    expect(res.isError).toBe(true);
+    expect(JSON.parse(res.content[0]!.text)).toMatchObject({ status: 'failed', detail: 'alert_failed' });
+    await server.close();
+  }, 30_000);
+
+  it("alerts: 'required' without Unstuck Cloud → a clear tool error before touching the browser", async () => {
+    const connectCdp = vi.fn();
+    const { client, server } = await connect({ transport: new FakeTransport(), connect: connectCdp as never });
+    const res = (await client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: '127.0.0.1:1', alerts: 'required' } })) as { content: { text: string }[]; isError: boolean };
+    expect(res.isError).toBe(true);
+    expect(res.content[0]!.text).toBe("alerts: 'required' needs UNSTUCK_API_KEY (Unstuck Cloud)");
+    expect(connectCdp).not.toHaveBeenCalled();
+    await server.close();
+  });
 
   it('no browser configured → a clear tool error', async () => {
     const { client, server } = await connect({ transport: new FakeTransport() });

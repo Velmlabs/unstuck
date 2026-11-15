@@ -6,7 +6,7 @@ import { FakeTransport, FakeCdp } from '@velmlabs/unstuck-core/testing';
 import { MemoryEventLog } from '@velmlabs/unstuck-core';
 import { runStdioHost } from '../src/stdio-host';
 
-function start(alerter?: (info: any, site: string | undefined) => Promise<void>) {
+function start(alerter?: (info: any, site: string | undefined) => Promise<any>) {
   const input = new PassThrough();
   const output = new PassThrough();
   const transport = new FakeTransport();
@@ -22,7 +22,7 @@ function start(alerter?: (info: any, site: string | undefined) => Promise<void>)
 }
 
 describe('runStdioHost alerts', () => {
-  async function run(alerter: ((info: any, site: string | undefined) => Promise<void>) | undefined, params: object) {
+  async function run(alerter: ((info: any, site: string | undefined) => Promise<any>) | undefined, params: object) {
     const h = start(alerter);
     const cdp = new FakeCdp();
     h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
@@ -61,6 +61,53 @@ describe('runStdioHost alerts', () => {
     await run(alerter, { alerts: true });
     expect(alerter).toHaveBeenCalledTimes(1);
     await run(undefined as any, {});
+  });
+
+  describe("alerts: 'required'", () => {
+    async function required(alerter: ((info: any, site: string | undefined) => Promise<any>) | undefined) {
+      const h = start(alerter);
+      const cdp = new FakeCdp();
+      h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
+      h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+      const links: any[] = [];
+      h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
+      const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'CAPTCHA', timeoutS: 30, site: 'news.example.com', alerts: 'required' });
+      return { h, links, result };
+    }
+    const end = async (h: { input: PassThrough; done: Promise<void> }) => {
+      h.input.end();
+      await h.done;
+    };
+
+    it('the link reached no phone → failed/alert_failed within 1 s', async () => {
+      for (const problem of ['no_devices', 'notify_failed', 'alerts_not_allowed']) {
+        const t = await required(async () => ({ delivered: 0, problem }));
+        const started = Date.now();
+        await expect(t.result).resolves.toMatchObject({ status: 'failed', detail: 'alert_failed' });
+        expect(Date.now() - started).toBeLessThan(1_000);
+        expect(t.links).toHaveLength(1);
+        await end(t.h);
+      }
+    });
+
+    it('delivered to one phone → the takeover goes on', async () => {
+      const t = await required(async () => ({ delivered: 1 }));
+      await vi.waitFor(() => expect(t.links).toHaveLength(1));
+      const settled = vi.fn();
+      void t.result.then(settled, settled);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(settled).not.toHaveBeenCalled();
+      await end(t.h);
+      await expect(t.result).resolves.toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
+    });
+
+    it('no Cloud alerter (self-hosted relay, local server) → config_error before any takeover starts', async () => {
+      const t = await required(undefined);
+      await expect(t.result).rejects.toMatchObject({ code: 'config_error', message: "alerts: 'required' needs apiKey (Unstuck Cloud)" });
+      expect(t.links).toHaveLength(0);
+      expect(t.h.transport.published.size).toBe(0);
+      await end(t.h);
+    });
   });
 });
 

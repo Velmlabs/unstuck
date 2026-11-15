@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildRelayTransport, createEngine, CLOUD_RELAY_URL, type TakeoverCallOptions } from '@velmlabs/unstuck-core';
 import { FakeCdp, FakeTransport } from '@velmlabs/unstuck-core/testing';
-import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import { exportDevicePublicKey, newDeviceKeyPair, type TakeoverResult } from '@velmlabs/unstuck-protocol';
 import { settle } from '../../core/test/settle';
 import { InProcessUnstuck } from '../src/in-process';
 import { Unstuck, UnstuckConfigError } from '../src/index';
@@ -80,6 +80,8 @@ async function join(transport: FakeTransport, url: string) {
   expect(v.json()[0]).toMatchObject({ t: 'ready' });
   return v;
 }
+
+const box = (t: { box: { result?: TakeoverResult } }) => t.box.result;
 
 function track(p: Promise<TakeoverResult>) {
   const box: { result?: TakeoverResult } = {};
@@ -208,6 +210,72 @@ describe('InProcessUnstuck', () => {
     expect(lastTransport().published.size).toBe(1);
     expect(fetch).not.toHaveBeenCalled();
     await u.close();
+  });
+
+  describe("alerts: 'required'", () => {
+    const phone = async () => {
+      const pair = await newDeviceKeyPair();
+      return { id: 'd1', label: 'Pixel', publicKey: await exportDevicePublicKey(pair.publicKey) };
+    };
+    /** Cloud answering the devices lookup and the notify call. */
+    const cloud = (devices: () => Response | Promise<Response>, notify: () => Response = () => new Response('', { status: 202 })) =>
+      vi.fn(async (url: string) => (url.endsWith('/devices') ? devices() : notify())) as unknown as typeof fetch;
+    const required = async (fetch: typeof globalThis.fetch) => {
+      const lines: string[] = [];
+      vi.spyOn(console, 'error').mockImplementation((l: unknown) => void lines.push(String(l)));
+      const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', onLink: () => {}, fetch }, {});
+      const page = new FakePage();
+      const box = track(u.takeover(page, { reason: 'x', alerts: 'required' }));
+      await settle();
+      return { u, box, page, lines };
+    };
+
+    it('no paired phone → failed/alert_failed at once, the link stops working', async () => {
+      const t = await required(cloud(() => Response.json({ devices: [] })));
+      expect(box(t)).toMatchObject({ status: 'failed', detail: 'alert_failed' });
+      expect(lastTransport().unpublished).toHaveLength(1);
+      expect(t.page.detached).toBe(1);
+      await t.u.close();
+    });
+    it('notify answered 500 → failed/alert_failed', async () => {
+      const p = await phone();
+      const t = await required(cloud(() => Response.json({ devices: [p] }), () => new Response('', { status: 500 })));
+      expect(box(t)).toMatchObject({ status: 'failed', detail: 'alert_failed' });
+      for (const l of t.lines) expect(l).not.toContain('uk_live_secret');
+      await t.u.close();
+    });
+    it('alerts not allowed for the key → failed/alert_failed', async () => {
+      const t = await required(cloud(() => Response.json({ error: 'alerts_not_allowed' }, { status: 403 })));
+      expect(box(t)).toMatchObject({ status: 'failed', detail: 'alert_failed' });
+      await t.u.close();
+    });
+    it('delivered to one phone → the takeover goes on', async () => {
+      const t = await required(cloud(async () => Response.json({ devices: [await phone()] })));
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(box(t)).toBeUndefined();
+      await t.u.close();
+      await settle();
+      expect(box(t)).toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
+    });
+    it('alerts: true (the default) with no phone keeps waiting, as before', async () => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', onLink: () => {}, fetch: cloud(() => Response.json({ devices: [] })) }, {});
+      const r = track(u.takeover(new FakePage(), { reason: 'x', alerts: true }));
+      await settle();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(r.result).toBeUndefined();
+      await u.close();
+    });
+    it('a self-hosted relay has no phone alerts: UnstuckConfigError before the page is attached', async () => {
+      const page = new FakePage();
+      const attach = vi.spyOn(page, 'createCDPSession');
+      const u = new InProcessUnstuck({ relay: 'wss://own.example', agentKey: 'ak', onLink: () => {} }, {});
+      const p = u.takeover(page, { reason: 'x', alerts: 'required' });
+      await expect(p).rejects.toThrow(UnstuckConfigError);
+      await expect(p).rejects.toThrow("alerts: 'required' needs apiKey (Unstuck Cloud)");
+      expect(attach).not.toHaveBeenCalled();
+      expect(buildRelayTransport).not.toHaveBeenCalled();
+    });
   });
 
   it('follows a popup opened during the takeover, and detaches it afterwards', async () => {

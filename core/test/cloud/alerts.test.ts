@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { newDeviceKeyPair, exportDevicePublicKey, openAlert } from '@velmlabs/unstuck-protocol';
 import type { LinkInfo } from '../../src/engine';
-import { createCloudAlerter } from '../../src/cloud/alerts';
+import { createCloudAlerter, sendTakeoverAlert } from '../../src/cloud/alerts';
 
 const T = 'tok_SECRET_value';
 const K = 'key_SECRET_value';
@@ -98,7 +98,7 @@ describe('createCloudAlerter', () => {
 
   it('fetch throwing, 5xx, bad json or a bad device key resolve with one log line and no secrets', async () => {
     const throwing = setup(() => Promise.reject(new Error('boom APIKEY')));
-    await expect(throwing.alert(info, 'x.com')).resolves.toBeUndefined();
+    await expect(throwing.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'error' });
     expect(throwing.lines).toHaveLength(1);
 
     const five = setup(() => new Response('', { status: 503 }));
@@ -126,7 +126,7 @@ describe('createCloudAlerter', () => {
   it('a thrown non-Error still resolves with one log line', async () => {
     for (const thrown of ['just a string', undefined, null, 42]) {
       const s = setup(() => Promise.reject(thrown));
-      await expect(s.alert(info, 'x.com')).resolves.toBeUndefined();
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'error' });
       expect(s.lines).toHaveLength(1);
     }
     const masked = setup(() => Promise.reject('failed for APIKEY'));
@@ -191,6 +191,48 @@ describe('createCloudAlerter', () => {
     expect(body.sealed[0].blob.length).toBeLessThan(2000);
   });
 
+  describe('the outcome it resolves with (for alerts: required)', () => {
+    it('delivered: how many phones the link was sealed to, once Cloud accepted it', async () => {
+      const a = await device('d1');
+      const b = await device('d2');
+      const s = setup(() => json({ devices: [a, b, { id: 'bad', publicKey: 'AAAA' }] }));
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 2 });
+    });
+    it('alerts not allowed for the key, also from the cache', async () => {
+      const s = setup(() => json({ error: 'alerts_not_allowed' }, 403));
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'alerts_not_allowed' });
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'alerts_not_allowed' });
+      expect(s.calls).toHaveLength(1);
+    });
+    it('no paired phone', async () => {
+      const s = setup(() => json({ devices: [] }));
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'no_devices' });
+    });
+    it('every seal failed', async () => {
+      const s = setup(() => json({ devices: [{ id: 'd', publicKey: 'AAAA' }] }));
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'seal_failed' });
+    });
+    it('notify answered non-2xx', async () => {
+      const a = await device('d1');
+      const s = setup(() => json({ devices: [a] }), () => new Response('', { status: 500 }));
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'notify_failed' });
+      expect(s.lines[1]).toMatch(/could not send the phone alert: notify answered 500/);
+    });
+    it('a 401 from either call: the key was rejected', async () => {
+      const devices = setup(() => new Response('', { status: 401 }));
+      await expect(devices.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'unauthorized' });
+      expect(devices.lines).toEqual(['[unstuck] could not send the phone alert: devices lookup answered 401']);
+      const a = await device('d1');
+      const notify = setup(() => json({ devices: [a] }), () => new Response('', { status: 401 }));
+      await expect(notify.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'unauthorized' });
+    });
+    it('anything else (5xx lookup, bad json, a link without a fragment) is an error', async () => {
+      await expect(setup(() => new Response('', { status: 503 })).alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'error' });
+      await expect(setup(() => new Response('<html>')).alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'error' });
+      await expect(setup(() => json({ devices: [] })).alert({ ...info, url: 'http://127.0.0.1:1/s/sess1' }, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'error' });
+    });
+  });
+
   it('defaults: global fetch, console-free stderr log and Date.now; a trailing slash on the base is stripped', async () => {
     const orig = globalThis.fetch;
     const urls: string[] = [];
@@ -206,5 +248,26 @@ describe('createCloudAlerter', () => {
     expect(urls).toEqual(['https://api.test/api/v1/agent/devices']);
     expect(written).toHaveLength(1);
     expect(written[0]).toMatch(/^\[unstuck\] /);
+  });
+});
+
+describe('sendTakeoverAlert', () => {
+  const ok = async () => ({ delivered: 1 });
+  const none = async () => ({ delivered: 0 as const, problem: 'no_devices' as const });
+  it("alerts false or no alerter: nothing sent; true: sent, never fails; 'required': fails only when no phone got it", async () => {
+    const run = async (alerter: Parameters<typeof sendTakeoverAlert>[0], alerts: boolean | 'required' | undefined) => {
+      const fail = vi.fn();
+      const spy = alerter && vi.fn(alerter);
+      sendTakeoverAlert(spy, alerts, info, 'x.com', { fail });
+      await Promise.resolve();
+      await Promise.resolve();
+      return { sent: spy ? spy.mock.calls.length : 0, fail: fail.mock.calls };
+    };
+    expect(await run(none, false)).toEqual({ sent: 0, fail: [] });
+    expect(await run(null, 'required')).toEqual({ sent: 0, fail: [] });
+    expect(await run(none, undefined)).toEqual({ sent: 1, fail: [] });
+    expect(await run(none, true)).toEqual({ sent: 1, fail: [] });
+    expect(await run(ok, 'required')).toEqual({ sent: 1, fail: [] });
+    expect(await run(none, 'required')).toEqual({ sent: 1, fail: [['alert_failed']] });
   });
 });

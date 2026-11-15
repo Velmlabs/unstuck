@@ -9,7 +9,7 @@ import {
 } from '@velmlabs/unstuck-protocol';
 import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
-import { UnstuckEngineError } from './errors';
+import { UnstuckConfigError, UnstuckEngineError } from './errors';
 import { InProcessUnstuck } from './in-process';
 import { optionEnv, validateOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
 
@@ -119,6 +119,8 @@ export class Unstuck {
       } catch (e) {
         // The RPC channel closing means the engine process is gone; report it as such.
         if (e instanceof RpcCallError && e.code === 'closed') throw new UnstuckEngineError(`engine exited with code ${await engine.exited}`);
+        // The engine refused the options (e.g. alerts: 'required' without Unstuck Cloud).
+        if (e instanceof RpcCallError && e.code === 'config_error') throw new UnstuckConfigError(e.message);
         throw e;
       }
     } finally {

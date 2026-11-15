@@ -5,9 +5,10 @@ import {
   createEngine,
   hostnames,
   selectTransport,
+  sendTakeoverAlert,
   type CdpClient,
+  type CloudAlerter,
   type Engine,
-  type LinkInfo,
   type PopupSource,
   type TransportChoice,
 } from '@velmlabs/unstuck-core';
@@ -36,7 +37,7 @@ function siteOf(url: string): string | undefined {
 export class InProcessUnstuck {
   private readonly env: Record<string, string | undefined>;
   private readonly choice: TransportChoice;
-  private readonly alerter: ((info: LinkInfo, site: string | undefined) => Promise<void>) | null;
+  private readonly alerter: CloudAlerter | null;
   private engine: Engine | null = null;
   /** Bumped by close(): a takeover that was still attaching when it ran must not start a new engine. */
   private generation = 0;
@@ -65,6 +66,7 @@ export class InProcessUnstuck {
 
   private async run(page: unknown, o: TakeoverOptions): Promise<TakeoverResult> {
     if (this.choice.kind !== 'relay') throw new UnstuckConfigError('in a Worker, Unstuck needs a relay: set apiKey or relay + agentKey');
+    if (o.alerts === 'required' && !this.alerter) throw new UnstuckConfigError("alerts: 'required' needs apiKey (Unstuck Cloud)");
     const requireCode = o.requireCode ?? this.opts.requireCode ?? this.env.UNSTUCK_REQUIRE_CODE === '1';
     if (requireCode && !this.opts.onLink)
       throw new TypeError('requireCode needs an onLink handler that sends the 6-digit code by a different channel than the link (printed together, the code protects nothing)');
@@ -117,9 +119,9 @@ export class InProcessUnstuck {
         requireCode,
         allowedSites: hostnames(o.allowedSites),
         popups: source,
-        onLink: (info) => {
+        onLink: (info, takeover) => {
           onLink({ url: info.url, reason: info.reason, sessionId: info.sessionId, expiresAt: info.expiresAt, ...(info.code ? { code: info.code } : {}) });
-          if (o.alerts !== false) void this.alerter?.(info, site);
+          sendTakeoverAlert(this.alerter, o.alerts, info, site, takeover);
         },
       });
     } finally {
