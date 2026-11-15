@@ -93,11 +93,34 @@ claude mcp add unstuck -e UNSTUCK_CDP_URL=http://127.0.0.1:9222 -- npx -y @velml
 
 Tell your agent: *"If you hit a CAPTCHA or a login, call request_human_takeover with the reason."* Setup for Claude Desktop and Cursor: [unstuck.sh/docs/mcp](https://unstuck.sh/docs/mcp/).
 
+### Give your agent the Unstuck skill
+
+The skill teaches an agent *when* to hand a step to a person (CAPTCHAs, logins, 2FA, pages it can't get past) and *how*: a short reason without secrets, the right timeout and sites, and what to do with each result. You don't have to explain Unstuck in every prompt.
+
+**Claude Code:** install the plugin. It adds the skill and the Unstuck MCP server in one step:
+
+```bash
+/plugin marketplace add velmlabs/unstuck
+/plugin install unstuck@unstuck
+```
+
+Start Chrome with `--remote-debugging-port=9222` as above, then ask for the task: *"Open portal.example.com and download this month's invoice."* At the login or CAPTCHA, the agent calls Unstuck, you get the link, and it carries on after you tap Done.
+
+**Any agent that reads skills** (Codex, Cursor, Claude Desktop and others): download [`SKILL.md`](plugins/unstuck/skills/unstuck/SKILL.md) into its skills folder, and add the MCP server above or the SDK:
+
+```bash
+mkdir -p ~/.claude/skills/unstuck
+curl -fsSL https://unstuck.sh/skills/unstuck/SKILL.md -o ~/.claude/skills/unstuck/SKILL.md
+```
+
+Set `UNSTUCK_API_KEY` (from [your dashboard](https://unstuck.sh/dashboard/keys)) for links that open on any phone and for phone alerts. Full guide: [unstuck.sh/docs/skill](https://unstuck.sh/docs/skill/).
+
 ## Works with
 
 | Stack | Guide | Example |
 |---|---|---|
 | MCP: Claude Code, Claude Desktop, Cursor, Playwright MCP | [unstuck.sh/docs/mcp](https://unstuck.sh/docs/mcp) | [`examples/mcp`](examples/mcp) |
+| Agent skill: Claude Code plugin, or any agent that reads skills | [unstuck.sh/docs/skill](https://unstuck.sh/docs/skill/) | [`plugins/unstuck`](plugins/unstuck) |
 | Playwright (TypeScript, Python) | [unstuck.sh/docs/playwright](https://unstuck.sh/docs/playwright) | [`examples/playwright-ts`](examples/playwright-ts), [`examples/playwright-py`](examples/playwright-py) |
 | Puppeteer | [unstuck.sh/docs/puppeteer](https://unstuck.sh/docs/puppeteer) | [`examples/puppeteer`](examples/puppeteer) |
 | browser-use, Stagehand | [unstuck.sh/docs/ai-agents](https://unstuck.sh/docs/ai-agents) | [`examples/browser-use`](examples/browser-use), [`examples/stagehand`](examples/stagehand) |

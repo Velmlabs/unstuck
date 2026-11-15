@@ -8,12 +8,13 @@ const tracked = execFileSync('git', ['ls-files'], { encoding: 'utf8' })
   .filter((f) => /\.(ts|tsx|mjs|js|json|py|toml|md|yaml|yml)$|Dockerfile$/.test(f) && !f.startsWith('docs/') && f !== 'pnpm-lock.yaml');
 
 describe('package names', () => {
+  // The npm name is @velmlabs/unstuck; Claude Code plugin manifests (.claude-plugin/) are rightly named "unstuck".
   it('no code, manifest or example uses the old names', () => {
     const offenders = [];
     for (const f of tracked) {
       if (!fs.existsSync(f)) continue;
       const text = fs.readFileSync(f, 'utf8');
-      if (/@unstuck\//.test(text) || /from ['"]unstuck['"]|require\(['"]unstuck['"]\)|"unstuck": "workspace/.test(text) || /^\s*"name": "unstuck",/m.test(text)) offenders.push(f);
+      if (/@unstuck\//.test(text) || /from ['"]unstuck['"]|require\(['"]unstuck['"]\)|"unstuck": "workspace/.test(text) || (f.endsWith('package.json') && /^\s*"name": "unstuck",/m.test(text))) offenders.push(f);
     }
     expect(offenders.filter((f) => f !== 'scripts/package-names.test.mjs' && f !== 'e2e/examples/harness.ts')).toEqual([]);
   });
