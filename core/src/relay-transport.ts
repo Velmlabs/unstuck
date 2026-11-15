@@ -89,8 +89,9 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
     send(d) {
       if (!conn.closed && ws.readyState === 1) ws.send(encodeEnvelope(c, typeof d === 'string' ? enc.encode(d) : d));
     },
+    // Workers' client WebSocket has no bufferedAmount: undefined would make every backpressure check fail (NaN < mark).
     get bufferedAmount() {
-      return ws.bufferedAmount;
+      return ws.bufferedAmount ?? 0;
     },
     onMessage: (h) => void conn.messages.push(h),
     onClose: (h) => void conn.closes.push(h),

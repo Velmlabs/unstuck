@@ -126,6 +126,15 @@ describe('createRelayTransport', () => {
     expect(closed).toBe(1);
   });
 
+  it("a socket without bufferedAmount (Workers' client WebSocket) reads as 0, so frames are not held back forever", async () => {
+    const { t, ws } = await published();
+    (ws as { bufferedAmount?: number }).bufferedAmount = undefined;
+    const conns: ViewerConnection[] = [];
+    t.onConnection(ID, (c) => conns.push(c));
+    ws.text({ t: 'open', c: 3 });
+    expect(conns[0]!.bufferedAmount).toBe(0);
+  });
+
   it('binary messages delivered as Blob (Workers client sockets) are handled, in order with text', async () => {
     const { t, ws } = await published();
     const got: unknown[] = [];
