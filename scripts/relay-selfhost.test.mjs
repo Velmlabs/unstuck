@@ -48,3 +48,21 @@ describe('bundled relay', () => {
     }
   }, 60_000);
 });
+
+describe('relay image workflow', () => {
+  const wf = read('.github/workflows/relay-image.yml');
+  it('pins every action to a full commit (supply chain), and pushes only from a public repo with its own token', () => {
+    const uses = [...wf.matchAll(/uses: ([^\s]+)/g)].map((m) => m[1]);
+    expect(uses.length).toBeGreaterThan(5);
+    for (const u of uses) expect(u, u).toMatch(/@[0-9a-f]{40}$/);
+    expect(wf).toContain('if: ${{ !github.event.repository.private }}');
+    expect(wf).toContain('password: ${{ secrets.GITHUB_TOKEN }}');
+    expect(wf).toContain('platforms: linux/amd64,linux/arm64');
+  });
+  it('publishes ghcr.io/velmlabs/unstuck-relay with the relay version and latest, after a smoke test, with provenance', () => {
+    expect(wf).toContain('IMAGE: ghcr.io/velmlabs/unstuck-relay');
+    expect(wf).toContain("require('./relay-node/package.json').version");
+    expect(wf.indexOf('Smoke test')).toBeLessThan(wf.indexOf('Build and push'));
+    expect(wf).toContain('actions/attest-build-provenance@');
+  });
+});

@@ -1,6 +1,7 @@
 # Unstuck relay (AGPL-3.0). Build from the repository root:
 #   docker build -f relay-node/Dockerfile -t unstuck-relay .
-FROM node:22-alpine AS build
+# The build stage runs once on the builder's own platform: its output (one JS file and static files) runs anywhere.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS build
 WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
@@ -17,6 +18,11 @@ RUN printf 'packages:\n  - protocol\n  - core\n  - relay-core\n  - relay-node\n 
 
 # The relay is one bundled file plus the viewer's static files: no node_modules, nothing compiled at start.
 FROM node:22-alpine
+LABEL org.opencontainers.image.title="Unstuck relay" \
+      org.opencontainers.image.description="Self-hosted relay for Unstuck: human takeover for AI browser agents" \
+      org.opencontainers.image.source="https://github.com/velmlabs/unstuck" \
+      org.opencontainers.image.url="https://unstuck.sh/docs/self-host/" \
+      org.opencontainers.image.licenses="AGPL-3.0-only"
 WORKDIR /app
 COPY --from=build /src/relay-node/dist/relay.mjs ./relay.mjs
 COPY --from=build /src/viewer/dist ./viewer-dist

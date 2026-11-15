@@ -1,0 +1,84 @@
+# Publishes the self-hosted relay as a Docker image: ghcr.io/velmlabs/unstuck-relay, for linux/amd64 and linux/arm64,
+# tagged with the relay's version (relay-node/package.json) and `latest`, with a signed build provenance attestation
+# (verify with: gh attestation verify oci://ghcr.io/velmlabs/unstuck-relay:<version> --owner velmlabs).
+#
+# Runs on version tags (v*) and by hand (Actions → Relay image → Run workflow). No secrets are stored: it pushes with
+# the workflow's own GITHUB_TOKEN. One-time setup after the first run: GitHub → velmlabs → Packages → unstuck-relay →
+# Package settings → Change visibility → Public.
+name: Relay image
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: relay-image
+  cancel-in-progress: false
+env:
+  IMAGE: ghcr.io/velmlabs/unstuck-relay
+jobs:
+  image:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # push to ghcr.io
+      id-token: write # sign the provenance attestation
+      attestations: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Relay version
+        id: version
+        run: echo "version=$(node -p "require('./relay-node/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Build for this runner and test it
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: relay-node/Dockerfile
+          platforms: linux/amd64
+          load: true
+          tags: unstuck-relay:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test (starts, answers /healthz, serves the viewer, refuses a missing key)
+        run: |
+          docker run -d --name relay -p 8787:8787 -e UNSTUCK_AGENT_KEYS=ci-key unstuck-relay:test
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8787/healthz && break; sleep 1; done
+          curl -fsS http://127.0.0.1:8787/healthz | grep -q '"ok":true'
+          docker run --rm -e PORT=8788 unstuck-relay:test 2>&1 | grep -qi 'UNSTUCK_AGENT_KEYS' || (echo 'a relay without keys must refuse to start' && exit 1)
+          docker exec relay test -f /app/viewer-dist/index.html
+          docker rm -f relay
+      - uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f # v5.8.0
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+      - name: Build and push (amd64 + arm64)
+        id: push
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          file: relay-node/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
