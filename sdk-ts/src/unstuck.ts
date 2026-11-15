@@ -11,7 +11,7 @@ import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
 import { UnstuckConfigError, UnstuckEngineError } from './errors';
 import { InProcessUnstuck } from './in-process';
-import { optionEnv, validateOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
+import { callUserOnLink, optionEnv, validateOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
 
 export type { TakeoverLink, UnstuckOptions };
 
@@ -42,7 +42,7 @@ export class Unstuck {
   constructor(private readonly opts: UnstuckOptions = {}) {
     validateOptions(opts);
     // On Node, the environment is the fallback for options, exactly like binary mode.
-    this.inProcess = opts.mode === 'in-process' ? new InProcessUnstuck(opts, process.env) : null;
+    this.inProcess = opts.mode === 'in-process' ? new InProcessUnstuck(opts, process.env, 'in-process mode needs a relay: set apiKey or relay + agentKey') : null;
   }
 
   /**
@@ -169,7 +169,10 @@ export class Unstuck {
       });
       engine.peer.onNotification(Methods.takeoverLink, (raw) => {
         const l = raw as TakeoverLinkParams;
-        (this.opts.onLink ?? defaultOnLink)({ url: l.url, reason: l.reason, sessionId: l.sessionId, expiresAt: l.expiresAt, ...(l.code ? { code: l.code } : {}) });
+        const link: TakeoverLink = { url: l.url, reason: l.reason, sessionId: l.sessionId, expiresAt: l.expiresAt, ...(l.code ? { code: l.code } : {}) };
+        // A throwing handler would escape the engine's stdout reader and crash the process.
+        if (this.opts.onLink) callUserOnLink(this.opts.onLink, link);
+        else defaultOnLink(link);
       });
       void engine.exited.then(() => {
         if (this.engine === started) this.engine = null;

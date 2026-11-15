@@ -131,13 +131,30 @@ describe('MCP server', () => {
     const alerter = vi.fn<(info: any, site: string | undefined) => Promise<any>>(async () => ({ delivered: 1 }));
     const { client, server, logs } = await connect({ transport: new FakeTransport(), alerter });
     const call = client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 10, ...(alerts === undefined ? {} : { alerts }) } });
-    // onLink runs the alerter right after it writes the link line, so once the link has reached the client the flag has been applied.
+    // onLink runs the alerter before it writes the link line, so once the link has reached the client the flag has been applied.
     await vi.waitFor(() => expect(logs.some((l) => l.includes('→'))).toBe(true), { timeout: 15_000 });
     if (calls) await vi.waitFor(() => expect(alerter).toHaveBeenCalledTimes(1), { timeout: 15_000 });
     expect(alerter).toHaveBeenCalledTimes(calls);
     if (calls) expect(alerter.mock.calls[0]![0]).toMatchObject({ reason: 'r' });
     await server.close();
     await call.catch(() => {});
+  }, 30_000);
+
+  it('the alert goes out even if writing the link line throws (the takeover is not broken by it)', async () => {
+    const alerter = vi.fn<(info: any, site: string | undefined) => Promise<any>>(async () => ({ delivered: 0, problem: 'no_devices' }));
+    const stderr = {
+      write: () => {
+        throw new Error('EPIPE');
+      },
+    };
+    const { client, server } = await connect({ transport: new FakeTransport(), alerter, stderr });
+    const res = client.callTool({ name: TOOL_NAME, arguments: { reason: 'r', cdp_url: `127.0.0.1:${chrome.port}`, timeout_s: 600, alerts: 'required' } }) as Promise<{
+      content: { text: string }[];
+    }>;
+    await vi.waitFor(() => expect(alerter).toHaveBeenCalledTimes(1), { timeout: 15_000 });
+    // 'required' still ends it at once with alert_failed: the takeover did not wait for its timeout.
+    expect(JSON.parse((await res).content[0]!.text)).toMatchObject({ status: 'failed', detail: 'alert_failed' });
+    await server.close();
   }, 30_000);
 
   it("alerts: 'required' with no phone reached → the tool returns failed/alert_failed at once", async () => {

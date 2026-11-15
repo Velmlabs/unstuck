@@ -632,3 +632,43 @@ describe('messages that arrive while the hello is still being handled', () => {
   });
 });
 
+
+describe('a link handler or step that throws', () => {
+  it('a throwing onLink leaves the takeover running (no unhandled rejection): it still ends normally', async () => {
+    const transport = new FakeTransport();
+    const engine = createEngine({ transport, defaultTimeoutS: 2 });
+    const p = engine.takeover(new FakeCdp(), {
+      reason: 'x',
+      onLink: () => {
+        throw new Error('handler bug');
+      },
+    });
+    await settle();
+    expect(transport.published.size).toBe(1);
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(p).resolves.toMatchObject({ status: 'timed_out' });
+  });
+
+  it('an unexpected error in the start-up steps fails the takeover at once instead of rejecting unhandled', async () => {
+    const transport = new FakeTransport();
+    const log = {
+      append(e: { type: string }) {
+        if (e.type === 'link') throw new Error('log is full');
+      },
+    };
+    const engine = createEngine({ transport, log });
+    await expect(engine.takeover(new FakeCdp(), { reason: 'x' })).resolves.toMatchObject({ status: 'failed', detail: 'internal_error: log is full' });
+    expect(transport.unpublished).toHaveLength(1);
+  });
+
+  it('a non-Error thrown value is reported as text', async () => {
+    const transport = new FakeTransport();
+    const log = {
+      append(e: { type: string }) {
+        if (e.type === 'published') throw 'nope';
+      },
+    };
+    const engine = createEngine({ transport, log });
+    await expect(engine.takeover(new FakeCdp(), { reason: 'x' })).resolves.toMatchObject({ status: 'failed', detail: 'internal_error: nope' });
+  });
+});

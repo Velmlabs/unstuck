@@ -500,8 +500,13 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     // design, section 4.2 (docs/specs/2026-11-14-notifications-design.md in the unstuck-cloud repo). "notifying" completes immediately.
     go('notified');
     emit('link', { expiresAt });
-    opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, joined });
-  })();
+    try {
+      opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, joined });
+    } catch {
+      // A link handler that throws is the caller's bug: the takeover keeps running (an alert may already be on its way).
+    }
+    // Never an unhandled rejection (it would crash Node, and the takeover would wait for its timeout): fail it now.
+  })().catch((e: unknown) => finish('failed', `internal_error: ${(e as Error)?.message ?? String(e)}`));
 
   function fail(detail: string): void {
     finish('failed', detail);

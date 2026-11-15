@@ -31,8 +31,6 @@
     ".": {
       "workerd": "./src/edge.ts",
       "worker": "./src/edge.ts",
-      "deno": "./src/edge.ts",
-      "bun": "./src/edge.ts",
       "browser": "./src/edge.ts",
       "default": "./src/index.ts"
     }
@@ -65,14 +63,6 @@
           "default": "./dist/edge.js"
         },
         "worker": {
-          "types": "./dist/edge.d.ts",
-          "default": "./dist/edge.js"
-        },
-        "deno": {
-          "types": "./dist/edge.d.ts",
-          "default": "./dist/edge.js"
-        },
-        "bun": {
           "types": "./dist/edge.d.ts",
           "default": "./dist/edge.js"
         },

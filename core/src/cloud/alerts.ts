@@ -67,8 +67,8 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
   const log = o.log ?? ((l: string) => console.error(l));
   const now = o.now ?? Date.now;
   const headers = { Authorization: `Bearer ${o.apiKey}` };
-  /** `allowed` is false when the key may not send alerts (403 alerts_not_allowed); that answer is cached too. */
-  let cache: { at: number; devices: Device[]; allowed: boolean } | null = null;
+  /** Only a successful device list is cached: a refusal or failure is asked again on the next alert (it may be fixed by then). */
+  let cache: { at: number; devices: Device[] } | null = null;
   /** The phones the previous alert was sealed to (ids and labels), so the log line appears only when it changes. */
   let lastSet: string | null = null;
 
@@ -92,19 +92,20 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
     }
   }
 
-  async function devices(): Promise<{ devices: Device[]; allowed: boolean }> {
-    if (cache && now() - cache.at < CACHE_MS) return cache;
-    const { list, allowed } = await within('devices lookup', async (signal) => {
+  /** The paired phones, or null when the key may not send alerts (403 alerts_not_allowed). */
+  async function devices(): Promise<Device[] | null> {
+    if (cache && now() - cache.at < CACHE_MS) return cache.devices;
+    const list = await within('devices lookup', async (signal) => {
       const res = await doFetch(`${base}/api/v1/agent/devices`, { headers, signal });
       if (res.status === 403 && (await res.json().catch(() => null))?.error === 'alerts_not_allowed') {
         log('[unstuck] alerts are not enabled for this API key (turn them on in your unstuck.sh dashboard)');
-        return { list: [] as Device[], allowed: false };
+        return null;
       }
       if (!res.ok) throw new AlertFailure(`devices lookup answered ${res.status}`, res.status === 401 ? 'unauthorized' : 'error');
-      return { list: ((await res.json()) as { devices: Device[] }).devices, allowed: true };
+      return ((await res.json()) as { devices: Device[] }).devices;
     });
-    cache = { at: now(), devices: list, allowed };
-    return cache;
+    if (list) cache = { at: now(), devices: list };
+    return list;
   }
 
   const none = (problem: AlertProblem): AlertOutcome => ({ delivered: 0, problem });
@@ -113,8 +114,8 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
     try {
       const link = splitLink(info.url);
       if (!link) return none('error');
-      const { devices: list, allowed } = await devices();
-      if (!allowed) return none('alerts_not_allowed');
+      const list = await devices();
+      if (!list) return none('alerts_not_allowed');
       if (list.length === 0) return none('no_devices');
       const payload: AlertPayload = { t: link.t, k: link.k, reason: cut(info.reason, MAX_REASON), site: cut(site ?? '', MAX_SITE), expiresAt: info.expiresAt };
       // Each phone on its own: one with a bad key is skipped, the others still get the alert.
@@ -158,6 +159,7 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
  * A takeover's alert, from its link handler: none with `alerts: false`; with `'required'`, a link that reached no paired
  * phone fails the takeover at once with `alert_failed` instead of letting it wait for its timeout, unless someone already
  * joined through the link the handler passed on. An alerter that rejects counts as no phone reached.
+ * Returns the outcome (never rejects), or null when no alert is sent (no Unstuck Cloud alerter, or `alerts: false`).
  */
 export function sendTakeoverAlert(
   alerter: CloudAlerter | null | undefined,
@@ -165,8 +167,8 @@ export function sendTakeoverAlert(
   info: LinkInfo,
   site: string | undefined,
   takeover: TakeoverControl,
-): void {
-  if (alerts === false || !alerter) return;
+): Promise<AlertOutcome> | null {
+  if (alerts === false || !alerter) return null;
   const failed = (): AlertOutcome => ({ delivered: 0, problem: 'error' });
   let sent: Promise<AlertOutcome>;
   try {
@@ -175,4 +177,5 @@ export function sendTakeoverAlert(
     sent = Promise.resolve(failed());
   }
   if (alerts === 'required') void sent.then((r) => r.delivered === 0 && !takeover.joined() && takeover.fail('alert_failed'));
+  return sent;
 }

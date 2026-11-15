@@ -48,11 +48,12 @@ describe('packed packages', () => {
       expect(JSON.stringify(pkg.exports), dir).not.toContain('src/');
       // A "default" condition, so require() (Node 22+) and CJS-mode TypeScript resolve it too.
       const node = { types: './dist/index.d.ts', import: './dist/index.js', default: './dist/index.js' };
-      // The SDK also ships an edge entry (no Node built-ins) for Workers, Deno, Bun and browsers, listed before the Node conditions.
+      // The SDK also ships an edge entry (no Node built-ins) for Workers and browsers, listed before the Node conditions.
+      // Deno and Bun get the Node entry (binary mode works there; they opt in with mode: 'in-process').
       const edge = { types: './dist/edge.d.ts', default: './dist/edge.js' };
-      const expected = dir === 'sdk-ts' ? { workerd: edge, worker: edge, deno: edge, bun: edge, browser: edge, ...node } : node;
+      const expected = dir === 'sdk-ts' ? { workerd: edge, worker: edge, browser: edge, ...node } : node;
       expect(pkg.exports['.'], dir).toEqual(expected);
-      if (dir === 'sdk-ts') expect(Object.keys(pkg.exports['.']).slice(0, 5), dir).toEqual(['workerd', 'worker', 'deno', 'bun', 'browser']);
+      if (dir === 'sdk-ts') expect(Object.keys(pkg.exports['.']).slice(0, 3), dir).toEqual(['workerd', 'worker', 'browser']);
       expect(pkg.engines, dir).toEqual({ node: '>=20' });
       expect(JSON.stringify(pkg.dependencies ?? {}), dir).not.toContain('workspace:');
       expect(pkg.repository?.url, dir).toBe('git+https://github.com/velmlabs/unstuck.git');

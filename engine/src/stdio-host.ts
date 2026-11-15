@@ -79,8 +79,9 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
         requireCode: p.requireCode,
         allowedSites: hostnames(p.allowedSites),
         onLink: (info, takeover) => {
-          peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId });
+          // The alert starts first: if passing the link on to the SDK throws, the paired phones still get it.
           sendTakeoverAlert(opts.alerter, p.alerts, info, p.site, takeover);
+          peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId });
         },
         popups: {
           onPopup(cb) {

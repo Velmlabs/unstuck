@@ -68,6 +68,27 @@ describe('Unstuck', () => {
     await human.close();
   });
 
+  it('a throwing onLink is logged without the link and the takeover goes on (it never crashes the process)', async () => {
+    const page = await browser.newPage();
+    await page.setContent('<p>hello</p>');
+    const lines: string[] = [];
+    const error = vi.spyOn(console, 'error').mockImplementation((l: unknown) => void lines.push(String(l)));
+    let url = '';
+    const unstuck = new Unstuck({
+      enginePath: ENGINE,
+      onLink: (l) => {
+        url = l.url;
+        throw new Error(`webhook refused ${l.url}`);
+      },
+    });
+    await expect(unstuck.takeover(page, { reason: 'x', timeoutS: 1 })).resolves.toMatchObject({ status: 'timed_out' });
+    expect(lines).toEqual([expect.stringMatching(/^Unstuck: your onLink handler threw \(webhook refused <link>\); the takeover goes on \(session [A-Za-z0-9_-]+\)$/)]);
+    expect(lines[0]).not.toContain(url.split('#')[1]);
+    error.mockRestore();
+    await unstuck.close();
+    await page.close();
+  });
+
   it('allowedSites reaches the engine: the page stays put on an off-site link but may go to a listed site', async () => {
     const page = await browser.newPage();
     await page.goto('data:text/html,<p>x</p>').catch(() => {});

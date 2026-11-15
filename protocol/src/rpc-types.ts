@@ -57,8 +57,8 @@ export interface TakeoverParams {
   allowedSites?: string[];
   /**
    * Send this takeover to the user's paired phones (Unstuck Cloud); undefined means yes, false skips it. 'required' fails
-   * the takeover with `alert_failed` when no paired phone gets the link; without Unstuck Cloud the engine answers the
-   * request with error code `config_error`.
+   * the takeover with `alert_failed` when Unstuck Cloud can't accept the link for at least one paired phone; without
+   * Unstuck Cloud the engine answers the request with error code `config_error`.
    */
   alerts?: boolean | 'required';
 }

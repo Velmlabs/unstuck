@@ -49,6 +49,24 @@ describe('runStdioHost alerts', () => {
     expect(alerter.mock.calls[0]![1]).toBe('news.example.com');
   });
 
+  it('the alert goes out even if passing the link on throws, and the takeover still ends normally', async () => {
+    const alerter = vi.fn(async () => ({ delivered: 0 as const, problem: 'no_devices' as const }));
+    const h = start(alerter);
+    const write = h.output.write.bind(h.output);
+    h.output.write = ((chunk: unknown, ...rest: never[]) => {
+      if (String(chunk).includes(Methods.takeoverLink)) throw new Error('EPIPE');
+      return write(chunk as never, ...rest);
+    }) as typeof h.output.write;
+    const cdp = new FakeCdp();
+    h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
+    h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+    const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'CAPTCHA', timeoutS: 30, alerts: 'required' });
+    await expect(result).resolves.toMatchObject({ status: 'failed', detail: 'alert_failed' });
+    expect(alerter).toHaveBeenCalledTimes(1);
+    h.input.end();
+    await h.done;
+  });
+
   it('alerts: false skips the alerter, and the link notification still arrives', async () => {
     const alerter = vi.fn<(info: any, site: string | undefined) => Promise<void>>(async () => {});
     const links = await run(alerter, { alerts: false });

@@ -81,8 +81,8 @@ class Unstuck:
         sites the flow needs in ``allowed_sites``, e.g. ``["accounts.google.com"]``.
 
         With Unstuck Cloud (``UNSTUCK_API_KEY``) the link is also sent to your paired phones; ``alerts=False`` skips that.
-        ``alerts="required"`` ends the takeover at once with status ``failed``, detail ``alert_failed``, if the link
-        cannot be delivered to at least one paired phone (alerts not allowed for the key, no paired phone, every seal
+        ``alerts="required"`` ends the takeover at once with status ``failed``, detail ``alert_failed``, if Unstuck
+        Cloud can't accept the link for at least one paired phone (alerts not allowed for the key, no paired phone, every seal
         failed, or Cloud refused it); without Unstuck Cloud it raises ValueError.
         """
         wants_code = self._require_code if require_code is None else require_code

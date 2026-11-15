@@ -20,9 +20,9 @@ export interface TakeoverOptions {
   allowedSites?: string[];
   /**
    * With Unstuck Cloud, the link is also sent to your paired phones; false skips that for this takeover (default true).
-   * 'required': with Unstuck Cloud, end the takeover at once with status `failed`, detail `alert_failed`, if the link
-   * cannot be delivered to at least one paired phone (alerts not allowed for the key, no paired phone, every seal
-   * failed, or notify answered non-2xx). Without Unstuck Cloud (a self-hosted relay) it throws UnstuckConfigError.
+   * 'required': with Unstuck Cloud, end the takeover at once with status `failed`, detail `alert_failed`, if Unstuck
+   * Cloud can't accept the link for at least one paired phone (alerts not allowed for the key, no paired phone, every
+   * seal failed, or notify answered non-2xx). Without Unstuck Cloud (a self-hosted relay) it throws UnstuckConfigError.
    */
   alerts?: boolean | 'required';
 }
@@ -36,9 +36,14 @@ export interface UnstuckOptions {
   port?: number;
   /** Default takeover timeout in seconds (engine default: 600). */
   timeoutS?: number;
-  /** Called when a human is needed. Default: print the link to stderr. */
+  /**
+   * Called when a human is needed. Default: binary mode prints the link to stderr. In-process mode uses console.log: with
+   * Unstuck Cloud phone alerts on, it waits for the alert and logs the link only if no paired phone got it (otherwise one
+   * line without the link); with a self-hosted relay or `alerts: false` it logs the link. A handler that throws is
+   * logged (without the link) and the takeover goes on.
+   */
   onLink?: (link: TakeoverLink) => void;
-  /** Relay to use instead of the local server, e.g. wss://relay.example.com (or set UNSTUCK_RELAY_URL). */
+  /** Relay to use instead of the local server, e.g. wss://relay.example.com (or set UNSTUCK_RELAY_URL); ws:// only to localhost. */
   relay?: string;
   /** Key for that relay (or UNSTUCK_AGENT_KEY). With only UNSTUCK_API_KEY set, Unstuck Cloud is used. */
   agentKey?: string;
@@ -50,7 +55,7 @@ export interface UnstuckOptions {
   cloudRelay?: string;
   /** Override the Unstuck Cloud API URL (only with apiKey). */
   cloudApi?: string;
-  /** Override the viewer URL used in takeover links. */
+  /** Override the viewer URL used in takeover links (https://, or http:// to localhost). */
   viewerUrl?: string;
   /** 'binary' runs the engine as a child process (Node); 'in-process' runs it in this JavaScript runtime. */
   mode?: 'binary' | 'in-process';
@@ -58,10 +63,29 @@ export interface UnstuckOptions {
   fetch?: typeof fetch;
 }
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** `secure` (wss: or https:) anywhere; the plain scheme (ws: or http:) only to this machine. */
+function checkUrl(name: string, value: string | undefined, secure: 'wss' | 'https', plain: 'ws' | 'http'): void {
+  if (!value) return; // unset (an empty string is unset too, as elsewhere)
+  let url: URL | null = null;
+  try {
+    url = new URL(value);
+  } catch {
+    // reported below
+  }
+  if (url?.protocol === `${secure}:` || (url?.protocol === `${plain}:` && LOCAL_HOSTS.has(url.hostname))) return;
+  throw new UnstuckConfigError(`${name} must be a ${secure}:// URL (${plain}:// only to localhost, 127.0.0.1 or [::1])`);
+}
+
 export function validateOptions(o: UnstuckOptions): void {
   if (o.apiKey && o.relay) throw new UnstuckConfigError('use either apiKey (Unstuck Cloud) or relay + agentKey (your own relay), not both');
   if (o.apiKey && o.agentKey) throw new UnstuckConfigError('agentKey is for your own relay (with relay); Unstuck Cloud only needs apiKey');
   if ((o.cloudRelay || o.cloudApi) && !o.apiKey) throw new UnstuckConfigError('cloudRelay and cloudApi only apply with apiKey');
+  checkUrl('relay', o.relay, 'wss', 'ws');
+  checkUrl('cloudRelay', o.cloudRelay, 'wss', 'ws');
+  checkUrl('cloudApi', o.cloudApi, 'https', 'http');
+  checkUrl('viewerUrl', o.viewerUrl, 'https', 'http');
 }
 
 /** Engine environment for the options. A value of undefined means "remove this variable". */
@@ -79,4 +103,16 @@ export function optionEnv(o: UnstuckOptions): Record<string, string | undefined>
   if (o.relay) env.UNSTUCK_RELAY_URL = o.relay;
   if (o.agentKey) env.UNSTUCK_AGENT_KEY = o.agentKey;
   return env;
+}
+
+/** A user link handler that throws must not stop the takeover: one line, without the link (its message may quote it). */
+export function callUserOnLink(onLink: (l: TakeoverLink) => void, l: TakeoverLink): void {
+  try {
+    onLink(l);
+  } catch (e) {
+    const secret = l.url.slice(l.url.indexOf('#') + 1);
+    let msg = String((e as Error)?.message ?? e).replaceAll(l.url, '<link>');
+    if (secret) msg = msg.replaceAll(secret, '<link secret>');
+    console.error(`Unstuck: your onLink handler threw (${msg}); the takeover goes on (session ${l.sessionId})`);
+  }
 }

@@ -500,7 +500,122 @@ describe('InProcessUnstuck', () => {
   });
 });
 
+describe('link handlers and the phone alert', () => {
+  const phone = async () => {
+    const pair = await newDeviceKeyPair();
+    return { id: 'd1', label: 'Pixel', publicKey: await exportDevicePublicKey(pair.publicKey) };
+  };
+  const cloud = (devices: () => Response | Promise<Response>) =>
+    vi.fn(async (url: string) => (url.endsWith('/devices') ? devices() : new Response('', { status: 202 }))) as unknown as typeof fetch;
+  const logs = () => {
+    const out: string[] = [];
+    const err: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation((l: unknown) => void out.push(String(l)));
+    vi.spyOn(console, 'error').mockImplementation((l: unknown) => void err.push(String(l)));
+    return { out, err };
+  };
+  const LINK = /http:\/\/fake\.test\/s\/[A-Za-z0-9_-]+#t=/;
+
+  it('a throwing onLink: the alert is still sent, one console.error line without the link, the takeover goes on', async () => {
+    const l = logs();
+    const fetch = cloud(async () => Response.json({ devices: [await phone()] }));
+    let url = '';
+    const u = new InProcessUnstuck(
+      {
+        apiKey: 'uk_live_secret',
+        fetch,
+        onLink: (link) => {
+          url = link.url;
+          throw new Error(`could not post ${link.url} (secret ${link.url.split('#')[1]})`);
+        },
+      },
+      {},
+    );
+    const r = track(u.takeover(new FakePage(), { reason: 'x' }));
+    await settle();
+    expect(vi.mocked(fetch).mock.calls.map((c) => String(c[0]))).toEqual(['https://unstuck.sh/api/v1/agent/devices', 'https://unstuck.sh/api/v1/agent/notify']);
+    const threw = l.err.filter((e) => e.includes('onLink'));
+    expect(threw).toHaveLength(1);
+    expect(threw[0]).toMatch(/^Unstuck: your onLink handler threw \(could not post <link> \(secret <link secret>\)\); the takeover goes on \(session [A-Za-z0-9_-]+\)$/);
+    for (const e of l.err) expect(e).not.toContain(url.split('#')[1]);
+    expect(r.result).toBeUndefined();
+    await join(lastTransport(), url);
+    await u.close();
+  });
+
+  it("a throwing onLink with alerts: 'required' and no paired phone still fails at once with alert_failed", async () => {
+    const l = logs();
+    const u = new InProcessUnstuck(
+      {
+        apiKey: 'uk_live_secret',
+        fetch: cloud(() => Response.json({ devices: [] })),
+        onLink: () => {
+          throw 'not an Error';
+        },
+      },
+      {},
+    );
+    const r = track(u.takeover(new FakePage(), { reason: 'x', alerts: 'required' }));
+    await settle();
+    expect(r.result).toMatchObject({ status: 'failed', detail: 'alert_failed' });
+    expect(l.err.filter((e) => e.includes('onLink'))).toEqual([expect.stringMatching(/^Unstuck: your onLink handler threw \(not an Error\);/)]);
+    await u.close();
+  });
+
+  it('default handler, alert delivered: one line naming the phones and the session, never the link', async () => {
+    const l = logs();
+    const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', fetch: cloud(async () => Response.json({ devices: [await phone()] })) }, {});
+    void u.takeover(new FakePage(), { reason: 'Solve it' });
+    await settle();
+    expect(l.out).toEqual([expect.stringMatching(/^Unstuck: a human is needed \(Solve it\), link sent to 1 paired phone\(s\) \(session [A-Za-z0-9_-]+\)$/)]);
+    const sessionId = (lastTransport().published.keys().next().value as string);
+    expect(l.out[0]).toContain(`(session ${sessionId})`);
+    for (const line of [...l.out, ...l.err]) expect(line).not.toMatch(/#t=/);
+    await u.close();
+  });
+
+  it('default handler, no phone got it (alerts on): the full link is logged as the fallback', async () => {
+    const l = logs();
+    const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', fetch: cloud(() => Response.json({ devices: [] })) }, {});
+    const r = track(u.takeover(new FakePage(), { reason: 'Solve it' }));
+    await settle();
+    expect(l.out).toEqual([expect.stringMatching(/^Unstuck: a human is needed \(Solve it\) → /)]);
+    expect(l.out[0]).toMatch(LINK);
+    expect(r.result).toBeUndefined();
+    await u.close();
+  });
+
+  it("default handler, 'required' and no phone: the takeover failed (alert_failed), so the link is not logged", async () => {
+    const l = logs();
+    const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', fetch: cloud(() => Response.json({ devices: [] })) }, {});
+    const r = track(u.takeover(new FakePage(), { reason: 'x', alerts: 'required' }));
+    await settle();
+    expect(r.result).toMatchObject({ status: 'failed', detail: 'alert_failed' });
+    expect(l.out).toEqual([]);
+    await u.close();
+  });
+
+  it('default handler with alerts: false: the log is the only channel, the full link is logged at once', async () => {
+    const l = logs();
+    const fetch = cloud(() => Response.json({ devices: [] }));
+    const u = new InProcessUnstuck({ apiKey: 'uk_live_secret', fetch }, {});
+    void u.takeover(new FakePage(), { reason: 'x', alerts: false });
+    await settle();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(l.out).toEqual([expect.stringMatching(LINK)]);
+    await u.close();
+  });
+});
+
 describe('Node Unstuck with mode: in-process', () => {
+  it('without a relay: UnstuckConfigError that names in-process mode (not a Worker)', async () => {
+    vi.stubEnv('UNSTUCK_RELAY_URL', '');
+    vi.stubEnv('UNSTUCK_API_KEY', '');
+    const p = new Unstuck({ mode: 'in-process' }).takeover(new FakePage(), { reason: 'x' });
+    await expect(p).rejects.toThrow(UnstuckConfigError);
+    await expect(p).rejects.toThrow('in-process mode needs a relay: set apiKey or relay + agentKey');
+  });
+
   it('Node: mode in-process uses process.env as fallback', async () => {
     vi.stubEnv('UNSTUCK_RELAY_URL', '');
     vi.stubEnv('UNSTUCK_AGENT_KEY', '');

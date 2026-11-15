@@ -135,7 +135,7 @@ describe('createCloudAlerter', () => {
     expect(masked.lines[0]).not.toContain('APIKEY');
   });
 
-  it('only 403 alerts_not_allowed is "not enabled" and cached; any other 403 is a failure and is not cached', async () => {
+  it('only 403 alerts_not_allowed is "not enabled"; neither it nor any other failure is cached', async () => {
     const other = setup(() => json({ error: 'suspended' }, 403));
     await other.alert(info, 'x.com');
     await other.alert(info, 'x.com');
@@ -149,8 +149,8 @@ describe('createCloudAlerter', () => {
     const denied = setup(() => json({ error: 'alerts_not_allowed' }, 403));
     await denied.alert(info, 'x.com');
     await denied.alert(info, 'x.com');
-    expect(denied.calls).toHaveLength(1); // cached
-    expect(denied.lines).toHaveLength(1);
+    expect(denied.calls).toHaveLength(2); // not cached: alerts may have been turned on since
+    expect(denied.lines).toHaveLength(2);
     expect(denied.lines[0]).toMatch(/not enabled/);
   });
 
@@ -199,11 +199,15 @@ describe('createCloudAlerter', () => {
       const s = setup(() => json({ devices: [a, b, { id: 'bad', publicKey: 'AAAA' }] }));
       await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 2 });
     });
-    it('alerts not allowed for the key, also from the cache', async () => {
-      const s = setup(() => json({ error: 'alerts_not_allowed' }, 403));
+    it('alerts not allowed for the key, asked again each time (turning alerts on takes effect at once)', async () => {
+      let allowed = false;
+      const a = await device('d1');
+      const s = setup(() => (allowed ? json({ devices: [a] }) : json({ error: 'alerts_not_allowed' }, 403)));
       await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'alerts_not_allowed' });
       await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 0, problem: 'alerts_not_allowed' });
-      expect(s.calls).toHaveLength(1);
+      expect(s.calls).toHaveLength(2);
+      allowed = true;
+      await expect(s.alert(info, 'x.com')).resolves.toEqual({ delivered: 1 });
     });
     it('no paired phone', async () => {
       const s = setup(() => json({ devices: [] }));
@@ -300,7 +304,7 @@ describe('sendTakeoverAlert', () => {
     const fail = vi.fn();
     const spy = alerter && vi.fn(alerter);
     let looked = false;
-    sendTakeoverAlert(spy, alerts, info, 'x.com', {
+    const outcome = sendTakeoverAlert(spy, alerts, info, 'x.com', {
       fail,
       joined: () => {
         looked = true;
@@ -308,7 +312,7 @@ describe('sendTakeoverAlert', () => {
       },
     });
     await settle();
-    return { sent: spy ? spy.mock.calls.length : 0, fail: fail.mock.calls, looked };
+    return { sent: spy ? spy.mock.calls.length : 0, fail: fail.mock.calls, looked, outcome: outcome && (await outcome) };
   };
 
   it("alerts false or no alerter: nothing sent; true: sent, never fails; 'required': fails only when no phone got it", async () => {
@@ -317,7 +321,15 @@ describe('sendTakeoverAlert', () => {
     expect(await run(none, undefined)).toMatchObject({ sent: 1, fail: [] });
     expect(await run(none, true)).toMatchObject({ sent: 1, fail: [] });
     expect(await run(ok, 'required')).toMatchObject({ sent: 1, fail: [] });
-    expect(await run(none, 'required')).toEqual({ sent: 1, fail: [['alert_failed']], looked: true });
+    expect(await run(none, 'required')).toEqual({ sent: 1, fail: [['alert_failed']], looked: true, outcome: { delivered: 0, problem: 'no_devices' } });
+  });
+
+  it('returns the outcome (null when nothing is sent), so a link handler can wait for it', async () => {
+    expect(await run(none, false)).toMatchObject({ outcome: null });
+    expect(await run(null, true)).toMatchObject({ outcome: null });
+    expect(await run(ok, true)).toMatchObject({ outcome: { delivered: 1 } });
+    expect(await run(rejects, true)).toMatchObject({ outcome: { delivered: 0, problem: 'error' } });
+    expect(await run(throws, true)).toMatchObject({ outcome: { delivered: 0, problem: 'error' } });
   });
 
   it("a custom alerter that rejects or throws counts as no phone reached, with no unhandled rejection", async () => {
@@ -336,6 +348,6 @@ describe('sendTakeoverAlert', () => {
   });
 
   it("'required' never fails a takeover someone already joined through the link", async () => {
-    expect(await run(none, 'required', true)).toEqual({ sent: 1, fail: [], looked: true });
+    expect(await run(none, 'required', true)).toEqual({ sent: 1, fail: [], looked: true, outcome: { delivered: 0, problem: 'no_devices' } });
   });
 });

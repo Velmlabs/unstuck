@@ -14,6 +14,12 @@ describe('edge entry', () => {
     expect(() => new edge.Unstuck({ apiKey: 'k', relay: 'wss://r.example' })).toThrow(edge.UnstuckConfigError);
   });
 
+  it("refuses mode: 'binary': this entry has no engine binary", () => {
+    expect(() => new edge.Unstuck({ mode: 'binary', apiKey: 'k' })).toThrow(edge.UnstuckConfigError);
+    expect(() => new edge.Unstuck({ mode: 'binary' })).toThrow('binary mode needs Node.js: this runtime loaded the in-process entry, which has no engine binary');
+    expect(() => new edge.Unstuck({ mode: 'in-process', apiKey: 'k' })).not.toThrow();
+  });
+
   it('constructs with no options and delegates takeover and close to the in-process engine', async () => {
     const result = { status: 'resolved', sessionId: 's', url: 'u', durationS: 1 } as const;
     const takeover = vi.spyOn(InProcessUnstuck.prototype, 'takeover').mockResolvedValue(result);

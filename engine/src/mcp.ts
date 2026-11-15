@@ -69,7 +69,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           .union([z.boolean(), z.literal('required')])
           .optional()
           .describe(
-            "Send this takeover to the user's paired phones (default true). \"required\" ends it at once as failed (alert_failed) if no paired phone gets the link (Unstuck Cloud only).",
+            "Send this takeover to the user's paired phones (default true). \"required\" ends it at once as failed (alert_failed) if Unstuck Cloud can't accept the link for at least one paired phone (Unstuck Cloud only).",
           ),
       },
     },
@@ -99,6 +99,8 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           allowedSites: hostnames(allowed_sites),
           popups: cdp.popups,
           onLink: (info, takeover) => {
+            // The alert starts first: if writing or opening the link throws, the paired phones still get it.
+            sendTakeoverAlert(opts.alerter, alerts, info, site, takeover);
             const { url: link, code } = info;
             const line = `Unstuck: a human is needed (${reason}) → ${link}`;
             opts.stderr.write(line + '\n');
@@ -106,7 +108,6 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
             for (const data of code ? [line, `Unstuck: the 6-digit code for that link (send it separately from the link): ${code}`] : [line])
               void server.sendLoggingMessage({ level: 'notice', logger: 'unstuck', data }).catch(ignore);
             if (opts.open) openUrl(link);
-            sendTakeoverAlert(opts.alerter, alerts, info, site, takeover);
           },
         });
         const out = { status: r.status, session_id: r.sessionId, url: r.url, duration_s: r.durationS, ...(r.detail ? { detail: r.detail } : {}) };
