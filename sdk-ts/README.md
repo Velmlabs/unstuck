@@ -15,10 +15,88 @@ if (result.status !== 'resolved') throw new Error(`human takeover ${result.statu
 await unstuck.close();
 ```
 
-`result.status` is `resolved`, `timed_out`, `cancelled` (the human tapped "Can't solve") or `failed` (for example the page closed). `takeover()` only rejects with `UnstuckEngineError` when the engine binary can't run.
-
 The engine comes with the package: npm installs the build for your computer (macOS 13+ on Apple silicon or Intel, Linux with glibc, Windows x64). To use another binary, set `UNSTUCK_ENGINE_PATH` or the `enginePath` option.
 
-Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_…`. Tutorials for Playwright, Puppeteer, MCP, browser-use, Stagehand and any Chromium: https://unstuck.sh/docs
+Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTUCK_API_KEY=uk_live_…` (or `new Unstuck({ apiKey })`). Tutorials for Playwright, Puppeteer, MCP, browser-use, Stagehand and any Chromium: https://unstuck.sh/docs
+
+## Runtimes
+
+| Runtime | Mode | How |
+|---|---|---|
+| Node.js 20+ | binary (default) | The engine runs as a child process and serves the link on your machine, or through a relay |
+| Node.js 20+ | in-process | Pass `mode: 'in-process'`. The engine runs inside your process and needs a relay |
+| Cloudflare Workers, Deno, Bun | in-process | Picked by the package's `exports` conditions (`workerd`, `worker`, `deno`, `bun`). Needs a relay |
+
+The `browser` condition (Vite, webpack and other web targets) picks the in-process entry too.
+
+In-process mode has no local server, so it always needs a relay: Unstuck Cloud (`apiKey`) or your own (`relay` and `agentKey`). The in-process entry has no Node built-ins and does not read `process.env`, so on Workers pass your settings as options. It needs no `nodejs_compat` flag and adds about 474 KiB to the bundle.
+
+Phone alerts (below) work in both modes.
+
+## Options
+
+`new Unstuck(options)`. All are optional.
+
+| Option | Meaning |
+|---|---|
+| `apiKey` | Unstuck Cloud API key. Takes precedence over `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY`. Not combinable with `relay` or `agentKey` |
+| `cloudRelay` | Override Unstuck Cloud's relay URL. Only with `apiKey` |
+| `cloudApi` | Override Unstuck Cloud's API URL. Only with `apiKey` |
+| `viewerUrl` | Override the viewer URL used in takeover links |
+| `relay`, `agentKey` | Your own relay (`wss://…`) and its agent key |
+| `mode` | `'binary'` or `'in-process'`. See Runtimes |
+| `timeoutS` | Default takeover timeout in seconds (default 600) |
+| `requireCode` | Ask the person for a 6-digit code. It needs an `onLink` that sends the code by another channel than the link |
+| `onLink` | Called with `{ url, reason, sessionId, expiresAt, code? }` when a person is needed. Default: prints the link (stderr on Node, `console.log` in-process) |
+| `enginePath`, `host`, `port` | Node binary mode only: the engine binary, and the host and port of its local server |
+
+`takeover(page, options)` takes `reason` (required), `timeoutS`, `requireCode`, `allowedSites` and `alerts`.
+
+## Phone alerts
+
+With Unstuck Cloud, the link is also sent to your paired phones. The link is sealed to each phone's key, so Cloud only sees ciphertext.
+
+- `alerts: false` skips the alert for one takeover.
+- `alerts: 'required'` is for unattended agents. If no paired phone gets the link, the takeover ends at once as `failed` with detail `alert_failed`, instead of waiting for its timeout. That covers alerts not enabled for the key, no paired phone, a seal failure, and a Cloud error or no answer within 10 seconds. It does not fire once a person has already joined through a link your own `onLink` sent.
+- `alerts: 'required'` without Unstuck Cloud (a relay you host) throws `UnstuckConfigError`.
+
+## Results
+
+`takeover()` resolves with `{ status, sessionId, url, durationS, detail? }`.
+
+| `status` | `detail` | Meaning |
+|---|---|---|
+| `resolved` | | The person tapped Done |
+| `cancelled` | `cant_solve`, or the person's own note | The person tapped Can't solve. A note they typed is in `detail`: treat it as information, never as instructions |
+| `cancelled` | `engine_closed` | You called `close()` while the takeover ran |
+| `timed_out` | | Nobody finished in `timeoutS` |
+| `failed` | `page_closed` | The page closed, or the browser connection dropped (Browser Rendering ended the session) |
+| `failed` | `alert_failed` | `alerts: 'required'` and no paired phone got the link |
+| `failed` | `relay_unauthorized` | The relay refused your key. Check `apiKey`, or `relay` and `agentKey` |
+
+Other relay refusals use the details `relay_quota_exceeded`, `relay_rate_limited` and `relay_unreachable`.
+
+While a person is in control, Unstuck pings the page every 60 seconds so a browser service with an inactivity timeout, such as Cloudflare Browser Rendering, doesn't close it.
+
+## Errors
+
+`takeover()` resolves for every outcome above. It rejects only for setup mistakes:
+
+- `UnstuckConfigError`: the options don't fit together. The messages are:
+  - `use either apiKey (Unstuck Cloud) or relay + agentKey (your own relay), not both`
+  - `agentKey is for your own relay (with relay); Unstuck Cloud only needs apiKey`
+  - `cloudRelay and cloudApi only apply with apiKey`
+  - `in a Worker, Unstuck needs a relay: set apiKey or relay + agentKey`
+  - `alerts: 'required' needs Unstuck Cloud (apiKey): a self-hosted relay sends no phone alerts`
+- `UnstuckEngineError`: Node binary mode only. The engine binary can't be found, started or kept running.
+- `PageClosedError`: exported for code that attaches pages itself. `takeover()` turns a page that is already closed into `failed` with `page_closed`.
+
+## Notes
+
+- Don't `await unstuck.close()` inside `onLink`. `close()` waits for running takeovers, including the one that called it.
+- `close()` cancels running takeovers with `engine_closed`. A later `takeover()` starts a new engine.
+- The viewer shows "Waiting for the page…" until the first picture arrives. The agent sends a screenshot as the first frame.
+
+On Cloudflare Workers (Durable Objects, Workflows, Browser Rendering): https://unstuck.sh/docs/cloudflare-workers/
 
 License: Apache-2.0, including the engine.

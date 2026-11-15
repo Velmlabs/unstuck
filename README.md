@@ -125,6 +125,52 @@ Set `UNSTUCK_API_KEY` (from [your dashboard](https://unstuck.sh/dashboard/keys))
 | Puppeteer | [unstuck.sh/docs/puppeteer](https://unstuck.sh/docs/puppeteer) | [`examples/puppeteer`](examples/puppeteer) |
 | browser-use, Stagehand | [unstuck.sh/docs/ai-agents](https://unstuck.sh/docs/ai-agents) | [`examples/browser-use`](examples/browser-use), [`examples/stagehand`](examples/stagehand) |
 | Any Chromium over CDP, Selenium, hosted browsers | [unstuck.sh/docs/any-browser](https://unstuck.sh/docs/any-browser) | [`examples/cdp`](examples/cdp), [`examples/selenium`](examples/selenium) |
+| Cloudflare Workers: Durable Objects, Agents SDK, Browser Rendering | [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) | the example below |
+| Deno and Bun (in-process mode) | [unstuck.sh/docs/requirements](https://unstuck.sh/docs/requirements/) | |
+
+### Cloudflare Workers
+
+Since 0.2.0 the TypeScript SDK runs inside a Worker. It needs a relay, so use an Unstuck Cloud key (or your own relay with `relay` and `agentKey`). No Node compatibility flag is needed.
+
+```bash
+npm install @velmlabs/unstuck @cloudflare/puppeteer
+npx wrangler secret put UNSTUCK_API_KEY
+```
+
+Run the takeover in a Durable Object, which can stay alive while a person works:
+
+```ts
+import puppeteer from '@cloudflare/puppeteer';
+import { Unstuck } from '@velmlabs/unstuck';
+import { DurableObject } from 'cloudflare:workers';
+
+interface Env {
+  BROWSER: Fetcher;
+  UNSTUCK_API_KEY: string;
+}
+
+export class Agent extends DurableObject<Env> {
+  async fetch(): Promise<Response> {
+    const browser = await puppeteer.launch(this.env.BROWSER, { keep_alive: 600_000 });
+    try {
+      const page = await browser.newPage();
+      await page.goto('https://portal.example.com/login');
+
+      const unstuck = new Unstuck({ apiKey: this.env.UNSTUCK_API_KEY });
+      const result = await unstuck.takeover(page, {
+        reason: 'Log in with your 2FA code',
+        timeoutS: 480,
+        alerts: 'required', // fail at once if no paired phone gets the link
+      });
+      return new Response(result.status);
+    } finally {
+      await browser.close();
+    }
+  }
+}
+```
+
+The full guide (Workflows, timeouts, CPU limits, a self-hosted relay): [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/).
 
 Full docs: **https://unstuck.sh/docs**
 

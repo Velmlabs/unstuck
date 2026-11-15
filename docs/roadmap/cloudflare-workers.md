@@ -1,10 +1,10 @@
 # Roadmap: official Cloudflare Workers support
 
-**Status:** draft for discussion · **Target:** 0.2.0 (Phase 1), then Phases 2–3 · **Owner:** Velm Labs
+**Status:** Phase 1 shipped in 0.2.0; Phases 2–3 open · **Owner:** Velm Labs
 
-Unstuck already runs *around* Cloudflare Workers: the relay and the hosted viewer are Workers. It doesn't yet run
-*inside* one. An agent written as a Worker (with the Agents SDK or Browser Rendering) can't call `takeover()` today.
-This document is the plan to make Workers a first-class place to run Unstuck, the same as Node, Python and MCP.
+Unstuck runs *around* Cloudflare Workers (the relay and the hosted viewer are Workers) and, since 0.2.0, *inside* one.
+An agent written as a Worker (with the Agents SDK or Browser Rendering) can call `takeover()`. This document was the
+plan; it is kept for the design reasoning and for the phases that are still open.
 
 ## Where we are
 
@@ -16,7 +16,9 @@ This document is the plan to make Workers a first-class place to run Unstuck, th
 | Relay client (`core/src/relay-transport.ts`) | ✅ Portable: the global `WebSocket` |
 | End-to-end encryption and alert sealing (`protocol/`) | ✅ Portable: Web Crypto |
 | Cloudflare Browser Rendering with Unstuck | ✅ Proven in [`docs/spikes/cloudflare-browser-rendering.md`](../spikes/cloudflare-browser-rendering.md): screencast, input, paste, cross-origin CAPTCHA iframes and popups all work |
-| TypeScript SDK inside a Worker | ❌ The SDK always starts the engine as a separate binary (`sdk-ts/src/engine-process.ts`), which a Worker can't do |
+| TypeScript SDK inside a Worker | ✅ Shipped in 0.2.0: in-process mode, picked by the package's export conditions. See [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) |
+| Cloud phone alerts from a Worker | ✅ Shipped in 0.2.0: the alert code moved into `core/`, with `alerts: 'required'` |
+| Workflows | ✅ Works, per a user report: set an explicit `step.do` timeout and `retries: { limit: 0 }`. No automated test yet |
 
 The MVP design already planned this as the SDK's **in-process mode** (design spec §4.3: "binary mode under Node,
 in-process mode elsewhere"; "in-process mode on Workers has no embedded server, so it requires a relay"). It was
@@ -100,7 +102,7 @@ the public internet. Nice-to-have for Phase 2, not needed to ship.
 
 ## Phases
 
-### Phase 1: Workers agents (0.2.0)
+### Phase 1: Workers agents (shipped in 0.2.0)
 
 1. In-process mode in `sdk-ts`: runtime detection, `workerd` export condition, `createEngine()` + relay transport.
 2. Browser Rendering pages via `@cloudflare/puppeteer` (adapter and test).
@@ -112,10 +114,10 @@ the public internet. Nice-to-have for Phase 2, not needed to ship.
 
 ### Phase 2: docs and examples
 
-- Docs page `unstuck.sh/docs/cloudflare-workers/` and `examples/cloudflare-worker/` (deployable, with
-  `wrangler.toml`).
+- Docs page `unstuck.sh/docs/cloudflare-workers/` (shipped with 0.2.0) and `examples/cloudflare-worker/` (deployable,
+  with `wrangler.toml`; not yet).
 - An Agents SDK example: an agent that hands a step to a person mid-task and carries on.
-- A "Cloudflare Workers" section in the agent skill (`plugins/unstuck/skills/unstuck/SKILL.md`).
+- A "Cloudflare Workers" section in the agent skill (`plugins/unstuck/skills/unstuck/SKILL.md`): shipped with 0.2.0.
 - Optional: service-binding transport for a same-account relay.
 
 ### Phase 3: live demo on unstuck.sh
