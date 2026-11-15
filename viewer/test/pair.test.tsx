@@ -74,13 +74,20 @@ describe('pairing', () => {
   });
 
   it('shows the expired message for a used or expired code, and stores nothing', async () => {
-    for (const status of [400, 404, 410]) {
+    for (const status of [404, 410]) {
       cleanup();
       const { store } = setup({ fetchFn: (async () => json(status, { error: 'invalid_code' })) as unknown as typeof fetch });
       await pairNow();
       await screen.findByText('This pairing code has expired. Make a new one in your dashboard.');
       expect(store.rec).toBeNull();
     }
+  });
+
+  it('a 400 says to make a new code', async () => {
+    const { store } = setup({ fetchFn: (async () => json(400, {})) as unknown as typeof fetch });
+    await pairNow();
+    await screen.findByText('Could not pair this phone. Make a new code in your dashboard and try again.');
+    expect(store.rec).toBeNull();
   });
 
   it('shows a retry message when Cloud cannot be reached or fails', async () => {
@@ -93,12 +100,26 @@ describe('pairing', () => {
     await screen.findByText(/could not reach unstuck/i);
   });
 
-  it('with no code and no paired phone asks for a new link; with a stored phone shows it as paired', async () => {
+  it('with no code and no paired phone asks for the code; with a stored phone shows it as paired', async () => {
     setup({ code: null });
-    await screen.findByText(/open the pairing link from your dashboard/i);
+    await screen.findByLabelText('Enter the pairing code from your dashboard');
     cleanup();
     setup({ code: null, store: memoryStore({ deviceId: 'd', deviceToken: 't', privateKey: {} as CryptoKey }) });
     await screen.findByText(/this phone is paired/i);
+  });
+
+  it('a typed code is normalised (uppercase, no dash) and sent; a malformed one is not sent', async () => {
+    const { fetchFn, store } = setup({ code: null });
+    const input = await screen.findByLabelText('Enter the pairing code from your dashboard');
+    fireEvent.input(input, { target: { value: 'abc' } });
+    await pairNow();
+    await screen.findByText(/does not look right/i);
+    expect(fetchFn).not.toHaveBeenCalled();
+    fireEvent.input(input, { target: { value: 'abcd-efgh' } });
+    await pairNow();
+    await screen.findByText(/this phone is paired/i);
+    expect(JSON.parse(fetchFn.mock.calls[0]![1]!.body as string).code).toBe('ABCDEFGH');
+    expect(store.rec?.deviceId).toBe('dev1');
   });
 
   it('a stale code with an existing pairing still offers to pair again', async () => {
@@ -138,12 +159,16 @@ describe('phone notifications', () => {
     await screen.findByText(/could not turn on phone notifications/i);
   });
 
-  it('is not offered in iPhone Safari: the Add to Home Screen steps appear instead', async () => {
-    setup({ env: { userAgent: IPHONE, standalone: false, maxTouchPoints: 5, canPush: false } });
-    await pairNow();
+  it('is not offered in iPhone Safari: two paths, and the home-screen path does not use the code', async () => {
+    const { fetchFn } = setup({ env: { userAgent: IPHONE, standalone: false, maxTouchPoints: 5, canPush: false } });
+    expect(await screen.findByRole('heading', { name: /add to home screen for phone notifications/i })).toBeTruthy();
+    expect(screen.getByText(/enter a new pairing code from your dashboard/i)).toBeTruthy();
+    expect(fetchFn).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Pair Safari (for Telegram and email links)' }));
     await screen.findByText(/this phone is paired/i);
     expect(screen.queryByRole('button', { name: /turn on phone notifications/i })).toBeNull();
-    expect(screen.getByText(/add to home screen/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: /connect telegram/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /add to home screen for phone notifications/i })).toBeTruthy();
   });
 
   it('is offered in the iPhone home-screen app', async () => {
@@ -151,6 +176,7 @@ describe('phone notifications', () => {
     await pairNow();
     await screen.findByRole('button', { name: /turn on phone notifications/i });
     expect(screen.queryByText(/add to home screen/i)).toBeNull();
+    expect(screen.queryByText(/Safari/)).toBeNull();
   });
 
   it('is hidden where the browser cannot do push at all', async () => {

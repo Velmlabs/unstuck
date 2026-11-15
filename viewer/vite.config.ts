@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
   if (mode === 'sw') {
     return {
       base: '/',
+      publicDir: false,
       build: { ...common, emptyOutDir: false, lib: { entry: 'src/sw.ts', formats: ['iife' as const], name: 'unstuckSw', fileName: () => 'sw.js' } },
     };
   }

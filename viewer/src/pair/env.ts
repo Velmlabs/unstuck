@@ -38,3 +38,9 @@ export function pushNeedsHomeScreen(ua: string, standalone: boolean, maxTouchPoi
 export function codeFromHash(hash: string): string | null {
   return new URLSearchParams(hash.replace(/^#/, '')).get('c') || null;
 }
+
+/** A typed pairing code like "abcd-efgh" as the 8 uppercase characters Cloud issues; null when it can't be one. */
+export function normalizeCode(typed: string): string | null {
+  const c = typed.replace(/[\s-]/g, '').toUpperCase();
+  return /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{8}$/.test(c) ? c : null;
+}

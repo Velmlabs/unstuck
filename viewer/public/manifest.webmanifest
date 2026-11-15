@@ -1,0 +1,11 @@
+{
+  "name": "Unstuck",
+  "short_name": "Unstuck",
+  "description": "Take over your agent's browser when it gets stuck.",
+  "display": "standalone",
+  "start_url": "/pair",
+  "scope": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#0F172A",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

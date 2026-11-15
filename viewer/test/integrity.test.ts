@@ -55,3 +55,19 @@ describe('the hosted build', () => {
     expect(fs.readFileSync(path.join(out, 'pair.html'), 'utf8')).toContain('integrity="sha384-');
   });
 });
+
+describe('the pair page is installable', () => {
+  it('links a manifest that starts at /pair, and the hosted folder carries it', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const html = fs.readFileSync(path.join(__dirname, '../pair.html'), 'utf8');
+    expect(html).toContain('rel="manifest"');
+    expect(html).toContain('name="apple-mobile-web-app-capable" content="yes"');
+    const m = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest.webmanifest'), 'utf8'));
+    expect(m).toMatchObject({ name: 'Unstuck', short_name: 'Unstuck', display: 'standalone', start_url: '/pair', scope: '/' });
+    expect(fs.existsSync(path.join(__dirname, '../public', m.icons[0].src))).toBe(true);
+    const { version } = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+    const sums = path.join(__dirname, '../dist-hosted/v', version, 'SHA256SUMS.json');
+    if (fs.existsSync(sums)) expect(Object.keys(JSON.parse(fs.readFileSync(sums, 'utf8')).files)).toEqual(expect.arrayContaining(['manifest.webmanifest', 'icon.svg']));
+  });
+});

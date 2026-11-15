@@ -28,12 +28,12 @@ sw.addEventListener('push', (e: PushEv) => {
       } catch {
         // not JSON: nothing to show
       }
-      const n = await notificationFor(data, indexedDbDeviceStore());
-      if (n) await sw.registration.showNotification(n.title, n.options);
+      const n = await notificationFor(data, indexedDbDeviceStore(), self.location.origin);
+      await sw.registration.showNotification(n.title, n.options);
     })(),
   );
 });
 sw.addEventListener('notificationclick', (e: ClickEv) => {
   e.notification.close();
-  e.waitUntil(handleClick(e.notification.data, { openWindow: (u) => sw.clients.openWindow(u) }));
+  e.waitUntil(handleClick(e.notification.data, { origin: self.location.origin, openWindow: (u) => sw.clients.openWindow(u) }));
 });

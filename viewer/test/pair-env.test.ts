@@ -60,3 +60,16 @@ describe('codeFromHash', () => {
     expect(codeFromHash('#c=')).toBeNull();
   });
 });
+
+import { normalizeCode } from '../src/pair/env';
+describe('normalizeCode', () => {
+  it('accepts 8 characters from the code alphabet, any case, dash optional', () => {
+    expect(normalizeCode('abcd-efgh')).toBe('ABCDEFGH');
+    expect(normalizeCode(' ABCD EFGH ')).toBe('ABCDEFGH');
+    expect(normalizeCode('2345-6789')).toBe('23456789');
+  });
+  it('rejects anything else', () => {
+    for (const bad of ['', 'ABCD', 'ABCD-EFGHJ', 'ABCD-EFGI', 'ABCD-EFG0', 'ABCD-EFGL', 'ABCD-EFGO', 'ABCD-EF!H'])
+      expect(normalizeCode(bad)).toBeNull();
+  });
+});

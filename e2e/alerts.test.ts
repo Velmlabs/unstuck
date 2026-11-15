@@ -38,7 +38,7 @@ beforeAll(async () => {
       if (req.method === 'OPTIONS') return void res.writeHead(204, cors).end();
       if (pathname === '/api/v1/devices/pair' && req.method === 'POST') {
         const b = JSON.parse(raw);
-        if (b.code !== CODE) return send(400, { error: 'invalid_code' });
+        if (b.code !== CODE) return send(410, { error: 'invalid_code' });
         pairBodies.push(b);
         devices.push({ id: 'dev-e2e', publicKey: b.publicKey, label: b.label });
         return send(200, { deviceId: 'dev-e2e', deviceToken: 'device-token' });
