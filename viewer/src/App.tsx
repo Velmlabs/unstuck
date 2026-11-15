@@ -102,6 +102,9 @@ const resumeStore = {
   },
 };
 
+/** How long the viewer waits for the page's first picture before saying it may still be loading. */
+const FIRST_FRAME_HINT_MS = 10_000;
+
 /** A press that moves less than this (CSS px) before release is a tap, not a drag. */
 const TAP_SLOP_PX = 10;
 
@@ -158,6 +161,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const ringField = useRef<Field | null>(null);
   const sockRef = useRef<ViewerSocket | null>(null);
   const pageSize = useRef({ width: 0, height: 0 });
+  /** Nothing drawn yet: the black area says it is waiting for the page, not broken. */
+  const [framed, setFramed] = useState(false);
+  const framedRef = useRef(false);
+  const [slowFirstFrame, setSlowFirstFrame] = useState(false);
   const moveQueued = useRef(false);
   const pressed = useRef<'left' | 'middle' | 'right' | null>(null);
   const site = info?.site || alert?.site || '';
@@ -199,6 +206,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       onFrame: (f) => {
         pageSize.current = { width: f.width, height: f.height };
         if (canvasRef.current) drawFrame(canvasRef.current, f);
+        if (!framedRef.current) {
+          framedRef.current = true;
+          setFramed(true);
+        }
       },
       onState: (s) => {
         const final = FINAL_SCREENS[s];
@@ -247,6 +258,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   useEffect(() => {
     alert?.sender?.().then(setSender, () => setSender(null));
   }, []);
+
+  const waitingForFrame = live && !framed;
+  useEffect(() => {
+    if (!waitingForFrame) return;
+    const id = setTimeout(() => setSlowFirstFrame(true), FIRST_FRAME_HINT_MS);
+    return () => clearTimeout(id);
+  }, [waitingForFrame]);
 
   useEffect(() => {
     if (!info) return;
@@ -560,6 +578,12 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           <button type="button" class="btn type-here" onClick={() => openBridge(chip, null)}>
             Type here
           </button>
+        ) : null}
+        {waitingForFrame ? (
+          <div class="first-frame" role="status">
+            <p>Waiting for the page…</p>
+            {slowFirstFrame ? <p class="first-frame-hint">The page hasn't sent a picture yet. It may still be loading.</p> : null}
+          </div>
         ) : null}
         {phase !== 'live' ? (
           <div class="banner" role="status">

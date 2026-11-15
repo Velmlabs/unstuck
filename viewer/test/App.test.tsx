@@ -194,6 +194,52 @@ describe('App', () => {
     }
   });
 
+  describe('before the first frame', () => {
+    const connectNoFrame = () =>
+      act(() => {
+        handlers.onReady({ t: 'ready', reason: 'Solve the CAPTCHA', site: 'shop.example', expiresAt: NOW + 125_000, resumeKey: 'k' });
+        handlers.onPhase('live');
+      });
+    const waiting = () => screen.queryAllByRole('status').find((el) => el.textContent?.includes('Waiting for the page'));
+
+    it('says it is waiting for the page, and after 10 s that the page may still be loading; the first frame removes it', () => {
+      vi.useFakeTimers();
+      try {
+        setup();
+        expect(waiting()).toBeUndefined(); // still connecting: the banner says so
+        connectNoFrame();
+        expect(waiting()!.textContent).toBe('Waiting for the page…');
+        act(() => void vi.advanceTimersByTime(9_999));
+        expect(waiting()!.textContent).toBe('Waiting for the page…');
+        act(() => void vi.advanceTimersByTime(1));
+        expect(waiting()!.textContent).toBe("Waiting for the page…The page hasn't sent a picture yet. It may still be loading.");
+        act(() => handlers.onFrame({ width: 1280, height: 720, jpeg: new Uint8Array([1]) }));
+        expect(waiting()).toBeUndefined();
+        expect(screen.queryByText(/hasn't sent a picture/)).toBeNull();
+        // A connection drop after that never brings it back.
+        act(() => handlers.onPhase('reconnecting'));
+        act(() => handlers.onPhase('live'));
+        expect(waiting()).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a frame before 10 s means the hint never shows', () => {
+      vi.useFakeTimers();
+      try {
+        setup();
+        connectNoFrame();
+        act(() => handlers.onFrame({ width: 1280, height: 720, jpeg: new Uint8Array([1]) }));
+        act(() => void vi.advanceTimersByTime(20_000));
+        expect(screen.queryByText(/hasn't sent a picture/)).toBeNull();
+        expect(waiting()).toBeUndefined();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   it('draws incoming frames on the canvas', () => {
     setup();
     goLive();

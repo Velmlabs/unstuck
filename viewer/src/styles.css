@@ -140,6 +140,30 @@ body {
   border-color: var(--color-border);
 }
 
+.first-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap);
+  padding: var(--pad);
+  text-align: center;
+  color: var(--color-foreground);
+  pointer-events: none;
+}
+
+.first-frame p {
+  margin: 0;
+  max-width: 320px;
+}
+
+.first-frame-hint {
+  color: var(--color-muted-foreground);
+  font-size: 14px;
+}
+
 .banner {
   position: absolute;
   inset: var(--pad) var(--pad) auto var(--pad);

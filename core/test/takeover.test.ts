@@ -219,6 +219,23 @@ describe('takeover session', () => {
     expect(v2.binary()).toHaveLength(1);
   });
 
+  it('a viewer joining a page that never repaints still gets a picture at once: one screenshot through the frame path', async () => {
+    const t = setupWith((cdp) => {
+      cdp.respond('Page.getLayoutMetrics', () => ({ cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 800, clientHeight: 600 } }));
+      cdp.respond('Page.captureScreenshot', () => ({ data: 'AQID' }));
+    });
+    await settle();
+    const v = await t.join();
+    await settle();
+    expect(t.cdp.calls.filter((c) => c.method === 'Page.captureScreenshot')).toEqual([{ method: 'Page.captureScreenshot', params: { format: 'jpeg', quality: 70 } }]);
+    expect(v.binary()).toHaveLength(1);
+    expect(Array.from(v.binary()[0]!.slice(1, 5))).toEqual([0x03, 0x20, 0x02, 0x58]); // 800, 600
+    // Screencast frames follow as usual.
+    t.cdp.emit('Page.screencastFrame', frame);
+    await settle();
+    expect(v.binary()).toHaveLength(2);
+  });
+
   it('Review Focus 5 (2a): no screencast and no insertText → takeover still works via fallbacks and says so', async () => {
     const t = setupWith((cdp) => {
       cdp.respond('Page.startScreencast', () => Promise.reject(new Error('not supported')));
