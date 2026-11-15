@@ -59,9 +59,9 @@ describe('packed packages', () => {
   it('the SDK imports from a clean folder with only the packed tarballs', () => {
     const app = tmpDir('app-');
     fs.writeFileSync(path.join(app, 'package.json'), '{"type":"module"}');
-    // The SDK depends on the generated launcher package; its platform packages are optional (not packed here).
+    // The SDK depends on core and the generated launcher package; the launcher's platform packages are optional (not packed here).
     const launcher = execFileSync('npm', ['pack', '--pack-destination', out], { cwd: stageLauncher(tmpDir('stage-'), '0.1.7'), encoding: 'utf8' }).trim().split('\n').pop();
-    execFileSync('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', '--omit=optional', tarballs.protocol, tarballs['sdk-ts'], path.join(out, launcher)], { cwd: app, stdio: 'ignore' });
+    execFileSync('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', '--omit=optional', tarballs.protocol, tarballs.core, tarballs['sdk-ts'], path.join(out, launcher)], { cwd: app, stdio: 'ignore' });
     const r = execFileSync('node', ['-e', "import('@velmlabs/unstuck').then((m) => console.log(typeof m.Unstuck, typeof m.UnstuckEngineError))"], { cwd: app, encoding: 'utf8' });
     expect(r.trim()).toBe('function function');
   }, 300_000);

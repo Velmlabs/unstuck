@@ -42,6 +42,7 @@
     "build:dist": "tsup"
   },
   "dependencies": {
+    "@velmlabs/unstuck-core": "workspace:*",
     "@velmlabs/unstuck-engine": "workspace:*",
     "@velmlabs/unstuck-protocol": "workspace:*"
   },

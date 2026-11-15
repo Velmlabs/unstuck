@@ -10,6 +10,7 @@ import {
 import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
 import { UnstuckEngineError } from './errors';
+import { InProcessUnstuck } from './in-process';
 import { optionEnv, validateOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
 
 export type { TakeoverLink, UnstuckOptions };
@@ -35,9 +36,13 @@ export class Unstuck {
   private engine: Promise<EngineProcess> | null = null;
   private readonly pages = new Map<string, AttachedPage>();
   private inFlight = 0;
+  /** Set for `mode: 'in-process'`: every method delegates to it. */
+  private readonly inProcess: InProcessUnstuck | null;
 
   constructor(private readonly opts: UnstuckOptions = {}) {
     validateOptions(opts);
+    // On Node, the environment is the fallback for options, exactly like binary mode.
+    this.inProcess = opts.mode === 'in-process' ? new InProcessUnstuck(opts, process.env) : null;
   }
 
   /**
@@ -48,6 +53,7 @@ export class Unstuck {
     page: unknown,
     opts: TakeoverOptions,
   ): Promise<TakeoverResult> {
+    if (this.inProcess) return this.inProcess.takeover(page, opts);
     // The engine also asks for a code when UNSTUCK_REQUIRE_CODE=1 (it inherits this environment).
     if ((opts.requireCode ?? this.opts.requireCode ?? process.env.UNSTUCK_REQUIRE_CODE === '1') && !this.opts.onLink)
       throw new TypeError('requireCode needs an onLink handler that sends the 6-digit code by a different channel than the link (printed together, the code protects nothing)');
@@ -129,6 +135,7 @@ export class Unstuck {
 
   /** Stops the engine (cancelling any running takeover). */
   async close(): Promise<void> {
+    if (this.inProcess) return this.inProcess.close();
     const pending = this.engine;
     this.engine = null;
     if (!pending) return;
