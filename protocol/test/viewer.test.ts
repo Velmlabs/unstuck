@@ -130,3 +130,36 @@ describe('padPlaintext', () => {
     expect(len(70_000)).toBe(70_000);
   });
 });
+
+describe('frame credit', () => {
+  it('ready may announce frame credit (engine 0.2.2+); older viewers ignore the extra key', () => {
+    expect(Value.Check(EngineToViewerSchema, { t: 'ready', reason: 'r', site: 's', expiresAt: 1, resumeKey: 'k', credit: 1 })).toBe(true);
+    expect(Value.Check(EngineToViewerSchema, { t: 'ready', reason: 'r', site: 's', expiresAt: 1, resumeKey: 'k', credit: 'yes' })).toBe(false);
+  });
+
+  it('accepts the opt-in and acks of a frame sequence number (1..2^32-1)', () => {
+    expect(parseViewerMessage('{"t":"credit","v":1}')).toEqual({ t: 'credit', v: 1 });
+    expect(parseViewerMessage('{"t":"ack","seq":1}')).toEqual({ t: 'ack', seq: 1 });
+    expect(parseViewerMessage(JSON.stringify({ t: 'ack', seq: 0xffffffff }))).toEqual({ t: 'ack', seq: 0xffffffff });
+  });
+
+  it.each([
+    ['{"t":"credit"}'],
+    ['{"t":"credit","v":2}'],
+    ['{"t":"credit","v":1,"x":1}'],
+    ['{"t":"ack"}'],
+    ['{"t":"ack","seq":0}'],
+    ['{"t":"ack","seq":-1}'],
+    ['{"t":"ack","seq":1.5}'],
+    ['{"t":"ack","seq":"1"}'],
+    ['{"t":"ack","seq":4294967296}'],
+    ['{"t":"ack","seq":1,"extra":true}'],
+  ])('rejects %s', (raw) => {
+    expect(parseViewerMessage(raw)).toBeNull();
+  });
+
+  it('acks survive padding (trailing spaces)', () => {
+    const p = padPlaintext(new TextEncoder().encode('{"t":"ack","seq":9}'));
+    expect(parseViewerMessage(new TextDecoder().decode(p))).toEqual({ t: 'ack', seq: 9 });
+  });
+});

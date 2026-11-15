@@ -49,6 +49,13 @@ export const ViewerToEngineSchema = Type.Union([
   Type.Object({ t: Lit('done') }, { additionalProperties: false }),
   Type.Object({ t: Lit('cant_solve'), reason: Type.Optional(Type.String({ maxLength: 200 })) }, { additionalProperties: false }),
   Type.Object({ t: Lit('ping') }, { additionalProperties: false }),
+  /**
+   * Frame credit opt-in, sent only to an engine whose ready says `credit: 1` (older engines refuse unknown messages):
+   * from now on the engine sends type-2 frames and keeps at most two of them unacknowledged.
+   */
+  Type.Object({ t: Lit('credit'), v: Type.Literal(1) }, { additionalProperties: false }),
+  /** This frame (and every earlier one) has been drawn. */
+  Type.Object({ t: Lit('ack'), seq: Type.Integer({ minimum: 1, maximum: 0xffffffff }) }, { additionalProperties: false }),
 ]);
 export type ViewerToEngine = Static<typeof ViewerToEngineSchema>;
 export type ViewerInput = Extract<ViewerToEngine, { t: 'mouse' | 'wheel' | 'key' | 'text' }>;
@@ -65,7 +72,15 @@ export const FieldSchema = Type.Object({ x: Num, y: Num, w: Num, h: Num, kind: F
 export type Field = Static<typeof FieldSchema>;
 
 export const EngineToViewerSchema = Type.Union([
-  Type.Object({ t: Lit('ready'), reason: Type.String(), site: Type.String(), expiresAt: Num, resumeKey: Type.String(), vn: Type.Optional(Type.String()) }),
+  Type.Object({
+    t: Lit('ready'),
+    reason: Type.String(),
+    site: Type.String(),
+    expiresAt: Num,
+    resumeKey: Type.String(),
+    vn: Type.Optional(Type.String()),
+    credit: Type.Optional(Type.Literal(1)),
+  }),
   Type.Object({ t: Lit('state'), status: SessionStatusSchema }),
   Type.Object({ t: Lit('error'), code: Type.Union(ViewerErrorCodes.map((c) => Lit(c))), message: Type.String() }),
   Type.Object({ t: Lit('pong') }),
@@ -73,7 +88,8 @@ export const EngineToViewerSchema = Type.Union([
   Type.Object({ t: Lit('focus'), kind: Type.Union([FieldKindSchema, Type.Null()]), field: Type.Optional(FieldSchema) }),
 ]);
 export type EngineToViewer =
-  | { t: 'ready'; reason: string; site: string; expiresAt: number; resumeKey: string; vn?: string }
+  /** `credit: 1`: this engine paces frames by the viewer's acks once the viewer opts in with `{ t: 'credit', v: 1 }`. */
+  | { t: 'ready'; reason: string; site: string; expiresAt: number; resumeKey: string; vn?: string; credit?: 1 }
   | { t: 'state'; status: SessionStatus }
   | { t: 'error'; code: ViewerErrorCode; message: string }
   | { t: 'pong' }
