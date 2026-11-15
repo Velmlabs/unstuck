@@ -22,7 +22,7 @@ import { scanFields, focusedField } from '../stream/fields';
 import { browserPlatformIsMac, translateShortcut } from '../stream/shortcuts';
 import { createFieldFeed } from './field-feed';
 import { lockPage, safeInput, type PageLock } from './page-lock';
-import { createLatestSender } from '../stream/latest';
+import { createLatestSender, type LatestSender } from '../stream/latest';
 import { nextStatus, isTerminal, type SessionEvent } from './status';
 import { newSessionId, signToken, verifyToken } from './tokens';
 import { sealConnection } from './sealed';
@@ -126,7 +126,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let stopScreencast: (() => Promise<void>) | null = null;
   /** Bumped by every start and stop: a start that resolves with a stale generation shuts itself down. */
   let streamGen = 0;
-  let sender: ReturnType<typeof createLatestSender> | null = null;
+  /** Where stream frames go while a stream runs (null between streams). */
+  let sender: LatestSender | null = null;
+  /** The holder's sender, kept across popup switches so frame numbering and credit carry on. */
+  let holderSender: LatestSender | null = null;
   let drainTimer: ReturnType<typeof setInterval> | null = null;
   let leftTimer: ReturnType<typeof setTimeout> | null = null;
   /** The path to humans (e.g. the relay) is down: the viewer-left timer is paused meanwhile. */
@@ -181,6 +184,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     streamGen++; // invalidates any start still in flight
     if (drainTimer) clearInterval(drainTimer);
     drainTimer = null;
+    sender?.clear();
     sender = null;
     const stop = stopScreencast;
     stopScreencast = null;
@@ -234,8 +238,9 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     resumeKey = newSessionId();
     if (status === 'waiting') go('viewer_joined');
     emit('viewer_joined');
-    sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey, ...(vn ? { vn } : {}) });
-    sender = createLatestSender(conn);
+    // credit: 1 — this engine paces frames by the viewer's acks once the viewer opts in ({ t: 'credit', v: 1 }).
+    sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey, ...(vn ? { vn } : {}), credit: 1 });
+    sender = holderSender = createLatestSender(conn, { now });
     // Chrome only sends frames when the page repaints; a static CAPTCHA would leave a new viewer black.
     if (lastFrame) sender.push(lastFrame);
     fieldFeed.onTargetChanged(); // the new viewer needs the current map even if it hasn't changed
@@ -277,7 +282,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     await stopStream();
     lastFrame = null;
     if (!holder || isTerminal(status)) return;
-    sender = createLatestSender(holder);
+    holderSender?.clear();
+    sender = holderSender;
     fieldFeed.onTargetChanged();
     await startStream();
   }
@@ -398,6 +404,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     switch (msg.t) {
       case 'ping':
         return sendJson(conn, { t: 'pong' });
+      case 'credit':
+        return void (conn === holder && holderSender?.enableCredit());
+      case 'ack':
+        return void (conn === holder && holderSender?.ack(msg.seq));
       case 'done':
         return finish('resolved');
       case 'cant_solve': {

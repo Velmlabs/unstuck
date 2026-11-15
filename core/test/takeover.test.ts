@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { FakeCdp, FakeTransport, type FakeViewer } from '../src/testing';
 import { createEngine, type LinkInfo, type TakeoverControl } from '../src/engine';
 import { MemoryEventLog } from '../src/events';
-import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import { decodeFrame, type TakeoverResult } from '@velmlabs/unstuck-protocol';
 import { settle } from './settle';
 
 const frame = { data: 'AQID', sessionId: 1, metadata: { deviceWidth: 1280, deviceHeight: 720 } };
@@ -422,6 +422,113 @@ describe('takeover session', () => {
     await settle();
     expect(v.binary()).toHaveLength(1);
     expect(v.binary()[0]![5]).toBe(2);
+  });
+
+  describe('frame credit', () => {
+    const shot = (n: number) => ({ ...frame, data: btoa(String.fromCharCode(n)) });
+    /** [jpeg byte, seq] of every frame the viewer got; seq undefined for type-1 frames. */
+    const got = (v: FakeViewer) => v.binary().map((b) => decodeFrame(b)!).map((f) => [f.jpeg[0], f.seq]);
+    const emit = async (t: ReturnType<typeof setup>, n: number) => {
+      t.cdp.emit('Page.screencastFrame', shot(n));
+      await settle();
+    };
+
+    it('ready announces frame credit', async () => {
+      const t = setup();
+      await settle();
+      const v = await t.join();
+      expect(v.json()[0]).toMatchObject({ t: 'ready', credit: 1 });
+    });
+
+    it('a viewer that never opts in gets type-1 frames with no credit limit (old viewers unchanged)', async () => {
+      const t = setup();
+      await settle();
+      const v = await t.join();
+      for (const n of [1, 2, 3, 4]) await emit(t, n);
+      expect(got(v)).toEqual([
+        [1, undefined],
+        [2, undefined],
+        [3, undefined],
+        [4, undefined],
+      ]);
+      v.push({ t: 'ack', seq: 1 }); // harmless without opting in
+      await settle();
+      expect(v.json().filter((m) => m.t === 'error')).toEqual([]);
+    });
+
+    it('after the opt-in at most two frames are unacknowledged; an ack sends the newest waiting frame', async () => {
+      const t = setup();
+      await settle();
+      const v = await t.join();
+      v.push({ t: 'credit', v: 1 });
+      await settle();
+      for (const n of [1, 2, 3, 4]) await emit(t, n);
+      expect(got(v)).toEqual([
+        [1, 1],
+        [2, 2],
+      ]);
+      await vi.advanceTimersByTimeAsync(200); // the drain timer doesn't bypass credit
+      expect(v.binary()).toHaveLength(2);
+      v.push({ t: 'ack', seq: 1 });
+      await settle();
+      expect(got(v).at(-1)).toEqual([4, 3]);
+      v.push({ t: 'ack', seq: 1 }); // stale
+      await emit(t, 5);
+      expect(v.binary()).toHaveLength(3);
+      v.push({ t: 'ack', seq: 3 });
+      await settle();
+      expect(got(v).at(-1)).toEqual([5, 4]);
+      expect(v.json().filter((m) => m.t === 'error')).toEqual([]);
+    });
+
+    it('a lost ack does not freeze the stream: after a second without acks one frame goes out', async () => {
+      const t = setup();
+      await settle();
+      const v = await t.join();
+      v.push({ t: 'credit', v: 1 });
+      await settle();
+      for (const n of [1, 2, 3]) await emit(t, n);
+      expect(v.binary()).toHaveLength(2);
+      await vi.advanceTimersByTimeAsync(1_100);
+      await settle();
+      expect(got(v).at(-1)).toEqual([3, 3]);
+    });
+
+    it('the first frame a joining viewer gets (the cached one) is not counted against credit', async () => {
+      const t = setup();
+      await settle();
+      const v1 = await t.join();
+      await emit(t, 7);
+      const resumeKey = v1.json()[0].resumeKey;
+      v1.close();
+      await settle();
+      const v2 = await t.join({ resumeKey });
+      expect(got(v2)).toEqual([[7, undefined]]);
+      v2.push({ t: 'credit', v: 1 });
+      await settle();
+      for (const n of [8, 9, 10]) await emit(t, n);
+      expect(got(v2).slice(1)).toEqual([
+        [8, 1],
+        [9, 2],
+      ]);
+    });
+
+    it('acks from a replaced viewer do not reach the new one', async () => {
+      const t = setup();
+      await settle();
+      const v1 = await t.join();
+      v1.push({ t: 'credit', v: 1 });
+      await settle();
+      const resumeKey = v1.json()[0].resumeKey;
+      const v2 = await t.join({ resumeKey });
+      v2.push({ t: 'credit', v: 1 });
+      await settle();
+      for (const n of [1, 2, 3]) await emit(t, n);
+      expect(v2.binary()).toHaveLength(2);
+      v1.push({ t: 'ack', seq: 2 });
+      await settle();
+      expect(v2.binary()).toHaveLength(2);
+    });
   });
 
   it('engine.close() cancels a waiting takeover with engine_closed and closes the transport', async () => {
