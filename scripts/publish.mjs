@@ -13,7 +13,7 @@ import { publishCredentials, scrubbedEnv } from './release/env.mjs';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 // Every command gets a credential-free environment unless it is given exactly the one secret it needs.
 const sh = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', env: scrubbedEnv(), ...opts });
 
