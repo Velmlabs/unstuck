@@ -9,11 +9,24 @@ docker build -f relay-node/Dockerfile -t unstuck-relay .
 docker run -p 8787:8787 -e UNSTUCK_AGENT_KEYS=change-me unstuck-relay
 ```
 
-Put it behind HTTPS (any reverse proxy), then point agents at it:
+Put it behind HTTPS (any reverse proxy; with Caddy, `reverse_proxy 127.0.0.1:8787`). HTTPS is required: phones only allow the Web Crypto API that decrypts the screen on `https://` pages. Then point agents at it:
 
 ```bash
 UNSTUCK_RELAY_URL=wss://relay.example.com UNSTUCK_AGENT_KEY=change-me python my_agent.py
 ```
+
+## Run with Node
+
+Node.js 22 or later, from the repository root:
+
+```bash
+pnpm install
+pnpm --filter @velmlabs/unstuck-viewer build
+pnpm --filter @velmlabs/unstuck-relay bundle     # the whole relay in one file: relay-node/dist/relay.mjs
+UNSTUCK_AGENT_KEYS=change-me UNSTUCK_VIEWER_DIR=viewer/dist node relay-node/dist/relay.mjs
+```
+
+Full guide: [unstuck.sh/docs/self-host](https://unstuck.sh/docs/self-host/).
 
 ## Environment
 

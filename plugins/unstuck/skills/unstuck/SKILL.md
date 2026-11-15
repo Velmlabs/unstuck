@@ -70,7 +70,7 @@ Options (TypeScript name / Python name):
 - `alerts`: `false` to skip phone alerts for this call.
 - `requireCode` / `require_code`: also ask for a 6-digit code delivered separately from the link (needs its own `onLink` / `on_link` handler).
 
-Without an API key the link works on the same machine or network only. With `UNSTUCK_API_KEY` set (from https://unstuck.sh/dashboard/keys) the link works on any phone, and the user's paired phones get an alert.
+Without an API key the link works on the agent's own machine only. With `UNSTUCK_API_KEY` set (from https://unstuck.sh/dashboard/keys) the link works on any phone, and the user's paired phones get an alert. Teams that run their own relay set `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY` instead (https://unstuck.sh/docs/self-host/).
 
 ## After the takeover
 

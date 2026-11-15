@@ -136,7 +136,25 @@ Full docs: **https://unstuck.sh/docs**
 | [Unstuck Cloud](https://unstuck.sh) (100 free takeovers a month) | any phone, from anywhere | `UNSTUCK_API_KEY=uk_live_…` |
 | Your own relay | wherever you host it | `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY` |
 
-Run your own relay on Node or Docker (`relay-node/`) or on Cloudflare Workers (`relay-cloudflare/`).
+### Self-host the relay
+
+Everything that makes a takeover work is open source, the relay included. Run it on your own server and links open on any phone with no Unstuck account:
+
+```bash
+git clone https://github.com/velmlabs/unstuck.git && cd unstuck
+docker build -f relay-node/Dockerfile -t unstuck-relay .
+KEY=$(openssl rand -hex 24) && echo "agent key: $KEY"   # keep it: your agents need it
+docker run -d -p 127.0.0.1:8787:8787 -e UNSTUCK_AGENT_KEYS="$KEY" unstuck-relay
+```
+
+Put it behind HTTPS (phones only decrypt the screen on `https://` pages; with Caddy it's `reverse_proxy 127.0.0.1:8787`), then point agents at it:
+
+```bash
+export UNSTUCK_RELAY_URL=wss://relay.example.com
+export UNSTUCK_AGENT_KEY=<the agent key>
+```
+
+It also runs on plain Node (`relay-node/`) and on Cloudflare Workers (`relay-cloudflare/`). Full guide, settings and a comparison with Unstuck Cloud: **[unstuck.sh/docs/self-host](https://unstuck.sh/docs/self-host/)**. Unstuck Cloud is the hosted relay, plus phone alerts and a dashboard, for when you'd rather not run a server.
 
 ## Security
 
