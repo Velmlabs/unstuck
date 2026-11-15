@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Clock fixture</title>
+    <style>
+      html, body { margin: 0; background: #000; overflow: hidden; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <script>
+      // Repaints every animation frame. Top left: the low 24 bits of Date.now() as 6 gray blocks of 80×80 px, most
+      // significant nibble first, nibble v drawn as gray v*16+8, so a viewer's lag can be read from its pixels.
+      // Below: coloured noise (?noise=<cells>) so each frame is a JPEG of realistic size.
+      const c = document.getElementById('c');
+      c.width = innerWidth;
+      c.height = innerHeight;
+      const ctx = c.getContext('2d');
+      const cells = Number(new URLSearchParams(location.search).get('noise') ?? 1200);
+      const draw = () => {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, c.width, c.height);
+        for (let i = 0; i < cells; i++) {
+          ctx.fillStyle = `rgb(${(Math.random() * 256) | 0},${(Math.random() * 256) | 0},${(Math.random() * 256) | 0})`;
+          ctx.fillRect(((Math.random() * c.width) / 16) * 16, 96 + ((Math.random() * (c.height - 96)) / 16) * 16, 16, 16);
+        }
+        const t = Date.now() & 0xffffff;
+        for (let i = 0; i < 6; i++) {
+          const v = (t >> ((5 - i) * 4)) & 0xf;
+          const g = v * 16 + 8;
+          ctx.fillStyle = `rgb(${g},${g},${g})`;
+          ctx.fillRect(i * 80, 0, 80, 80);
+        }
+        requestAnimationFrame(draw);
+      };
+      requestAnimationFrame(draw);
+    </script>
+  </body>
+</html>
