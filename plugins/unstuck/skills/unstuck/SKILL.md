@@ -81,9 +81,9 @@ const unstuck = new Unstuck({ apiKey: env.UNSTUCK_API_KEY }); // or { relay, age
 const result = await unstuck.takeover(page, { reason: 'Solve the CAPTCHA', alerts: 'required' });
 ```
 
-- Pass settings as options: a Worker has no `process.env`. No Node compatibility flag is needed.
-- Run the takeover in a Durable Object (or a Workflow step), not a plain request handler: a person can take minutes.
-- Launch the browser with `keep_alive` above the takeover's `timeoutS` (Browser Rendering allows up to 20 minutes).
+- Pass settings as options: a Worker has no `process.env`. Unstuck itself needs no Node compatibility flag, but `@cloudflare/puppeteer` does: keep `nodejs_compat`.
+- Run the takeover in a Durable Object (or a Workflow step), not a plain request handler: a person can take minutes. Start it and return at once (`ctx.waitUntil`), then store the result; don't hold the caller's request open.
+- Launch the browser with a generous `keep_alive` (Browser Rendering's limit is 20 minutes at the time of writing). Unstuck pings the page every 60 seconds during a takeover.
 - Use `alerts: 'required'` for unattended runs: if no paired phone can get the link, the result is `failed` with `detail: 'alert_failed'` at once, not a silent wait.
 - A browser connection that drops ends the takeover as `failed` with `page_closed`.
 

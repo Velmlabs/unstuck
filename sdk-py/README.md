@@ -15,7 +15,7 @@ if result.status != "resolved":
     raise RuntimeError(f"human takeover {result.status}")
 ```
 
-`result.status` is `resolved`, `timed_out`, `cancelled` (the human tapped "Can't solve") or `failed` (for example the page closed). `takeover()` only raises `UnstuckEngineError` when the engine binary can't run.
+`result.status` is `resolved`, `timed_out`, `cancelled` (the human tapped "Can't solve") or `failed` (for example the page closed). `takeover()` raises `UnstuckEngineError` when the engine binary can't run, and `ValueError` for misuse such as `alerts="required"` without Unstuck Cloud.
 
 The engine comes in the wheel for your platform (macOS 13+ on Apple silicon or Intel, Linux with glibc 2.17+, Windows x64). To use another binary, set `UNSTUCK_ENGINE_PATH` or `Unstuck(engine_path=...)`.
 

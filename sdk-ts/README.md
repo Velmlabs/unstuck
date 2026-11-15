@@ -29,7 +29,7 @@ Send the link through Unstuck Cloud, so it opens on any phone, by setting `UNSTU
 
 The `browser` condition (Vite, webpack and other web targets) picks the in-process entry too.
 
-In-process mode has no local server, so it always needs a relay: Unstuck Cloud (`apiKey`) or your own (`relay` and `agentKey`). The in-process entry has no Node built-ins and does not read `process.env`, so on Workers pass your settings as options. It needs no `nodejs_compat` flag and adds about 474 KiB to the bundle.
+In-process mode has no local server, so it always needs a relay: Unstuck Cloud (`apiKey`) or your own (`relay` and `agentKey`). The in-process entry has no Node built-ins and does not read `process.env`, so on Workers pass your settings as options. Unstuck itself needs no `nodejs_compat` flag (`@cloudflare/puppeteer` does, so keep it on). It adds about 0.5 MB to the bundle, as measured by the release dry run.
 
 Phone alerts (below) work in both modes.
 
@@ -58,7 +58,7 @@ With Unstuck Cloud, the link is also sent to your paired phones. The link is sea
 
 - `alerts: false` skips the alert for one takeover.
 - `alerts: 'required'` is for unattended agents. If no paired phone gets the link, the takeover ends at once as `failed` with detail `alert_failed`, instead of waiting for its timeout. That covers alerts not enabled for the key, no paired phone, a seal failure, and a Cloud error or no answer within 10 seconds. It does not fire once a person has already joined through a link your own `onLink` sent.
-- `alerts: 'required'` without Unstuck Cloud (a relay you host) throws `UnstuckConfigError`.
+- `alerts: 'required'` without Unstuck Cloud throws. A relay you host sends no phone alerts. In Node binary mode (local viewer server, or a relay you host) the error comes from the engine: `alerts: 'required' needs Unstuck Cloud (apiKey or UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts`. In-process it is the `UnstuckConfigError` below.
 
 ## Results
 
@@ -76,7 +76,7 @@ With Unstuck Cloud, the link is also sent to your paired phones. The link is sea
 
 Other relay refusals use the details `relay_quota_exceeded`, `relay_rate_limited` and `relay_unreachable`.
 
-While a person is in control, Unstuck pings the page every 60 seconds so a browser service with an inactivity timeout, such as Cloudflare Browser Rendering, doesn't close it.
+In in-process mode (Workers), Unstuck pings the page every 60 seconds for the whole takeover, so a browser service with an inactivity timeout, such as Cloudflare Browser Rendering, doesn't close it.
 
 ## Errors
 
@@ -88,6 +88,7 @@ While a person is in control, Unstuck pings the page every 60 seconds so a brows
   - `cloudRelay and cloudApi only apply with apiKey`
   - `in a Worker, Unstuck needs a relay: set apiKey or relay + agentKey`
   - `alerts: 'required' needs Unstuck Cloud (apiKey): a self-hosted relay sends no phone alerts`
+- `TypeError`: `requireCode` is on but there is no `onLink` handler. The code must travel by another channel than the link.
 - `UnstuckEngineError`: Node binary mode only. The engine binary can't be found, started or kept running.
 - `PageClosedError`: exported for code that attaches pages itself. `takeover()` turns a page that is already closed into `failed` with `page_closed`.
 

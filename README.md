@@ -130,14 +130,14 @@ Set `UNSTUCK_API_KEY` (from [your dashboard](https://unstuck.sh/dashboard/keys))
 
 ### Cloudflare Workers
 
-Since 0.2.0 the TypeScript SDK runs inside a Worker. It needs a relay, so use an Unstuck Cloud key (or your own relay with `relay` and `agentKey`). No Node compatibility flag is needed.
+Since 0.2.0 the TypeScript SDK runs inside a Worker. It needs a relay, so use an Unstuck Cloud key (or your own relay with `relay` and `agentKey`). Unstuck itself needs no Node compatibility flag, but `@cloudflare/puppeteer` does: keep `compatibility_flags = ["nodejs_compat"]`, as Cloudflare's Browser Rendering guide says.
 
 ```bash
 npm install @velmlabs/unstuck @cloudflare/puppeteer
 npx wrangler secret put UNSTUCK_API_KEY
 ```
 
-Run the takeover in a Durable Object, which can stay alive while a person works:
+Run the takeover in a Durable Object, which can stay alive while a person works. Start it and answer at once; don't hold the caller's request open:
 
 ```ts
 import puppeteer from '@cloudflare/puppeteer';
@@ -149,28 +149,38 @@ interface Env {
   UNSTUCK_API_KEY: string;
 }
 
-export class Agent extends DurableObject<Env> {
+export class PortalAgent extends DurableObject<Env> {
   async fetch(): Promise<Response> {
-    const browser = await puppeteer.launch(this.env.BROWSER, { keep_alive: 600_000 });
+    if ((await this.ctx.storage.get('running')) !== true) {
+      await this.ctx.storage.put('running', true);
+      this.ctx.waitUntil(this.run()); // returns at once; the takeover runs on
+    }
+    return new Response('started', { status: 202 });
+  }
+
+  async run(): Promise<void> {
+    let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
     try {
+      browser = await puppeteer.launch(this.env.BROWSER, { keep_alive: 1_200_000 });
       const page = await browser.newPage();
       await page.goto('https://portal.example.com/login');
 
       const unstuck = new Unstuck({ apiKey: this.env.UNSTUCK_API_KEY });
       const result = await unstuck.takeover(page, {
         reason: 'Log in with your 2FA code',
-        timeoutS: 480,
+        timeoutS: 900,
         alerts: 'required', // fail at once if no paired phone gets the link
       });
-      return new Response(result.status);
+      await this.ctx.storage.put('result', { status: result.status, detail: result.detail });
     } finally {
-      await browser.close();
+      await this.ctx.storage.put('running', false);
+      await browser?.close();
     }
   }
 }
 ```
 
-The full guide (Workflows, timeouts, CPU limits, a self-hosted relay): [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/).
+The full guide (status endpoint, Workflows, timeouts, CPU limits, a self-hosted relay): [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/).
 
 Full docs: **https://unstuck.sh/docs**
 
