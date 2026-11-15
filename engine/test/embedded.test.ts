@@ -183,3 +183,18 @@ describe('createEmbeddedTransport', () => {
     await expect(createEmbeddedTransport({ assets: ASSETS, port: t.port })).rejects.toThrow(/EADDRINUSE/);
   });
 });
+
+describe('default warning', () => {
+  it('warns on stderr when the viewer server listens beyond this machine (no warn handler given)', async () => {
+    const writes: string[] = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    (process.stderr as { write: unknown }).write = (s: string) => (writes.push(String(s)), true);
+    try {
+      const t = await createEmbeddedTransport({ assets: ASSETS, host: '0.0.0.0' });
+      cleanups.push(() => t.close());
+    } finally {
+      (process.stderr as { write: unknown }).write = orig;
+    }
+    expect(writes.join('')).toMatch(/^\[unstuck\] viewer server on 0\.0\.0\.0:\d+ is reachable from your network/);
+  });
+});

@@ -80,6 +80,17 @@ describe('runDoctor', () => {
     );
   }, 40_000);
 
+  it('a browser that does not answer Browser.getVersion is reported as an unknown browser, not a failure', async () => {
+    const noVersion: typeof connectCdp = async (url, opts) => {
+      const real = await connectCdp(url, opts);
+      const send = <T>(method: string, params?: object) => (method === 'Browser.getVersion' ? Promise.reject(new Error('not supported')) : real.browser.send<T>(method, params));
+      return { ...real, browser: { ...real.browser, send } } as DirectCdp;
+    };
+    const r = await runDoctor(`127.0.0.1:${chrome.port}`, { connect: noVersion });
+    expect(r.browser).toBe('unknown browser');
+    expect(r.verdict).not.toBe('unsupported');
+  }, 30_000);
+
   it('a browser without input is unsupported', async () => {
     const r = await runDoctor(`127.0.0.1:${chrome.port}`, {
       connect: wrapped({ 'Input.dispatchMouseEvent': () => Promise.reject(new Error('no input')) }),
