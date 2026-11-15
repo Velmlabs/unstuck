@@ -52,14 +52,14 @@ afterAll(async () => {
   server?.close();
 });
 
-async function startTakeover(opts: { timeoutS?: number; path?: string } = {}) {
+async function startTakeover(opts: { timeoutS?: number; path?: string; reason?: string } = {}) {
   const page = await agentBrowser.newPage({ viewport: { width: 1280, height: 720 } });
   await page.goto(site + (opts.path ?? '').replace(/^\//, ''));
   let link!: TakeoverLink;
   let linkArrived!: () => void;
   const gotLink = new Promise<void>((r) => (linkArrived = r));
   const unstuck = new Unstuck({ enginePath: ENGINE, onLink: (l) => ((link = l), linkArrived()) });
-  const result = unstuck.takeover(page, { reason: 'Solve the test CAPTCHA', timeoutS: opts.timeoutS ?? 60 });
+  const result = unstuck.takeover(page, { reason: opts.reason ?? 'Solve the test CAPTCHA', timeoutS: opts.timeoutS ?? 60 });
   await gotLink;
   return { page, unstuck, result, link };
 }
@@ -206,6 +206,24 @@ describe('local takeover end to end', () => {
     expect(page.url()).toBe(site + 'links');
     await tapOn('#same');
     await expect.poll(() => page.url(), { timeout: 10_000 }).toBe(site + 'next');
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await ctx.close();
+    await unstuck.close();
+    await page.close();
+  }, 60_000);
+
+  it('a long reason never pushes Done or the countdown off a phone screen', async () => {
+    const reason = 'Alerts check: open from Telegram, type in a field, then tap Done when the page looks right';
+    const { page, unstuck, result, link } = await startTakeover({ reason });
+    const { ctx, human } = await openHuman(link.url);
+    await human.getByText(reason).waitFor({ timeout: 20_000 });
+    const width = human.viewportSize()!.width;
+    expect(await human.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    for (const el of [human.getByRole('button', { name: 'Done' }), human.getByTestId('countdown')]) {
+      const box = (await el.boundingBox())!;
+      expect(box.x + box.width).toBeLessThanOrEqual(width);
+    }
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved' });
     await ctx.close();

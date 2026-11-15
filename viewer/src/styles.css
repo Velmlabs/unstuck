@@ -41,6 +41,9 @@ body {
 .app {
   display: grid;
   grid-template-rows: auto 1fr auto;
+  /* One column no wider than the screen: a long reason (white-space: nowrap) must ellipsize, not widen the page and
+     push Done and the countdown off a phone screen. */
+  grid-template-columns: minmax(0, 1fr);
   height: 100dvh;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
