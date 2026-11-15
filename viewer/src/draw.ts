@@ -1,13 +1,18 @@
 import type { Frame } from '@velmlabs/unstuck-protocol';
 
-const state = new WeakMap<HTMLCanvasElement, { busy: boolean; pending: Frame | null }>();
+type Drawn = (f: Frame) => void;
+const state = new WeakMap<HTMLCanvasElement, { busy: boolean; pending: { frame: Frame; onDrawn?: Drawn } | null }>();
 
-/** Decodes and draws a JPEG frame. Newest-frame-only: frames arriving mid-decode replace each other. */
-export async function drawFrameOnCanvas(canvas: HTMLCanvasElement, frame: Frame): Promise<void> {
+/**
+ * Decodes and draws a JPEG frame. Newest-frame-only: frames arriving mid-decode replace each other.
+ * `onDrawn` runs once the frame is on the canvas (or failed to decode), never for a frame a newer one replaced:
+ * the newer frame's report covers it (frame credit acks are cumulative).
+ */
+export async function drawFrameOnCanvas(canvas: HTMLCanvasElement, frame: Frame, onDrawn?: Drawn): Promise<void> {
   const s = state.get(canvas) ?? { busy: false, pending: null };
   state.set(canvas, s);
   if (s.busy) {
-    s.pending = frame;
+    s.pending = { frame, onDrawn };
     return;
   }
   s.busy = true;
@@ -25,7 +30,8 @@ export async function drawFrameOnCanvas(canvas: HTMLCanvasElement, frame: Frame)
   } finally {
     s.busy = false;
   }
+  onDrawn?.(frame);
   const next = s.pending;
   s.pending = null;
-  if (next) await drawFrameOnCanvas(canvas, next);
+  if (next) await drawFrameOnCanvas(canvas, next.frame, next.onDrawn);
 }

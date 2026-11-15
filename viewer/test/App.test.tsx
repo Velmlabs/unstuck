@@ -11,13 +11,20 @@ let connectOpts: { resumeKey?: string; alive?: () => Promise<boolean> } | undefi
 let wakes = 0;
 let connects = 0;
 let hellos: (string | undefined)[];
+let acked: unknown[];
 let connectUrl = '';
 const connectFn: AppProps['connectFn'] = (url, _token, _codec, h, opts) => {
   connectUrl = url;
   connects++;
   handlers = h;
   connectOpts = opts;
-  return { send: (m) => void sent.push(m), sendHello: (c) => void hellos.push(c), close: () => void (closed = true), wake: () => void wakes++ };
+  return {
+    send: (m) => void sent.push(m),
+    sendHello: (c) => void hellos.push(c),
+    close: () => void (closed = true),
+    wake: () => void wakes++,
+    ack: (f) => void acked.push(f),
+  };
 };
 const KEY = 'A'.repeat(43);
 const loc = (hash = `#t=TOK&k=${KEY}`) => ({ hash, pathname: '/s/SESSION', origin: 'http://127.0.0.1:5000' });
@@ -53,6 +60,7 @@ beforeEach(() => {
   localStorage.clear();
   sent = [];
   hellos = [];
+  acked = [];
   connects = 0;
   closed = false;
   drawFrame.mockClear();
@@ -243,7 +251,19 @@ describe('App', () => {
   it('draws incoming frames on the canvas', () => {
     setup();
     goLive();
-    expect(drawFrame).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), { width: 1280, height: 720, jpeg: new Uint8Array([1]) });
+    expect(drawFrame).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), { width: 1280, height: 720, jpeg: new Uint8Array([1]) }, expect.any(Function));
+  });
+
+  it('acks each frame once it has been drawn (frame credit), not before', () => {
+    setup();
+    goLive();
+    const f = { width: 1280, height: 720, jpeg: new Uint8Array([2]), seq: 7 };
+    act(() => handlers.onFrame(f));
+    const call = drawFrame.mock.calls.at(-1)!;
+    expect(call[1]).toBe(f);
+    expect(acked).toEqual([]);
+    call[2](f); // drawn
+    expect(acked).toEqual([f]);
   });
 
   it('maps taps to page coordinates (Review Focus 1)', () => {

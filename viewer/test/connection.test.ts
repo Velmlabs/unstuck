@@ -463,4 +463,61 @@ describe('long text', () => {
     expect(sent.map((m) => m.text).join('')).toBe(text);
     expect(Math.max(...FakeWs.all[0]!.sent.map((b) => b.length))).toBeLessThanOrEqual(65_504);
   });
+
+  describe('frame credit', () => {
+    const live = async (readyMsg: object) => {
+      const { h, sock } = make();
+      const ws = FakeWs.all[0]!;
+      ws.open();
+      await flush();
+      ws.msg(readyMsg);
+      await flush();
+      return { h, sock, ws, texts: () => ws.texts().map((t) => JSON.parse(t)) };
+    };
+    const frameBytes = (seq?: number) => encodeFrame({ width: 10, height: 20, jpeg: new Uint8Array([7]) }, seq);
+
+    it('opts in when ready announces credit, and passes frame sequence numbers on', async () => {
+      const { h, ws, texts } = await live({ ...ready, credit: 1 });
+      expect(texts().filter((m) => m.t === 'credit')).toEqual([{ t: 'credit', v: 1 }]);
+      ws.onmessage?.({ data: frameBytes(5).buffer });
+      await flush();
+      expect(h.onFrame).toHaveBeenCalledWith({ width: 10, height: 20, jpeg: new Uint8Array([7]), seq: 5 });
+    });
+
+    it('never opts in with an engine that does not announce credit (older engines refuse unknown messages)', async () => {
+      const { texts } = await live(ready);
+      expect(texts().map((m) => m.t)).toEqual(['hello']);
+    });
+
+    it('ack() sends the frame\'s sequence number on the socket it came from', async () => {
+      const { h, sock, texts } = await live({ ...ready, credit: 1 });
+      FakeWs.all[0]!.onmessage?.({ data: frameBytes(3).buffer });
+      await flush();
+      sock.ack(vi.mocked(h.onFrame).mock.calls[0]![0]);
+      await flush();
+      expect(texts().at(-1)).toEqual({ t: 'ack', seq: 3 });
+    });
+
+    it('ack() ignores frames without a sequence number and frames from a replaced socket', async () => {
+      const { h, sock, ws, texts } = await live({ ...ready, credit: 1 });
+      ws.onmessage?.({ data: frameBytes().buffer });
+      ws.onmessage?.({ data: frameBytes(9).buffer });
+      await flush();
+      const [plainFrame, old] = vi.mocked(h.onFrame).mock.calls.map((c) => c[0]);
+      sock.ack(plainFrame!);
+      sock.ack({ width: 1, height: 1, jpeg: new Uint8Array(), seq: 1 }); // not one this connection delivered
+      await flush();
+      expect(texts().filter((m) => m.t === 'ack')).toEqual([]);
+      ws.drop();
+      await vi.advanceTimersByTimeAsync(500);
+      const ws2 = FakeWs.all[1]!;
+      ws2.open();
+      await flush();
+      ws2.msg({ ...ready, credit: 1 });
+      await flush();
+      sock.ack(old!); // drawn after the reconnect: its number means nothing to the new connection
+      await flush();
+      expect(ws2.texts().map((t) => JSON.parse(t).t)).toEqual(['hello', 'credit']);
+    });
+  });
 });

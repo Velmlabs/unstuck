@@ -38,6 +38,11 @@ export interface ViewerSocket {
   sendHello(code?: string): void;
   /** The page is visible again or the network is back: retry now instead of waiting out the backoff. */
   wake(): void;
+  /**
+   * Frame credit: `frame` has been drawn. Sends `{ t: 'ack', seq }` for a numbered frame from the current connection;
+   * frames without a number (credit not negotiated) or from a socket since replaced are ignored.
+   */
+  ack(frame: Frame): void;
   close(): void;
 }
 
@@ -88,6 +93,8 @@ export function connect(
   // Anti-replay: with an engine that announces v: 2, our random vn must come back in ready before we trust anything.
   let vn: string | null = null;
   let verified = true;
+  /** The socket each numbered frame came in on, so an ack never reaches a later connection. */
+  const frameSocket = new WeakMap<Frame, WebSocket>();
 
   /** Seals and sends in order on the socket that was open when the message was queued. */
   const write = (target: WebSocket, m: ViewerToEngine) => {
@@ -113,6 +120,8 @@ export function connect(
       else if (m.t !== 'error') return;
     }
     if (m.t === 'ready') {
+      // Frame credit is opt-in: only an engine that announces it accepts these messages (older ones refuse unknown ones).
+      if (m.credit === 1) write(socket, { t: 'credit', v: 1 });
       resumeKey = m.resumeKey;
       attempt = 0;
       downSince = null;
@@ -170,7 +179,9 @@ export function connect(
         if (!isJsonPlaintext(plain)) {
           if (!verified) return;
           const f = decodeFrame(plain);
-          if (f) h.onFrame(f);
+          if (!f) return;
+          if (f.seq !== undefined) frameSocket.set(f, socket);
+          h.onFrame(f);
           return;
         }
         let m: EngineToViewer;
@@ -224,6 +235,10 @@ export function connect(
     },
     sendHello(code) {
       if (ws.readyState === 1) hello(ws, code);
+    },
+    ack(frame) {
+      if (frame.seq === undefined || frameSocket.get(frame) !== ws || ws.readyState !== 1) return;
+      write(ws, { t: 'ack', seq: frame.seq });
     },
     wake() {
       if (stopped || downSince === null || ws.readyState === 0 || ws.readyState === 1) return;

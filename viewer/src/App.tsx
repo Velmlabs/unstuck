@@ -13,7 +13,8 @@ import { cleanLabel, type Sender } from './alert-link';
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string; search?: string };
   connectFn?: (url: string, token: string, codec: Codec, h: ConnectionHandlers, opts: { resumeKey?: string; alive?: () => Promise<boolean> }) => ViewerSocket;
-  drawFrame?: (canvas: HTMLCanvasElement, frame: Frame) => void;
+  /** Draws `frame`; calls `onDrawn` once it is on the canvas (frame credit acks). */
+  drawFrame?: (canvas: HTMLCanvasElement, frame: Frame, onDrawn: (f: Frame) => void) => void;
   now?: () => number;
   /** A sealed link this browser could not open: show the "phone you paired" page and never connect. */
   alertError?: 'no_device' | 'not_for_this_device';
@@ -205,7 +206,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       },
       onFrame: (f) => {
         pageSize.current = { width: f.width, height: f.height };
-        if (canvasRef.current) drawFrame(canvasRef.current, f);
+        // Frame credit: the engine sends the next frame once this one is on screen (a slow phone never builds a backlog).
+        const drawn = (d: Frame) => sockRef.current?.ack(d);
+        if (canvasRef.current) drawFrame(canvasRef.current, f, drawn);
+        else drawn(f);
         if (!framedRef.current) {
           framedRef.current = true;
           setFramed(true);
