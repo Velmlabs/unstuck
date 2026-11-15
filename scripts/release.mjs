@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publishing 0.1.7 (docs/superpowers/specs/2026-11-14-publish-design.md).
+// Publishing 0.2.0 (docs/superpowers/specs/2026-11-14-publish-design.md).
 //   pnpm release           dry run: build everything into release/, prove it works from a clean install, and record each
 //                          artifact's SHA-256 with the commit in release/dry-run-passed.json
 //   pnpm release:publish   publishes exactly those artifacts (scripts/publish.mjs)
@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { buildEngine, checkBinaryType, embedViewer, macosInfo } from './release/build-engines.mjs';
 import { npmState, pypiState, sha1, sha256, writeManifest } from './release/manifest.mjs';
+import { edgeSmoke } from './release/edge-smoke.mjs';
 import { buildWheel } from './release/build-wheels.mjs';
 import { tarballProblems, wheelProblems } from './release/checks.mjs';
 import { PLATFORMS } from './release/platforms.mjs';
@@ -30,7 +31,7 @@ process.on('exit', () => fs.rmSync(path.dirname(emptyNpmrc), { recursive: true, 
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
-const VERSION = '0.1.7';
+const VERSION = '0.2.0';
 const TS = [
   { dir: 'protocol', name: '@velmlabs/unstuck-protocol' },
   { dir: 'core', name: '@velmlabs/unstuck-core' },
@@ -153,6 +154,9 @@ process.on('exit', () => scratch.forEach((d) => fs.rmSync(d, { recursive: true, 
 sh('npm', ['init', '-y'], { cwd: app, stdio: 'ignore' });
 sh('npm', ['pkg', 'set', 'type=module'], { cwd: app, stdio: 'ignore' });
 sh('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', ...hostTarballs, 'playwright@1.63.0', 'tsx@4.23.15'], { cwd: app, stdio: 'ignore', env: { ...process.env, PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1' } });
+step('Edge entry: bundles for workerd with no Node built-in');
+const edge = await edgeSmoke(app);
+console.log(`@velmlabs/unstuck edge entry: ${(edge.bytes / 1024).toFixed(0)} KiB, ${edge.inputs} modules, no Node built-ins`);
 fs.copyFileSync(path.join(root, 'examples/playwright-ts/index.ts'), path.join(app, 'index.ts'));
 const tsStatus = await takeover('npx', ['tsx', 'index.ts', siteUrl], app, noEngineOverride);
 if (tsStatus !== 'resolved') throw new Error(`TypeScript takeover: ${tsStatus}`);
