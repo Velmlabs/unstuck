@@ -358,33 +358,35 @@ describe('zoom on a phone', () => {
 });
 
 /** A finger dragging across the human's screen, with a slightly wobbly, human-like path. */
-async function fingerDrag(human: any, from: { x: number; y: number }, to: { x: number; y: number }, steps = 24) {
+async function fingerDrag(human: any, from: { x: number; y: number }, to: { x: number; y: number }, steps = 24, flick = false, beforeLift?: () => Promise<void>) {
   const s = await human.context().newCDPSession(human);
   const point = (x: number, y: number) => ({ touchPoints: [{ x, y, id: 1 }] });
   await s.send('Input.dispatchTouchEvent', { type: 'touchStart', ...point(from.x, from.y) });
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
-    const ease = t * t * (3 - 2 * t);
+    // A flick keeps its speed to the end (most moves land inside the viewer's move throttle); otherwise ease in and out.
+    const ease = flick ? t : t * t * (3 - 2 * t);
     await s.send('Input.dispatchTouchEvent', {
       type: 'touchMove',
       ...point(from.x + (to.x - from.x) * ease, from.y + (to.y - from.y) * ease + Math.sin(i) * 1.5),
     });
-    await new Promise((r) => setTimeout(r, 16));
+    await new Promise((r) => setTimeout(r, flick ? 0 : 16));
   }
+  await beforeLift?.();
   await s.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
 }
 
-describe('drag CAPTCHAs (sliders, drag-the-piece, drag and drop)', () => {
-  it('a phone-sized human solves all three by dragging with a finger', async () => {
+describe('drag CAPTCHAs (sliders, jigsaw slider, drag-the-piece, drag and drop)', () => {
+  it('a phone-sized human solves all four by dragging with a finger', async () => {
     const { page, unstuck, result, link } = await startTakeover({ path: '/drag' });
     const { ctx, human } = await openHuman(link.url);
     await waitFramed(human, 15_000);
 
-    const drag = async (fromSel: string, dx: number, dy: number) => {
+    const drag = async (fromSel: string, dx: number, dy: number, flick = false, beforeLift?: () => Promise<void>) => {
       const from = await centerOf(page, fromSel);
       const a = await canvasPointFor(human, from);
       const b = await canvasPointFor(human, { x: from.x + dx, y: from.y + dy });
-      await fingerDrag(human, a, b);
+      await fingerDrag(human, a, b, flick ? 10 : 24, flick, beforeLift);
     };
 
     await drag('#knob', 250, 0);
@@ -394,6 +396,15 @@ describe('drag CAPTCHAs (sliders, drag-the-piece, drag and drop)', () => {
     const hole = await centerOf(page, '#hole');
     await drag('#piece', hole.x - piece.x, hole.y - piece.y);
     await expect.poll(() => page.evaluate('window.puzzle'), { timeout: 10_000 }).toBe('ok');
+
+    // A strict jigsaw slider (±4 px, position from the last mousemove), dragged with a quick flick that ends fast.
+    // While the finger rests before lifting, the page already shows the piece where the finger is (what the person
+    // lines up by eye), not where an earlier, throttled move left it.
+    await drag('#jknob', 173, 0, true, async () => {
+      const at = () => page.evaluate("parseFloat(document.getElementById('jpiece').style.left)") as Promise<number>;
+      await expect.poll(async () => Math.abs((await at()) - 173), { timeout: 2_000 }).toBeLessThanOrEqual(4);
+    });
+    await expect.poll(() => page.evaluate('window.jigsaw'), { timeout: 10_000 }).toBe('ok');
 
     const card = await centerOf(page, '#card');
     const bin = await centerOf(page, '#bin');

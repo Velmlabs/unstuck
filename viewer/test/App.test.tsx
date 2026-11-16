@@ -1059,6 +1059,33 @@ describe('zoom', () => {
     ]);
   });
 
+  it('slider precision: a throttled move is sent when the tick ends, and a release elsewhere moves there first', () => {
+    setup();
+    const canvas = goLive();
+    pointer(canvas, 'pointerdown', { clientX: 320, clientY: 180, button: 0 });
+    pointer(canvas, 'pointermove', { clientX: 330, clientY: 180, buttons: 1 });
+    pointer(canvas, 'pointermove', { clientX: 335, clientY: 180, buttons: 1 }); // throttled, superseded
+    pointer(canvas, 'pointermove', { clientX: 340, clientY: 180, buttons: 1 }); // throttled: the newest
+    tick(16);
+    pointer(canvas, 'pointerup', { clientX: 340, clientY: 180, button: 0 }); // the page is already there: no extra move
+    pointer(canvas, 'pointerdown', { clientX: 340, clientY: 180, button: 0 });
+    tick(16);
+    pointer(canvas, 'pointermove', { clientX: 350, clientY: 180, buttons: 1 });
+    pointer(canvas, 'pointermove', { clientX: 355, clientY: 180, buttons: 1 }); // throttled
+    pointer(canvas, 'pointerup', { clientX: 360, clientY: 180, button: 0 });
+    tick(50); // the held-back move doesn't follow the release
+    expect(steps()).toEqual([
+      ['down', 640, 360],
+      ['move', 660, 360],
+      ['move', 680, 360],
+      ['up', 680, 360],
+      ['down', 680, 360],
+      ['move', 700, 360],
+      ['move', 720, 360],
+      ['up', 720, 360],
+    ]);
+  });
+
   it('a drag and a hold while zoomed map through the zoom', () => {
     setup();
     const canvas = goLive();
@@ -1150,8 +1177,9 @@ describe('zoom', () => {
     finger(canvas, 'pointerdown', 1, 100, 100);
     tick(250);
     finger(canvas, 'pointercancel', 1, 110, 100);
-    expect(steps().slice(-2)).toEqual([
+    expect(steps().slice(-3)).toEqual([
       ['down', 200, 200],
+      ['move', 220, 200],
       ['up', 220, 200],
     ]);
   });

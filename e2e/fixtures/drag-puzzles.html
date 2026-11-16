@@ -11,6 +11,11 @@
       #hole { position: absolute; left: 420px; top: 260px; width: 90px; height: 90px; border: 3px dashed #999; }
       #card { position: absolute; left: 100px; top: 480px; width: 90px; height: 60px; background: #10b981; }
       #bin { position: absolute; left: 420px; top: 460px; width: 120px; height: 100px; border: 3px dashed #555; }
+      #jig { position: absolute; left: 700px; top: 80px; width: 420px; height: 160px; background: repeating-linear-gradient(90deg, #c49a6c 0 52px, #a87b4f 52px 54px); }
+      #gap { position: absolute; left: 173px; top: 50px; width: 56px; height: 56px; background: rgba(30, 41, 99, 0.55); border: 1px dashed #fff; }
+      #jpiece { position: absolute; left: 0; top: 50px; width: 56px; height: 56px; background: #c49a6c; box-shadow: 0 0 0 2px #fff; }
+      #jtrack { position: absolute; left: 700px; top: 260px; width: 420px; height: 8px; background: #e5e7eb; border-radius: 4px; }
+      #jknob { position: absolute; left: -12px; top: -12px; width: 32px; height: 32px; background: #3b82f6; border-radius: 16px; }
     </style>
   </head>
   <body>
@@ -18,12 +23,16 @@
     <div id="track"><div id="knob"></div></div>
     <!-- 2. "Drag the piece into the gap": pointer events with pointer capture -->
     <div id="piece"></div><div id="hole"></div>
+    <!-- 4. Jigsaw slider ("slide to match"): the piece follows the knob; it must stop within 4 px of the gap -->
+    <div id="jig"><div id="gap"></div><div id="jpiece"></div></div>
+    <div id="jtrack"><div id="jknob"></div></div>
     <!-- 3. Native HTML5 drag and drop -->
     <div id="card" draggable="true"></div><div id="bin"></div>
     <script>
       window.slider = 'idle';
       window.puzzle = 'idle';
       window.dnd = 'idle';
+      window.jigsaw = 'idle';
 
       // 1. Slider: target offset 250 px (±12), at least 5 moves, every move with the left button held.
       const knob = document.getElementById('knob');
@@ -55,6 +64,23 @@
         grab = null;
         const p = piece.getBoundingClientRect(), h = document.getElementById('hole').getBoundingClientRect();
         window.puzzle = p.left >= h.left - 5 && p.right <= h.right + 5 && p.top >= h.top - 5 && p.bottom <= h.bottom + 5 ? 'ok' : `fail: ${Math.round(p.left)},${Math.round(p.top)}`;
+      });
+
+      // 4. Jigsaw slider: like most of them, the position comes from the last mousemove; mouseup only checks it.
+      const jknob = document.getElementById('jknob'), jpiece = document.getElementById('jpiece');
+      let jstart = null, jmoves = 0, jx = 0;
+      jknob.addEventListener('mousedown', (e) => { jstart = e.clientX; jmoves = 0; jx = 0; window.jigsaw = 'dragging'; });
+      document.addEventListener('mousemove', (e) => {
+        if (jstart === null || (e.buttons & 1) !== 1) return;
+        jmoves++;
+        jx = Math.max(0, Math.min(364, e.clientX - jstart));
+        jknob.style.left = jx - 12 + 'px';
+        jpiece.style.left = jx + 'px';
+      });
+      document.addEventListener('mouseup', () => {
+        if (jstart === null) return;
+        jstart = null;
+        window.jigsaw = Math.abs(jx - 173) <= 4 && jmoves >= 5 ? 'ok' : `fail: x=${jx} moves=${jmoves}`;
       });
 
       // 3. HTML5 drag and drop.

@@ -214,6 +214,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const pinch = useRef<{ ids: [number, number]; from: Pinch; start: View } | null>(null);
   const pendingUp = useRef<{ p: Point; button: 'left' | 'middle' | 'right'; timer: ReturnType<typeof setTimeout> } | null>(null);
   const moveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The newest move held back by the throttle: sent when the tick ends, so a drag always ends where the finger is. */
+  const trailingMove = useRef<Extract<ViewerToEngine, { t: 'mouse' }> | null>(null);
+  /** Where the page last saw the pointer move (a release elsewhere first gets a move there). */
+  const lastMove = useRef<Point | null>(null);
   /** Nothing drawn yet: the black area says it is waiting for the page, not broken. */
   const [framed, setFramed] = useState(false);
   const framedRef = useRef(false);
@@ -499,6 +503,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     flushUp(); // a tap's release still on its way goes first
     pressed.current = button;
     tapRef.current = { x: at.x, y: at.y, field: hitField(fieldsRef.current, p) };
+    lastMove.current = p; // a press puts the pointer there too
     send({ t: 'mouse', action: 'down', ...p, button, clickCount: 1, modifiers });
   };
 
@@ -523,6 +528,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     pressed.current = null;
     pressTouch.current = null;
     (e as Partial<PointerEvent>).preventDefault?.();
+    // Sliders read the position from the last mousemove: move to the release point first if the page isn't there yet.
+    trailingMove.current = null;
+    const last = lastMove.current;
+    if (last && (last.x !== p.x || last.y !== p.y)) sendMove({ t: 'mouse', action: 'move', ...p, button, clickCount: 0, modifiers });
     send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers });
   };
 
@@ -634,13 +643,31 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     send({ t: 'wheel', x: v.left + v.width / 2, y: v.top + v.height / 2, dx: 0, dy: Math.round(direction * v.height * SCROLL_FRACTION) });
   };
 
-  /** At most one move per MOVE_MS; `then` runs when the tick ends (a drag's first move). */
+  const sendMove = (m: Extract<ViewerToEngine, { t: 'mouse' }>) => {
+    lastMove.current = { x: m.x, y: m.y };
+    send(m);
+  };
+
+  /**
+   * At most one move per MOVE_MS; `then` runs when the tick ends (a drag's first move). A move that arrived during the
+   * tick isn't lost: the newest one is sent when the tick ends (one tick later still if `then` sent a move).
+   */
   const throttleMoves = (then?: () => void) => {
     moveQueued.current = true;
     moveTimer.current = setTimeout(() => {
       moveQueued.current = false;
       moveTimer.current = null;
-      then?.();
+      if (then) {
+        then();
+        if (trailingMove.current) throttleMoves();
+        return;
+      }
+      const m = trailingMove.current;
+      trailingMove.current = null;
+      // A held button's move only while it is still held (a release already went out at the lift point).
+      if (!m || !liveRef.current || (m.button !== 'none' && !pressed.current)) return;
+      throttleMoves();
+      sendMove(m);
     }, MOVE_MS);
   };
 
@@ -665,17 +692,21 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         if (!pressed.current || !p) return;
         pressTouch.current = { id: e.pointerId, ...at };
         return throttleMoves(() => {
-          if (pressed.current && liveRef.current) send({ t: 'mouse', action: 'move', ...p, button: 'left', clickCount: 0, modifiers: 0 });
+          if (pressed.current && liveRef.current) sendMove({ t: 'mouse', action: 'move', ...p, button: 'left', clickCount: 0, modifiers: 0 });
         });
       }
       if (pressTouch.current?.id !== e.pointerId) return;
       pressTouch.current = { id: e.pointerId, ...at };
     }
-    if (moveQueued.current) return;
     const p = point(e);
     if (!p) return;
+    const m = { t: 'mouse', action: 'move', ...p, button: e.buttons & 1 ? 'left' : 'none', clickCount: 0, modifiers: modifiersOf(e) } as const;
+    if (moveQueued.current) {
+      trailingMove.current = m;
+      return;
+    }
     throttleMoves();
-    send({ t: 'mouse', action: 'move', ...p, button: e.buttons & 1 ? 'left' : 'none', clickCount: 0, modifiers: modifiersOf(e) });
+    sendMove(m);
   };
 
   const onWheel = (e: WheelEvent) => {
@@ -732,6 +763,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       pendingUp.current = null;
       if (moveTimer.current) clearTimeout(moveTimer.current);
       moveTimer.current = null;
+      trailingMove.current = null;
+      lastMove.current = null;
       moveQueued.current = false; // a mirror mounted again must not start with its moves throttled away
       stopZoomAnimation();
     };
