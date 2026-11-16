@@ -290,6 +290,84 @@ describe('telegram', () => {
   });
 });
 
+describe('alert channels once paired: Telegram recommended first, phone notifications optional second', () => {
+  const DOCS = 'https://unstuck.sh/docs/alerts/#notifications-that-dont-show-up';
+  const before = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('Telegram comes first, labelled recommended, with the one filled button; notifications follow, optional and outlined', async () => {
+    setup();
+    await pairNow();
+    const tg = await screen.findByRole('region', { name: 'Get alerts on Telegram (recommended)' });
+    const push = screen.getByRole('region', { name: 'Also show phone notifications (optional)' });
+    expect(before(tg, push)).toBe(true);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Get alerts on Telegram (recommended)', 'Also show phone notifications (optional)']);
+    expect(tg.textContent).toContain('Arrives reliably, even when your phone saves battery.');
+    expect(tg.textContent).not.toContain('Safari');
+    const connect = screen.getByRole('button', { name: 'Connect Telegram' });
+    const turnOn = screen.getByRole('button', { name: 'Turn on phone notifications' });
+    expect(tg.contains(connect)).toBe(true);
+    expect(push.contains(turnOn)).toBe(true);
+    expect(connect.className).not.toContain('btn-ghost');
+    expect(turnOn.className).toContain('btn-ghost');
+    expect(push.textContent).toContain('Some phones hold browser notifications back to save battery.');
+    const link = screen.getByRole('link', { name: 'Why notifications may not show up' });
+    expect(link.getAttribute('href')).toBe(DOCS);
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('Install Unstuck sits with phone notifications, outlined', async () => {
+    const t = new EventTarget() as EventTarget & { matchMedia: (q: string) => { matches: boolean } };
+    t.matchMedia = () => ({ matches: false });
+    const install = captureInstall(t);
+    const e = new Event('beforeinstallprompt', { cancelable: true }) as Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: string }> };
+    e.prompt = async () => {};
+    e.userChoice = Promise.resolve({ outcome: 'dismissed' });
+    t.dispatchEvent(e);
+    setup({ install });
+    await pairNow();
+    const push = await screen.findByRole('region', { name: 'Also show phone notifications (optional)' });
+    const button = screen.getByRole('button', { name: 'Install Unstuck' });
+    expect(push.contains(button)).toBe(true);
+    expect(before(screen.getByRole('button', { name: 'Turn on phone notifications' }), button)).toBe(true);
+    expect(button.className).toContain('btn-ghost');
+  });
+
+  it('iPhone Safari: Telegram works right here in Safari; notifications say they need the Home Screen app, behind Install Unstuck', async () => {
+    setup({ install: captureInstall(new EventTarget()), env: { userAgent: IPHONE, standalone: false, maxTouchPoints: 5, canPush: false } });
+    fireEvent.click(await screen.findByRole('button', { name: 'Pair Safari (for Telegram and email links)' }));
+    const tg = await screen.findByRole('region', { name: 'Get alerts on Telegram (recommended)' });
+    const push = screen.getByRole('region', { name: 'Also show phone notifications (optional)' });
+    expect(before(tg, push)).toBe(true);
+    expect(tg.textContent).toContain('Arrives reliably, even when your phone saves battery, and works right here in Safari.');
+    expect(push.textContent).toContain('On iPhone, notifications need Unstuck on your Home Screen. Telegram does not.');
+    expect(push.contains(screen.getByRole('link', { name: 'Why notifications may not show up' }))).toBe(true);
+    expect(screen.queryByRole('button', { name: /turn on phone notifications/i })).toBeNull();
+    expect(push.contains(screen.getByRole('button', { name: 'Install Unstuck' }))).toBe(true);
+  });
+
+  it('where the browser cannot do push at all, only Telegram is offered; an install option still shows after it', async () => {
+    const win = new EventTarget() as EventTarget & { matchMedia: (q: string) => { matches: boolean } };
+    win.matchMedia = (q) => ({ matches: q === '(display-mode: standalone)' });
+    setup({ install: captureInstall(win), env: { userAgent: ANDROID, standalone: false, maxTouchPoints: 5, canPush: false } });
+    await pairNow();
+    const tg = await screen.findByRole('region', { name: 'Get alerts on Telegram (recommended)' });
+    expect(screen.queryByRole('region', { name: /phone notifications/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /notifications/i })).toBeNull();
+    const installed = screen.getByText('Unstuck is installed on this phone.');
+    expect(before(tg, installed)).toBe(true);
+  });
+
+  it('Telegram connected: its status shows under the recommended heading, before notifications', async () => {
+    const fetchFn = vi.fn(async (url: string) => (url.endsWith('/api/v1/devices/self') ? json(200, { label: 'Galaxy', push: false, telegram: true, telegramAnyBrowser: false }) : json(404, {})));
+    setup({ code: null, store: memoryStore({ deviceId: 'd', deviceToken: 't', privateKey: {} as CryptoKey }), fetchFn: fetchFn as unknown as typeof fetch });
+    const connected = await screen.findByText('Telegram is connected: alerts for this phone arrive in your Telegram chat.');
+    const tg = screen.getByRole('region', { name: 'Get alerts on Telegram (recommended)' });
+    expect(tg.contains(connected)).toBe(true);
+    expect(before(connected, screen.getByRole('button', { name: 'Turn on phone notifications' }))).toBe(true);
+  });
+});
+
 describe('status once paired (what Cloud says is really set up)', () => {
   const paired = () => memoryStore({ deviceId: 'dev9', deviceToken: 'tok9', privateKey: {} as CryptoKey, label: 'Galaxy' });
   type Status = { label: string; push: boolean; telegram: boolean; telegramAnyBrowser: boolean };

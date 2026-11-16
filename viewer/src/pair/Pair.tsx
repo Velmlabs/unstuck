@@ -39,6 +39,7 @@ type Note = { kind: 'ok' | 'error'; text: string } | null;
 
 const EXPIRED = 'This pairing code has expired. Make a new one in your dashboard.';
 const REJECTED = 'Could not pair this phone. Make a new code in your dashboard and try again.';
+const NOTIFICATIONS_DOCS = 'https://unstuck.sh/docs/alerts/#notifications-that-dont-show-up';
 const ANY_BROWSER_COPY =
   'Telegram links then carry the key that opens them, so Unstuck Cloud, Telegram and anyone you forward the message to could open your takeovers. Phone notifications stay locked to this browser.';
 
@@ -202,6 +203,8 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
   }
 
   const needsHome = pushNeedsHomeScreen(env.userAgent, env.standalone, env.maxTouchPoints);
+  /** Phone notifications can be turned on from this page (not iPhone Safari, which needs the Home Screen app). */
+  const pushHere = !needsHome && env.canPush;
   const pairText = needsHome ? 'Pair Safari (for Telegram and email links)' : 'Pair this phone';
   const homeScreenSteps = (
     <section>
@@ -217,7 +220,7 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
   // "Installed" is said on a phone only (a computer's installed app needs no word here).
   const onPhone = env.maxTouchPoints > 0;
   const installButton = (onClick: () => void, expanded?: boolean) => (
-    <button type="button" class="btn pair-btn install-btn" aria-expanded={expanded} onClick={onClick}>
+    <button type="button" class="btn btn-ghost pair-btn install-btn" aria-expanded={expanded} onClick={onClick}>
       <InstallIcon />
       Install Unstuck
     </button>
@@ -283,18 +286,12 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
       {phase === 'paired' && (
         <>
           <p role="status">{device?.label ? `This phone is paired as ${device.label}.` : 'This phone is paired.'} Clearing this browser's site data unpairs it.</p>
-          {installSection}
-          {!needsHome && env.canPush && (
-            <section>
-              {status?.push && <p role="status">Phone notifications are on.</p>}
-              <button type="button" class="btn pair-btn" onClick={() => void turnOnPush()}>{status?.push ? 'Turn on again' : 'Turn on phone notifications'}</button>
-              {pushNote && <p role={pushNote.kind === 'error' ? 'alert' : 'status'}>{pushNote.text}</p>}
-            </section>
-          )}
-          <section>
+          <section class="pair-channel" aria-labelledby="pair-telegram">
+            <h2 id="pair-telegram">Get alerts on Telegram (recommended)</h2>
+            <p class="muted">{needsHome ? 'Arrives reliably, even when your phone saves battery, and works right here in Safari.' : 'Arrives reliably, even when your phone saves battery.'}</p>
             {status?.telegram ? (
               <>
-                <p role="status">Telegram is connected: alerts for this phone arrive in your Telegram chat.</p>
+                <p role="status" class="pair-on">Telegram is connected: alerts for this phone arrive in your Telegram chat.</p>
                 <button type="button" class="btn btn-ghost pair-btn btn-small" onClick={() => void connectTelegram()}>Reconnect Telegram</button>
                 <label class="toggle">
                   <input type="checkbox" checked={status.telegramAnyBrowser} onChange={() => void setAnyBrowser(!status.telegramAnyBrowser)} /> Telegram links open in any browser
@@ -312,6 +309,28 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
             )}
             {tgNote && <p role="alert">{tgNote.text}</p>}
           </section>
+          {pushHere || needsHome ? (
+            <section class="pair-channel" aria-labelledby="pair-notifications">
+              <h2 id="pair-notifications">Also show phone notifications (optional)</h2>
+              <p class="muted">
+                Some phones hold browser notifications back to save battery.{' '}
+                <a href={NOTIFICATIONS_DOCS} target="_blank" rel="noopener noreferrer">
+                  Why notifications may not show up
+                </a>
+              </p>
+              {needsHome && <p class="muted">On iPhone, notifications need Unstuck on your Home Screen. Telegram does not.</p>}
+              {pushHere && (
+                <>
+                  {status?.push && <p role="status" class="pair-on">Phone notifications are on.</p>}
+                  <button type="button" class="btn btn-ghost pair-btn" onClick={() => void turnOnPush()}>{status?.push ? 'Turn on again' : 'Turn on phone notifications'}</button>
+                  {pushNote && <p role={pushNote.kind === 'error' ? 'alert' : 'status'}>{pushNote.text}</p>}
+                </>
+              )}
+              {installSection}
+            </section>
+          ) : (
+            installSection
+          )}
         </>
       )}
     </main>
