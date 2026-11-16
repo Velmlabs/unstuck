@@ -24,6 +24,7 @@ const FIXTURES: Record<string, Buffer> = {
   '/popup': fs.readFileSync(path.join(here, 'fixtures/popup.html')),
   '/drag': fs.readFileSync(path.join(here, 'fixtures/drag-puzzles.html')),
   '/otp': fs.readFileSync(path.join(here, 'fixtures/otp.html')),
+  '/long': fs.readFileSync(path.join(here, 'fixtures/long-page.html')),
 };
 
 let server: http.Server;
@@ -59,8 +60,8 @@ afterAll(async () => {
   server?.close();
 });
 
-async function startTakeover(opts: { timeoutS?: number; path?: string; reason?: string } = {}) {
-  const page = await agentBrowser.newPage({ viewport: { width: 1280, height: 720 } });
+async function startTakeover(opts: { timeoutS?: number; path?: string; reason?: string; viewport?: { width: number; height: number } } = {}) {
+  const page = await agentBrowser.newPage({ viewport: opts.viewport ?? { width: 1280, height: 720 } });
   await page.goto(site + (opts.path ?? '').replace(/^\//, ''));
   let link!: TakeoverLink;
   let linkArrived!: () => void;
@@ -82,11 +83,11 @@ async function openHuman(url: string, wire?: Buffer[]) {
 }
 
 /** Where an agent-page point appears on the human's canvas (object-fit: contain letterboxing). */
-async function canvasPointFor(human: any, pagePoint: { x: number; y: number }) {
+async function canvasPointFor(human: any, pagePoint: { x: number; y: number }, page = { width: 1280, height: 720 }) {
   const box = await human.locator('canvas').boundingBox();
-  const scale = Math.min(box.width / 1280, box.height / 720);
-  const offX = (box.width - 1280 * scale) / 2;
-  const offY = (box.height - 720 * scale) / 2;
+  const scale = Math.min(box.width / page.width, box.height / page.height);
+  const offX = (box.width - page.width * scale) / 2;
+  const offY = (box.height - page.height * scale) / 2;
   return { x: box.x + offX + pagePoint.x * scale, y: box.y + offY + pagePoint.y * scale };
 }
 
@@ -229,7 +230,7 @@ describe('local takeover end to end', () => {
     await human.getByText(reason).waitFor({ timeout: 20_000 });
     const width = human.viewportSize()!.width;
     expect(await human.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
-    for (const el of [human.getByRole('button', { name: 'Done' }), human.getByTestId('countdown')]) {
+    for (const el of [human.getByRole('button', { name: 'Done' }), human.getByTestId('countdown'), human.getByRole('button', { name: 'Help' })]) {
       const box = (await el.boundingBox())!;
       expect(box.x + box.width).toBeLessThanOrEqual(width);
     }
@@ -317,8 +318,15 @@ describe('zoom on a phone', () => {
         return Math.abs(s.left - a.left - (a.right - s.right));
       }),
     );
-    expect(offCentre.length).toBe(5);
+    expect(offCentre.length).toBe(6); // zoom in, out, fit; scroll up, down; Drag mode
     for (const d of offCentre) expect(d).toBeLessThanOrEqual(1);
+    // The whole rail fits on the phone's mirror, and Help in the top bar is on screen too.
+    const rail = await human.locator('.stage-controls').boundingBox();
+    const stage = await human.locator('.stage').boundingBox();
+    expect(rail.y).toBeGreaterThanOrEqual(stage.y);
+    expect(rail.y + rail.height).toBeLessThanOrEqual(stage.y + stage.height);
+    const help = await human.getByRole('button', { name: 'Help' }).boundingBox();
+    expect(help.x + help.width).toBeLessThanOrEqual(human.viewportSize()!.width);
 
     await human.getByRole('button', { name: 'Zoom in' }).tap();
     await human.getByRole('button', { name: 'Zoom in' }).tap();
@@ -357,11 +365,21 @@ describe('zoom on a phone', () => {
   }, 90_000);
 });
 
-/** A finger dragging across the human's screen, with a slightly wobbly, human-like path. */
-async function fingerDrag(human: any, from: { x: number; y: number }, to: { x: number; y: number }, steps = 24, flick = false, beforeLift?: () => Promise<void>) {
+/**
+ * A finger dragging across the human's screen, with a slightly wobbly, human-like path. With `holdMs` the finger rests
+ * where it landed that long before it moves (press and hold, then drag); without it, it moves at once (a swipe, or a
+ * drag in Drag mode).
+ */
+async function fingerDrag(
+  human: any,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  { steps = 24, flick = false, holdMs = 0, beforeLift }: { steps?: number; flick?: boolean; holdMs?: number; beforeLift?: () => Promise<void> } = {},
+) {
   const s = await human.context().newCDPSession(human);
   const point = (x: number, y: number) => ({ touchPoints: [{ x, y, id: 1 }] });
   await s.send('Input.dispatchTouchEvent', { type: 'touchStart', ...point(from.x, from.y) });
+  if (holdMs) await new Promise((r) => setTimeout(r, holdMs));
   for (let i = 1; i <= steps; i++) {
     const t = i / steps;
     // A flick keeps its speed to the end (most moves land inside the viewer's move throttle); otherwise ease in and out.
@@ -377,32 +395,42 @@ async function fingerDrag(human: any, from: { x: number; y: number }, to: { x: n
 }
 
 describe('drag CAPTCHAs (sliders, jigsaw slider, drag-the-piece, drag and drop)', () => {
-  it('a phone-sized human solves all four by dragging with a finger', async () => {
+  it('a phone-sized human solves all four with a finger: press and hold then drag, or swipes in Drag mode', async () => {
     const { page, unstuck, result, link } = await startTakeover({ path: '/drag' });
     const { ctx, human } = await openHuman(link.url);
     await waitFramed(human, 15_000);
 
-    const drag = async (fromSel: string, dx: number, dy: number, flick = false, beforeLift?: () => Promise<void>) => {
+    const drag = async (fromSel: string, dx: number, dy: number, o: { flick?: boolean; holdMs?: number; beforeLift?: () => Promise<void> } = {}) => {
       const from = await centerOf(page, fromSel);
       const a = await canvasPointFor(human, from);
       const b = await canvasPointFor(human, { x: from.x + dx, y: from.y + dy });
-      await fingerDrag(human, a, b, flick ? 10 : 24, flick, beforeLift);
+      await fingerDrag(human, a, b, { steps: o.flick ? 10 : 24, ...o });
     };
 
-    await drag('#knob', 250, 0);
+    // Press and hold, then drag (the default: a plain swipe would move, not drag).
+    await drag('#knob', 250, 0, { holdMs: 400 });
     await expect.poll(() => page.evaluate('window.slider'), { timeout: 10_000 }).toBe('ok');
 
     const piece = await centerOf(page, '#piece');
     const hole = await centerOf(page, '#hole');
-    await drag('#piece', hole.x - piece.x, hole.y - piece.y);
+    await drag('#piece', hole.x - piece.x, hole.y - piece.y, { holdMs: 400 });
     await expect.poll(() => page.evaluate('window.puzzle'), { timeout: 10_000 }).toBe('ok');
+
+    // Drag mode: a swipe drags at once.
+    const dragMode = human.getByRole('button', { name: 'Drag mode' });
+    expect(await dragMode.getAttribute('aria-pressed')).toBe('false');
+    await dragMode.tap();
+    await expect.poll(() => dragMode.getAttribute('aria-pressed'), { timeout: 5_000 }).toBe('true');
 
     // A strict jigsaw slider (±4 px, position from the last mousemove), dragged with a quick flick that ends fast.
     // While the finger rests before lifting, the page already shows the piece where the finger is (what the person
     // lines up by eye), not where an earlier, throttled move left it.
-    await drag('#jknob', 173, 0, true, async () => {
-      const at = () => page.evaluate("parseFloat(document.getElementById('jpiece').style.left)") as Promise<number>;
-      await expect.poll(async () => Math.abs((await at()) - 173), { timeout: 2_000 }).toBeLessThanOrEqual(4);
+    await drag('#jknob', 173, 0, {
+      flick: true,
+      beforeLift: async () => {
+        const at = () => page.evaluate("parseFloat(document.getElementById('jpiece').style.left)") as Promise<number>;
+        await expect.poll(async () => Math.abs((await at()) - 173), { timeout: 2_000 }).toBeLessThanOrEqual(4);
+      },
     });
     await expect.poll(() => page.evaluate('window.jigsaw'), { timeout: 10_000 }).toBe('ok');
 
@@ -410,6 +438,39 @@ describe('drag CAPTCHAs (sliders, jigsaw slider, drag-the-piece, drag and drop)'
     const bin = await centerOf(page, '#bin');
     await drag('#card', bin.x - card.x, bin.y - card.y);
     await expect.poll(() => page.evaluate('window.dnd'), { timeout: 10_000 }).toBe('ok');
+
+    await human.getByRole('button', { name: 'Done' }).click();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await unstuck.close();
+    await ctx.close();
+  }, 90_000);
+});
+
+describe('swipe to move', () => {
+  it('on a page taller than its window, a one-finger swipe up scrolls the agent page and clicks nothing; then a tap on the bottom button works', async () => {
+    const size = { width: 390, height: 720 };
+    const { page, unstuck, result, link } = await startTakeover({ path: '/long', viewport: size });
+    const { ctx, human } = await openHuman(link.url);
+    await waitFramed(human, 15_000);
+    const box = await human.locator('canvas').boundingBox();
+    const x = box.x + box.width / 2;
+    // Swipes up from low on the mirror (over the tiles) until the page is at its bottom.
+    const maxY = (await page.evaluate('document.documentElement.scrollHeight - innerHeight')) as number;
+    expect(maxY).toBeGreaterThan(500);
+    let before = 0;
+    for (let i = 0; i < 8 && before < maxY; i++) {
+      await fingerDrag(human, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.2 }, { steps: 16 });
+      await expect.poll(() => page.evaluate('scrollY'), { timeout: 5_000 }).toBeGreaterThan(before);
+      before = (await page.evaluate('scrollY')) as number;
+    }
+    await expect.poll(() => page.evaluate('scrollY'), { timeout: 5_000 }).toBe(maxY);
+    await new Promise((r) => setTimeout(r, 400));
+    expect(await page.evaluate('window.clicks')).toEqual([]);
+    // The Verify button is on screen now: a tap clicks it.
+    const verify = await canvasPointFor(human, await centerOf(page, '#verify'), size);
+    await human.touchscreen.tap(verify.x, verify.y);
+    await expect.poll(() => page.evaluate('window.verified'), { timeout: 10_000 }).toBe(1);
+    expect(await page.evaluate('window.clicks')).toEqual(['verify']);
 
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved' });

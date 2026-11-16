@@ -86,3 +86,44 @@ export const InstallIcon = () => (
     <path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 15.5v2A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-2" />
   </Icon>
 );
+
+/** Drag mode: a pointer with the path it drags along behind it. */
+export const DragIcon = () => (
+  <Icon>
+    <path d="M10 4.5l9 3.6-3.9 1.4-1.4 3.9z" />
+    <path d="M12.5 11.5l-2 2M8 16l-1.5 1.5M4.5 19.5l-.5.5" />
+  </Icon>
+);
+
+/** Help: a question mark in a circle. */
+export const HelpIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.7.3-1.2.9-1.2 1.7v.4M12 17.2h.01" />
+  </Icon>
+);
+
+/** Tap: a fingertip's touch with its ripple. */
+export const TapIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 4.5a7.5 7.5 0 0 1 7.5 7.5M12 19.5A7.5 7.5 0 0 1 4.5 12" />
+  </Icon>
+);
+
+/** Swipe: a touch moving, with the way it went. */
+export const SwipeIcon = () => (
+  <Icon>
+    <circle cx="15" cy="9" r="3" />
+    <path d="M12.6 11.4L5 19M5 14v5h5" />
+  </Icon>
+);
+
+/** Press and hold, then drag: a held touch and the drag that follows it. */
+export const HoldDragIcon = () => (
+  <Icon>
+    <circle cx="7" cy="12" r="3.5" />
+    <circle cx="7" cy="12" r=".6" />
+    <path d="M13 12h7.5M17.5 9l3 3-3 3" />
+  </Icon>
+);

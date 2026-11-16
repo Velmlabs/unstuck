@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/preact';
 import type { ConnectionHandlers } from '../src/connection';
-import { App, type AppProps } from '../src/App';
+import { App, DRAG_TIP_OFF, DRAG_TIP_ON, type AppProps } from '../src/App';
+import { HELP_ITEMS } from '../src/help';
 
 const NOW = 1_700_000_000_000;
 let handlers: ConnectionHandlers;
@@ -1039,9 +1040,10 @@ describe('zoom', () => {
     expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
   });
 
-  it('a finger drag: the press where it landed, then (one tick later) a move where it crossed the slop, then moves', () => {
+  it('Drag mode: a finger drag is the press where it landed, then (one tick later) a move where it crossed the slop, then moves', () => {
     setup();
     const canvas = goLive();
+    fireEvent.click(btn('Drag mode'));
     finger(canvas, 'pointerdown', 1, 100, 100);
     finger(canvas, 'pointermove', 1, 104, 100); // within the slop: nothing yet
     expect(mice()).toEqual([]);
@@ -1086,11 +1088,12 @@ describe('zoom', () => {
     ]);
   });
 
-  it('a drag and a hold while zoomed map through the zoom', () => {
+  it('a hold-then-drag and a hold while zoomed map through the zoom', () => {
     setup();
     const canvas = goLive();
     zoom2x();
     finger(canvas, 'pointerdown', 1, 0, 0);
+    tick(250);
     finger(canvas, 'pointermove', 1, 40, 0);
     tick(16);
     finger(canvas, 'pointerup', 1, 40, 0);
@@ -1121,6 +1124,268 @@ describe('zoom', () => {
     finger(canvas, 'pointermove', 1, 100, 80);
     finger(canvas, 'pointerup', 1, 100, 80);
     expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
+  });
+
+  describe('swipe to move, hold to drag', () => {
+    const wheels = () => sent.filter((m) => (m as { t: string }).t === 'wheel');
+
+    it('a swipe at fit scrolls the page at the finger, in page px, the content following the finger; no mouse input', () => {
+      setup();
+      const canvas = goLive(); // 640×360 showing 1280×720: 1 screen px = 2 page px
+      finger(canvas, 'pointerdown', 1, 320, 180);
+      finger(canvas, 'pointermove', 1, 320, 172); // within the slop: nothing yet
+      expect(sent).toEqual([]);
+      finger(canvas, 'pointermove', 1, 320, 150); // finger up 30 px from where it landed: the page scrolls down 60
+      expect(sent).toEqual([{ t: 'wheel', x: 640, y: 300, dx: 0, dy: 60 }]);
+      finger(canvas, 'pointermove', 1, 325, 145); // inside the tick: held back, added up
+      finger(canvas, 'pointermove', 1, 330, 140);
+      expect(wheels()).toHaveLength(1);
+      tick(16);
+      expect(wheels().at(-1)).toEqual({ t: 'wheel', x: 660, y: 280, dx: -20, dy: 20 });
+      finger(canvas, 'pointermove', 1, 330, 120);
+      finger(canvas, 'pointermove', 1, 330, 100); // the tick is still running: both wait
+      expect(wheels()).toHaveLength(2);
+      finger(canvas, 'pointerup', 1, 330, 100); // the rest goes at the lift
+      expect(wheels().at(-1)).toEqual({ t: 'wheel', x: 660, y: 200, dx: 0, dy: 80 });
+      tick(300);
+      expect(wheels()).toHaveLength(3);
+      expect(mice()).toEqual([]);
+      // No movement lost: 80 screen px up and 10 right, 160 and 20 page px.
+      const sum = wheels().reduce<[number, number]>((a, m) => [a[0] + (m as { dx: number }).dx, a[1] + (m as { dy: number }).dy], [0, 0]);
+      expect(sum).toEqual([-20, 160]);
+    });
+
+    it('the throttle sends at most one wheel per tick, and stops once the finger rests', () => {
+      setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 320, 300);
+      finger(canvas, 'pointermove', 1, 320, 280);
+      finger(canvas, 'pointermove', 1, 320, 270);
+      tick(16);
+      tick(16); // nothing came during this tick: the throttle goes quiet
+      finger(canvas, 'pointermove', 1, 320, 265); // a free tick: sent at once
+      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([40, 20, 10]);
+      finger(canvas, 'pointerup', 1, 320, 265);
+      expect(wheels()).toHaveLength(3); // nothing left to send
+    });
+
+    it('a short swipe that starts and ends on one spot never clicks it', () => {
+      setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      finger(canvas, 'pointermove', 1, 115, 100);
+      finger(canvas, 'pointermove', 1, 100, 100);
+      clock += 120;
+      finger(canvas, 'pointerup', 1, 100, 100);
+      tick(300);
+      expect(mice()).toEqual([]);
+      expect(wheels().map((m) => (m as { dx: number }).dx)).toEqual([-30, 30]);
+    });
+
+    it('zoomed in, a swipe pans the view first and scrolls the page with what is left at its edge', () => {
+      setup();
+      const canvas = goLive();
+      zoom2x(); // translate(-320px, -180px): 180 px of room to pan down the page, 1 screen px = 1 page px
+      finger(canvas, 'pointerdown', 1, 300, 300);
+      finger(canvas, 'pointermove', 1, 300, 200); // finger up 100: the view pans 100, nothing to the page
+      expect(canvas.style.transform).toBe('translate(-320px, -280px) scale(2)');
+      expect(sent).toEqual([]);
+      tick(16);
+      finger(canvas, 'pointermove', 1, 300, 100); // 80 more fit in the view, 20 scroll the page
+      expect(canvas.style.transform).toBe('translate(-320px, -360px) scale(2)');
+      expect(sent).toEqual([{ t: 'wheel', x: 620, y: 460, dx: 0, dy: 20 }]);
+      finger(canvas, 'pointerup', 1, 300, 100);
+      expect(mice()).toEqual([]);
+      expect(wheels()).toHaveLength(1);
+    });
+
+    it('a hold then a drag is a mouse drag: the press at the hold, moves as they come, the release where it lifts', () => {
+      setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      finger(canvas, 'pointermove', 1, 104, 100); // within the slop
+      tick(250);
+      expect(steps()).toEqual([['down', 200, 200]]);
+      finger(canvas, 'pointermove', 1, 130, 100);
+      finger(canvas, 'pointermove', 1, 140, 100); // throttled: sent when the tick ends
+      tick(16);
+      finger(canvas, 'pointerup', 1, 160, 100);
+      expect(steps()).toEqual([
+        ['down', 200, 200],
+        ['move', 260, 200],
+        ['move', 280, 200],
+        ['move', 320, 200],
+        ['up', 320, 200],
+      ]);
+      expect(wheels()).toEqual([]);
+    });
+
+    it('a second finger during a swipe ends it cleanly (its scroll so far goes) and pinches; nothing else reaches the page', () => {
+      setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 220, 180);
+      finger(canvas, 'pointermove', 1, 220, 150);
+      finger(canvas, 'pointermove', 1, 220, 140); // held back by the tick
+      finger(canvas, 'pointerdown', 2, 420, 140);
+      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([60, 20]);
+      finger(canvas, 'pointermove', 1, 120, 140);
+      finger(canvas, 'pointermove', 2, 520, 140);
+      expect(scaleOf(canvas)).toBe(2);
+      finger(canvas, 'pointerup', 1, 120, 140);
+      finger(canvas, 'pointermove', 2, 500, 100);
+      finger(canvas, 'pointerup', 2, 500, 100);
+      tick(300);
+      expect(wheels()).toHaveLength(2);
+      expect(mice()).toEqual([]);
+    });
+
+    it('a cancel, a lost lift or the session leaving live ends a swipe; a wheel due after it is dropped when not live', () => {
+      setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 320, 180);
+      finger(canvas, 'pointermove', 1, 320, 150);
+      finger(canvas, 'pointermove', 1, 320, 140);
+      finger(canvas, 'pointercancel', 1, 320, 140); // the rest goes
+      finger(canvas, 'pointermove', 1, 320, 100); // no longer swiping
+      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([60, 20]);
+      // A swipe whose lift was never reported: the next first finger flushes it and starts clean.
+      finger(canvas, 'pointerdown', 2, 320, 180, true);
+      finger(canvas, 'pointermove', 2, 320, 150);
+      finger(canvas, 'pointermove', 2, 320, 145);
+      fingerTap(canvas, 100, 100, 80, 3, true);
+      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([60, 20, 60, 10]);
+      expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
+      // Not live with a wheel held back by the tick: it is dropped.
+      finger(canvas, 'pointerdown', 4, 320, 180, true);
+      finger(canvas, 'pointermove', 4, 320, 150);
+      finger(canvas, 'pointermove', 4, 320, 140);
+      act(() => handlers.onPhase('reconnecting'));
+      tick(50);
+      expect(wheels()).toHaveLength(5);
+    });
+
+    it('leaves no wheel running after unmount', () => {
+      const r = setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 320, 180);
+      finger(canvas, 'pointermove', 1, 320, 150);
+      finger(canvas, 'pointermove', 1, 320, 140);
+      const before = sent.length;
+      r.unmount();
+      act(() => void vi.advanceTimersByTime(100));
+      expect(sent.length).toBe(before);
+    });
+
+    it('a swipe before the first frame or off the page image scrolls nothing it cannot place', () => {
+      setup();
+      act(() => handlers.onPhase('live'));
+      const canvas = screen.getByTestId('screen');
+      setBox(canvas, 0, 0, 640, 360);
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      finger(canvas, 'pointermove', 1, 100, 50);
+      finger(canvas, 'pointerup', 1, 100, 50);
+      expect(sent).toEqual([]);
+    });
+  });
+
+  describe('Drag mode toggle', () => {
+    it('is off by default, says what a swipe does, and toggles with aria-pressed', () => {
+      setup();
+      goLive();
+      const b = btn('Drag mode');
+      const tip = () => document.getElementById(b.getAttribute('aria-describedby')!)!.textContent;
+      expect(b.closest('.stage-controls')).toBeTruthy();
+      expect(b.getAttribute('aria-pressed')).toBe('false');
+      expect(b.hasAttribute('data-active')).toBe(false);
+      expect(tip()).toBe(DRAG_TIP_OFF);
+      fireEvent.click(b);
+      expect(b.getAttribute('aria-pressed')).toBe('true');
+      expect(b.hasAttribute('data-active')).toBe(true);
+      expect(tip()).toBe(DRAG_TIP_ON);
+      fireEvent.click(b);
+      expect(b.getAttribute('aria-pressed')).toBe('false');
+      expect(sent).toEqual([]);
+    });
+
+    it('is off again for a new session, and never stored', () => {
+      setup();
+      goLive();
+      fireEvent.click(btn('Drag mode'));
+      expect(btn('Drag mode').getAttribute('aria-pressed')).toBe('true');
+      cleanup();
+      localStorage.clear();
+      setup();
+      goLive();
+      expect(btn('Drag mode').getAttribute('aria-pressed')).toBe('false');
+      for (let i = 0; i < localStorage.length; i++) expect(localStorage.key(i)).not.toMatch(/drag/i);
+    });
+  });
+
+  describe('help', () => {
+    const dialog = () => screen.queryByRole('dialog');
+    it('Help opens a dialog listing every gesture and button; focus goes to Close and back to Help', () => {
+      setup();
+      goLive();
+      const help = btn('Help');
+      expect(help.closest('.topbar')).toBeTruthy();
+      expect(dialog()).toBeNull();
+      fireEvent.click(help);
+      const d = dialog()!;
+      expect(d.getAttribute('aria-modal')).toBe('true');
+      expect(d.textContent).toContain('How to use this screen');
+      const rows = [...d.querySelectorAll('li')].map((li) => li.querySelector('strong')!.textContent);
+      expect(rows).toEqual(HELP_ITEMS.map((i) => i.name));
+      expect(rows).toEqual(['Tap', 'Swipe', 'Press and hold, then drag', 'Pinch, Zoom in, Zoom out', 'Scroll up, Scroll down', 'Drag mode', 'Keyboard', "Can't solve", 'Done']);
+      for (const li of d.querySelectorAll('li')) expect(li.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+      expect(document.activeElement).toBe(btn('Close'));
+      act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
+      expect(document.activeElement).toBe(btn('Close')); // focus stays in the dialog
+      fireEvent.click(btn('Close'));
+      expect(dialog()).toBeNull();
+      expect(document.activeElement).toBe(btn('Help'));
+    });
+
+    it('closes with Esc (not sent to the page) and with a tap outside the card, not inside it', () => {
+      setup();
+      goLive();
+      fireEvent.click(btn('Help'));
+      act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true })));
+      expect(dialog()).toBeNull();
+      expect(sent).toEqual([]);
+      fireEvent.click(btn('Help'));
+      fireEvent.click(dialog()!); // inside the card
+      fireEvent.click(dialog()!.querySelector('li')!);
+      expect(dialog()).toBeTruthy();
+      fireEvent.click(screen.getByTestId('help-backdrop'));
+      expect(dialog()).toBeNull();
+    });
+
+    it('while open, nothing reaches the page and the session carries on; a press under way ends first', () => {
+      setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      tick(250); // a hold: pressed
+      fireEvent.click(btn('Help'));
+      expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
+      fingerTap(canvas, 100, 100);
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      finger(canvas, 'pointermove', 1, 100, 50);
+      finger(canvas, 'pointerup', 1, 100, 50);
+      pointer(canvas, 'pointerdown', { clientX: 10, clientY: 10, button: 0 });
+      act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 320, clientY: 180, deltaY: 50 })));
+      act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true })));
+      fireEvent.click(btn('Scroll down'));
+      fireEvent.click(btn('Zoom in'));
+      expect(sent).toHaveLength(2);
+      expect(canvas.style.transform).toBe('');
+      drawFrame.mockClear();
+      act(() => handlers.onFrame({ width: 1280, height: 720, jpeg: new Uint8Array([2]) }));
+      expect(drawFrame).toHaveBeenCalledTimes(1); // still live underneath
+      expect(screen.getByTestId('countdown')).toBeTruthy();
+      fireEvent.click(btn('Close'));
+      fingerTap(canvas, 100, 100);
+      expect(mice().map((m) => m.action)).toEqual(['down', 'up', 'down', 'up']);
+    });
   });
 
   it('a pinch zooms around its centre, sends nothing to the page, and two fingers moving together pan; a third finger is ignored', () => {

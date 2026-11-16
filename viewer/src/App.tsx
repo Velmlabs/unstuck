@@ -6,10 +6,11 @@ import { drawFrameOnCanvas } from './draw';
 import { attachBridge, configureBridge } from './bridge';
 import { bridgeBox, clipBox, fieldBox, hitField, keepInside, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
-import { FIT_VIEW, MAX_ZOOM, NO_INSET, clampToPage, clampView, isFit, pinchView, sizeChangedALot, toPagePoint, viewTransform, visiblePageRect, zoomAt, type Inset, type Pinch, type Point, type Rect, type View } from './mapping';
+import { FIT_VIEW, MAX_ZOOM, NO_INSET, clampToPage, clampView, imageRect, isFit, pinchView, sizeChangedALot, toPagePoint, viewTransform, visiblePageRect, zoomAt, type Inset, type Pinch, type Point, type Rect, type View } from './mapping';
 import { forgetFragment, parseFragment, relayFor, sessionIdFromPath } from './url';
 import { cleanLabel, type Sender } from './alert-link';
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon, FitIcon, FlagIcon, KeyboardIcon, ZoomInIcon, ZoomOutIcon } from './icons';
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, DragIcon, FitIcon, FlagIcon, HelpIcon, KeyboardIcon, ZoomInIcon, ZoomOutIcon } from './icons';
+import { HelpSheet } from './help';
 import { TipButton, useFirstTimeHint, useTips } from './tips';
 
 export interface AppProps {
@@ -117,9 +118,16 @@ const TAP_SLOP_PX = 10;
  *   page ever seeing a click:
  *   - a tap (released within TAP_SLOP_PX): the press is sent at release, and the release follows after as long as the
  *     finger was really down (TAP_MIN_MS..TAP_MAX_MS), at the press point, so the page sees a real tap's duration;
- *   - a drag (moved past the slop): the press is sent where the finger landed, then a move where it crossed the slop
- *     one throttle tick later, then moves as they come (one per MOVE_MS);
- *   - a hold (still for HOLD_MS): the press is sent then (press-and-hold challenges).
+ *   - a swipe (moved past the slop before HOLD_MS): a move, like a map. Nothing reaches the page as mouse input, so a
+ *     swipe never clicks. Zoomed in, the finger first pans the view (clamped like a pinch's pan); whatever the view
+ *     can't take (at fit, or at its edge) scrolls the agent's page: a wheel at the finger's page point, in page px
+ *     through the current scale, the content following the finger (finger up, page down). At most one wheel per
+ *     MOVE_MS: the movement in between adds up and goes with the next one, and what is left goes at the lift;
+ *   - a hold (still for HOLD_MS): the press is sent then (press-and-hold challenges), and if the finger then moves it
+ *     is a mouse drag: moves as they come (one per MOVE_MS, the newest held back sent when the tick ends), the release
+ *     where it lifts. So press and hold briefly, then drag: a slider or a puzzle piece;
+ *   - in Drag mode (the rail's toggle, for long drag puzzles) a swipe is a mouse drag at once instead: the press where
+ *     the finger landed, then a move where it crossed the slop one throttle tick later, then moves as they come.
  * - Two fingers pinch to zoom around their midpoint and pan as the midpoint moves. A second finger after a press was
  *   sent ends that press (a release where the first finger is) before the pinch starts. Nothing reaches the page;
  *   a finger left over after a pinch, or a third finger, does nothing until it lifts.
@@ -131,6 +139,9 @@ const HOLD_MS = 250;
 const TAP_MIN_MS = 40;
 const TAP_MAX_MS = 250;
 const MOVE_MS = 16;
+/** The Drag mode toggle's tooltip, for each state (it says what a swipe does now). */
+export const DRAG_TIP_ON = 'Drag mode: on. Swipes drag on the page.';
+export const DRAG_TIP_OFF = 'Drag mode: off. Swipe to move, hold to drag.';
 const ZOOM_ANIM_MS = 180;
 const reducedMotion = () =>
   typeof window.matchMedia !== 'function' || typeof requestAnimationFrame !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -176,6 +187,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const [info, setInfo] = useState<{ reason: string; site: string; expiresAt: number } | null>(null);
   const [remaining, setRemaining] = useState('');
   const [asking, setAsking] = useState(false);
+  /** The help sheet is open: the mirror takes no input until it closes (the session carries on). */
+  const [helping, setHelping] = useState(false);
+  const helpButton = useRef<HTMLButtonElement | null>(null);
+  /** Drag mode: a one-finger swipe drags on the page at once. Off for every new takeover (never stored). */
+  const [dragMode, setDragMode] = useState(false);
+  const dragModeRef = useRef(false);
+  dragModeRef.current = dragMode;
   const [reason, setReason] = useState('');
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bridgeRef = useRef<HTMLInputElement>(null);
@@ -213,6 +231,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const pressTouch = useRef<{ id: number; x: number; y: number } | null>(null);
   const pinch = useRef<{ ids: [number, number]; from: Pinch; start: View } | null>(null);
   const pendingUp = useRef<{ p: Point; button: 'left' | 'middle' | 'right'; timer: ReturnType<typeof setTimeout> } | null>(null);
+  /**
+   * A swipe: the finger, where it was last seen (client px) and its page point; the scroll not sent yet (page px) and
+   * the wheel throttle's tick.
+   */
+  const swipe = useRef<{ id: number; x: number; y: number; p: Point | null } | null>(null);
+  const wheelDue = useRef({ dx: 0, dy: 0 });
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const moveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The newest move held back by the throttle: sent when the tick ends, so a drag always ends where the finger is. */
   const trailingMove = useRef<Extract<ViewerToEngine, { t: 'mouse' }> | null>(null);
@@ -227,7 +252,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const site = info?.site || alert?.site || '';
   const live = screen.kind === 'session' && phase === 'live';
   const liveRef = useRef(live);
-  liveRef.current = live && !asking;
+  liveRef.current = live && !asking && !helping;
   const tips = useTips();
   const hint = useFirstTimeHint(live);
 
@@ -487,6 +512,17 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     animateTo(zoomAt(from, { x: box.left + box.width / 2, y: box.top + box.height / 2 }, zoomStep(from.scale, dir), box, page, controlsInset()));
   };
 
+  /** The help sheet: whatever the fingers were doing ends first (the mirror takes no input while it is open). */
+  const openHelp = () => {
+    flushUp();
+    resetTouches();
+    setHelping(true);
+  };
+  const closeHelp = () => {
+    setHelping(false);
+    helpButton.current?.focus({ preventScroll: true });
+  };
+
   /** Sends a tap's delayed release now (a new press, or its timer). */
   // A function declaration (hoisted): `send`, created on the first render, flushes through it too. Refs only.
   function flushUp() {
@@ -539,6 +575,64 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     if (held.current) clearTimeout(held.current.timer);
     held.current = null;
   };
+  /** Sends the scroll a swipe has built up (page px), at the finger's page point; nothing when it rounds to zero. */
+  const sendWheel = () => {
+    const due = wheelDue.current;
+    const p = swipe.current?.p ?? null;
+    const dx = Math.round(due.dx * 10) / 10;
+    const dy = Math.round(due.dy * 10) / 10;
+    if (!p || (dx === 0 && dy === 0)) return false;
+    due.dx -= dx;
+    due.dy -= dy;
+    send({ t: 'wheel', ...p, dx, dy });
+    return true;
+  };
+  /** At most one wheel per MOVE_MS: sent now if the tick is free, else at the end of the tick (with what came since). */
+  const throttleWheel = () => {
+    if (wheelTimer.current) return;
+    if (!sendWheel()) return;
+    const tickEnd = () => {
+      wheelTimer.current = null;
+      if (liveRef.current && sendWheel()) wheelTimer.current = setTimeout(tickEnd, MOVE_MS);
+    };
+    wheelTimer.current = setTimeout(tickEnd, MOVE_MS);
+  };
+  /** A swipe ends (the lift, a cancel, a second finger, a reset): what is left of its scroll goes now, if live. */
+  const endSwipe = () => {
+    if (!swipe.current) return;
+    if (wheelTimer.current) clearTimeout(wheelTimer.current);
+    wheelTimer.current = null;
+    if (liveRef.current) sendWheel();
+    swipe.current = null;
+    wheelDue.current = { dx: 0, dy: 0 };
+  };
+  /**
+   * The swiping finger moved to `at` (client px): the zoomed view pans with it as far as it can, and the rest scrolls
+   * the page (screen px to page px through the current scale; the content follows the finger, so the sign flips).
+   */
+  const swipeTo = (at: Point) => {
+    const sw = swipe.current!;
+    let dx = at.x - sw.x;
+    let dy = at.y - sw.y;
+    sw.x = at.x;
+    sw.y = at.y;
+    const page = pageSize.current;
+    if (!viewportRef.current || page.width === 0) return;
+    const box = mirrorBox();
+    const v = viewRef.current;
+    if (!isFit(v)) {
+      const panned = clampView({ scale: v.scale, x: v.x + dx, y: v.y + dy }, box, page, controlsInset());
+      if (panned.x !== v.x || panned.y !== v.y) setView(panned);
+      dx -= panned.x - v.x;
+      dy -= panned.y - v.y;
+    }
+    sw.p = clampToPage(at, box, page, viewRef.current);
+    const k = page.width / imageRect(box, page, viewRef.current).width;
+    if (!Number.isFinite(k)) return;
+    wheelDue.current.dx -= dx * k;
+    wheelDue.current.dy -= dy * k;
+    throttleWheel();
+  };
   /** A held-back finger becomes a press (it moved past the slop, or stayed down): sent where it landed. */
   const commitHeld = () => {
     const h = held.current;
@@ -554,6 +648,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
    */
   const resetTouches = () => {
     dropHeld();
+    endSwipe();
     const pt = pressTouch.current;
     if (pt && pressed.current) release({ clientX: pt.x, clientY: pt.y }, 0);
     pressTouch.current = null;
@@ -581,8 +676,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       return;
     }
     if (touches.current.size !== 2 || pinch.current) return; // a third finger: ignored
-    // A second finger: a pinch. A press already sent is released first, where the first finger is.
+    // A second finger: a pinch. A swipe ends (its scroll so far goes); a press already sent is released first, where
+    // the first finger is.
     dropHeld();
+    endSwipe();
     const [firstId, first] = [...touches.current][0]!;
     if (pressed.current) release({ clientX: first.x, clientY: first.y }, 0);
     pressTouch.current = null;
@@ -601,6 +698,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       if (touches.current.size === 0) pinch.current = null;
       return;
     }
+    if (swipe.current?.id === e.pointerId) return endSwipe(); // a swipe's lift: the rest of its scroll, no click
     const h = held.current;
     if (h && h.id === e.pointerId) {
       dropHeld();
@@ -623,6 +721,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     if (e.pointerType === 'touch') {
       touches.current.delete(e.pointerId);
       if (held.current?.id === e.pointerId) dropHeld();
+      if (swipe.current?.id === e.pointerId) endSwipe();
       if (pinch.current && touches.current.size === 0) pinch.current = null;
       if (pressTouch.current?.id !== e.pointerId) return;
     }
@@ -683,10 +782,17 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         if (a && b && viewportRef.current) setView(pinchView(pz.start, pz.from, pinchOf(a, b), mirrorBox(), pageSize.current, controlsInset()));
         return;
       }
+      if (swipe.current?.id === e.pointerId) return swipeTo(at);
       const h = held.current;
       if (h && h.id === e.pointerId) {
         if (Math.hypot(at.x - h.x, at.y - h.y) < TAP_SLOP_PX) return;
-        // A drag: the press now, the move to where it crossed the slop one tick later (never in the same tick).
+        if (!dragModeRef.current) {
+          // A swipe: a move from where the finger landed, so the content follows the finger all the way.
+          dropHeld();
+          swipe.current = { id: h.id, x: h.x, y: h.y, p: h.p };
+          return swipeTo(at);
+        }
+        // Drag mode: the press now, the move to where it crossed the slop one tick later (never in the same tick).
         commitHeld();
         const p = point(e);
         if (!pressed.current || !p) return;
@@ -764,6 +870,9 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       if (moveTimer.current) clearTimeout(moveTimer.current);
       moveTimer.current = null;
       trailingMove.current = null;
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+      wheelTimer.current = null;
+      swipe.current = null;
       lastMove.current = null;
       moveQueued.current = false; // a mirror mounted again must not start with its moves throttled away
       stopZoomAnimation();
@@ -878,6 +987,9 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
             {remaining}
           </span>
         ) : null}
+        <TipButton tips={tips} id="help" side="bottom" align="end" class="btn rail-btn help-btn" label="Help" tip="How to tap, move, drag and zoom." buttonRef={helpButton} onClick={openHelp}>
+          <HelpIcon />
+        </TipButton>
       </header>
 
       <div class="stage" ref={stageRef}>
@@ -887,7 +999,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
             data-testid="screen"
             data-framed={framed ? '' : undefined}
             class="screen"
-            aria-label="Live view of the agent's browser. Tap or click to interact. Pinch or use + to zoom."
+            aria-label="Live view of the agent's browser. Tap or click to interact, swipe to move, press and hold to drag. Pinch or use + to zoom."
           />
         </div>
         {/* mousedown is not allowed to move focus: zooming and scrolling keep the phone keyboard open over its field. */}
@@ -910,6 +1022,21 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
             </TipButton>
             <TipButton tips={tips} id="scroll-down" side="left" class="btn rail-btn" label="Scroll down" tip="Scroll the page down." onClick={() => scroll(1)}>
               <ChevronDownIcon />
+            </TipButton>
+          </div>
+          <div class="rail-divider" aria-hidden="true" />
+          <div class="control-group" role="group" aria-label="Touch">
+            <TipButton
+              tips={tips}
+              id="drag-mode"
+              side="left"
+              class="btn rail-btn rail-toggle"
+              label="Drag mode"
+              pressed={dragMode}
+              tip={dragMode ? DRAG_TIP_ON : DRAG_TIP_OFF}
+              onClick={() => setDragMode((on) => !on)}
+            >
+              <DragIcon />
             </TipButton>
           </div>
         </div>
@@ -1016,6 +1143,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           </form>
         </div>
       ) : null}
+
+      {helping ? <HelpSheet onClose={closeHelp} /> : null}
 
       {asking ? (
         <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="cant-title">

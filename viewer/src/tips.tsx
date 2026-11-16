@@ -16,7 +16,7 @@ import type { ComponentChildren } from 'preact';
 export const LONG_PRESS_MS = 500;
 export const TOUCH_TIP_MS = 2500;
 export const HOVER_MS = 400;
-export const HINT_MS = 6000;
+export const HINT_MS = 8000;
 /** A finger that moves more than this (CSS px) while held is not a long-press. */
 const PRESS_SLOP_PX = 10;
 /** After a long-press, the click the release would make is ignored for this long (it follows the lift at once). */
@@ -107,9 +107,9 @@ export interface TipButtonProps {
   tips: Tips;
   id: string;
   tip: string;
-  /** Where the tooltip opens: above (the bottom bar) or to the left (the tool rail). */
-  side: 'top' | 'left';
-  /** For `top`: which edge of the button the bubble lines up with, so it stays on screen at the bar's ends. */
+  /** Where the tooltip opens: above (the bottom bar), below (the top bar) or to the left (the tool rail). */
+  side: 'top' | 'bottom' | 'left';
+  /** For `top` and `bottom`: which edge of the button the bubble lines up with, so it stays on screen at the bar's ends. */
   align?: 'start' | 'center' | 'end';
   class: string;
   /** The accessible name of an icon-only button. */
@@ -117,13 +117,17 @@ export interface TipButtonProps {
   disabled?: boolean;
   /** Shown as switched on (data-active), e.g. Keyboard while the phone keyboard is open. Visual only: not a toggle. */
   active?: boolean;
+  /** A real on/off toggle (aria-pressed), shown lit while on, e.g. Drag mode. */
+  pressed?: boolean;
   /** For an `end`-aligned top tooltip: an element (the tool rail) its bubble must stay clear of, to the left of it. */
   avoid?: () => Element | null;
+  /** The button element itself (e.g. so focus can go back to it when a dialog it opened closes). */
+  buttonRef?: { current: HTMLButtonElement | null };
   onClick: () => void;
   children: ComponentChildren;
 }
 
-export function TipButton({ tips, id, tip, side, align = 'center', class: cls, label, disabled, active, avoid, onClick, children }: TipButtonProps) {
+export function TipButton({ tips, id, tip, side, align = 'center', class: cls, label, disabled, active, pressed, avoid, buttonRef, onClick, children }: TipButtonProps) {
   const wrap = useRef<HTMLSpanElement>(null);
   const tipId = `tip-${id}`;
   const open = tips.open === id;
@@ -223,11 +227,13 @@ export function TipButton({ tips, id, tip, side, align = 'center', class: cls, l
       style={clear ? { '--tip-clear': `${clear}px` } : undefined}
     >
       <button
+        ref={buttonRef}
         type="button"
         class={cls}
         aria-label={label}
         aria-describedby={tipId}
-        data-active={active ? '' : undefined}
+        aria-pressed={pressed === undefined ? undefined : pressed}
+        data-active={active || pressed ? '' : undefined}
         disabled={disabled}
         onClick={onClick}
         onFocus={() => tips.keyboard() && tips.show(id, 'focus')}
@@ -245,9 +251,10 @@ export function TipButton({ tips, id, tip, side, align = 'center', class: cls, l
 /**
  * The first time the viewer is live on this device: the hint's text (for touch or for a mouse) until it is dismissed
  * (any touch or click, or HINT_MS). Remembered in localStorage; where storage is blocked it shows once per page load.
+ * On a touch screen it teaches the gestures first (a swipe moves, a hold drags), then where to learn more.
  */
-export const HINT_TOUCH = 'Tip: press and hold any button to see what it does.';
-export const HINT_MOUSE = 'Tip: hover over any button to see what it does.';
+export const HINT_TOUCH = 'Swipe to move, press and hold to drag. Hold any button to see what it does, or tap ? for help.';
+export const HINT_MOUSE = 'Hover over any button to see what it does, or click ? for help.';
 
 /** A touch screen (no hover, or a coarse pointer): tooltips come from a long-press there. */
 const touchFirst = () =>

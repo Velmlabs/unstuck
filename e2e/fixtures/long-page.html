@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Long page fixture</title>
+    <style>
+      body { margin: 0; font: 20px sans-serif; background: linear-gradient(#e0f2fe, #fef3c7); }
+      #readout { position: fixed; top: 8px; right: 8px; padding: 4px 8px; background: #111; color: #fff; font: 14px monospace; }
+      .tile { display: block; width: 300px; height: 120px; margin: 40px; background: #93c5fd; border: 0; font: inherit; }
+      #verify { display: block; margin: 40px; width: 300px; height: 80px; background: #16a34a; color: #fff; border: 0; font: 600 24px sans-serif; }
+    </style>
+  </head>
+  <body>
+    <!-- A page much taller than the viewport, like a CAPTCHA whose Verify button is below the fold. Every tile is a
+         button that records a click, so a swipe that clicked something would show. -->
+    <div id="readout">scrollY 0</div>
+    <button class="tile" id="t1">Tile 1</button>
+    <button class="tile" id="t2">Tile 2</button>
+    <button class="tile" id="t3">Tile 3</button>
+    <button class="tile" id="t4">Tile 4</button>
+    <button class="tile" id="t5">Tile 5</button>
+    <button class="tile" id="t6">Tile 6</button>
+    <button class="tile" id="t7">Tile 7</button>
+    <button class="tile" id="t8">Tile 8</button>
+    <button class="tile" id="t9">Tile 9</button>
+    <button class="tile" id="t10">Tile 10</button>
+    <button id="verify">Verify</button>
+    <script>
+      window.clicks = [];
+      window.verified = 0;
+      document.addEventListener('click', (e) => window.clicks.push(e.target.id || e.target.tagName), true);
+      document.getElementById('verify').addEventListener('click', () => window.verified++);
+      const readout = document.getElementById('readout');
+      addEventListener('scroll', () => (readout.textContent = 'scrollY ' + Math.round(scrollY)));
+    </script>
+  </body>
+</html>

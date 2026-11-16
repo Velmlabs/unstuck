@@ -54,6 +54,8 @@ const COPY: Record<string, string> = {
   'Fit page to screen': 'Fit the page to the screen.',
   'Scroll up': 'Scroll the page up.',
   'Scroll down': 'Scroll the page down.',
+  'Drag mode': 'Drag mode: off. Swipe to move, hold to drag.',
+  Help: 'How to tap, move, drag and zoom.',
 };
 
 beforeEach(() => {
@@ -85,6 +87,11 @@ describe('control buttons', () => {
     expect(btn('Done').getAttribute('aria-label')).toBeNull();
     expect(btn('Zoom in').getAttribute('aria-label')).toBe('Zoom in');
     expect(screen.queryByRole('tooltip')).toBeNull();
+    // Every button in the tool rail and the top bar has a tooltip.
+    for (const b of document.querySelectorAll('.stage-controls button, .topbar button')) expect(tipOf(b).getAttribute('role')).toBe('tooltip');
+    expect(document.querySelectorAll('.stage-controls button')).toHaveLength(6);
+    // Help's tooltip opens below it (it sits in the top bar), lined up with its right edge.
+    expect(anchor('Help').className).toBe('tip-anchor tip-bottom tip-align-end');
   });
 
   it('a long-press shows the tooltip and its release does not press the button', () => {
@@ -233,7 +240,8 @@ describe('control buttons', () => {
     expect(k.hasAttribute('data-active')).toBe(true);
     act(() => (screen.getByTestId('keyboard-bridge') as HTMLInputElement).blur());
     expect(k.hasAttribute('data-active')).toBe(false);
-    for (const name of Object.keys(COPY)) expect(btn(name).hasAttribute('aria-pressed'), name).toBe(false);
+    // Only Drag mode is a real toggle.
+    for (const name of Object.keys(COPY)) expect(btn(name).hasAttribute('aria-pressed'), name).toBe(name === 'Drag mode');
   });
 
   it('Esc hides a hover or long-press tooltip and still goes to the page', () => {
@@ -291,6 +299,12 @@ describe('first-time hint', () => {
     ptr(screen.getByRole('note'), 'pointerdown', 'touch');
     expect(hint()).toBeNull();
     expect(off.mock.calls.filter(([type, , capture]) => type === 'pointerdown' && capture === true).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('on a touch screen it teaches swipe to move, hold to drag, and points to help', () => {
+    expect(HINT_TOUCH).toMatch(/^Swipe to move, press and hold to drag\./);
+    expect(HINT_TOUCH).toContain('tap ? for help');
+    expect(HINT_MOUSE).toContain('click ? for help');
   });
 
   it('on a touch screen it says press and hold', () => {
