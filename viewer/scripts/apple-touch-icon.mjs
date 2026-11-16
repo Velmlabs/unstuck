@@ -1,12 +1,13 @@
-// Draws public/apple-touch-icon.png (180×180), the PNG twin of public/icon.svg that iPhone wants for the Home Screen
-// (it ignores SVG touch icons). Full bleed: iOS rounds the corners itself. Run by hand when icon.svg changes:
+// Draws the PNG twins of public/icon.svg: apple-touch-icon.png (180×180), which iPhone wants for the Home Screen (it
+// ignores SVG touch icons), and icon-192.png / icon-512.png, the manifest icons Chrome needs to offer an install.
+// Full bleed: iOS and Android round or mask the corners themselves (the mark sits well inside the maskable safe zone).
+// Run by hand when icon.svg changes:
 //   node scripts/apple-touch-icon.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
 
-const SIZE = 180;
 const SS = 4; // 4×4 samples per pixel
 const BG = [0x0f, 0x17, 0x2a];
 const FG = [0x22, 0xc5, 0x5e];
@@ -18,7 +19,7 @@ function dist(x, y) {
   return Math.min(seg(168), seg(344), arc);
 }
 
-export function iconPng() {
+export function iconPng(SIZE = 180) {
   const raw = Buffer.alloc(SIZE * (SIZE * 3 + 1));
   for (let py = 0; py < SIZE; py++) {
     raw[py * (SIZE * 3 + 1)] = 0; // filter: none
@@ -67,7 +68,9 @@ export function iconPng() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  const out = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', 'apple-touch-icon.png');
-  fs.writeFileSync(out, iconPng());
-  console.log(`wrote ${out}`);
+  const pub = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
+  for (const [name, size] of [['apple-touch-icon.png', 180], ['icon-192.png', 192], ['icon-512.png', 512]]) {
+    fs.writeFileSync(path.join(pub, name), iconPng(size));
+    console.log(`wrote ${name}`);
+  }
 }

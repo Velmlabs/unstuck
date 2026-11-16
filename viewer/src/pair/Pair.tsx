@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { exportDevicePublicKey, newDeviceKeyPair } from '@velmlabs/unstuck-protocol';
 import type { DeviceRecord, DeviceStore } from '../device-store';
 import { defaultLabel, normalizeCode, pushNeedsHomeScreen } from './env';
+import type { Installer } from './install';
+import { InstallIcon } from '../icons';
 
 export interface PairEnv {
   userAgent: string;
@@ -25,6 +27,8 @@ export interface PairProps {
   /** Asks permission, registers the service worker and subscribes; resolves with the subscription's JSON. */
   subscribePush: (vapidPublicKey: string) => Promise<unknown>;
   openUrl: (url: string) => void;
+  /** The install prompt captured by the entry module (see install.ts); left out, no install option is shown. */
+  install?: Installer;
 }
 
 /** What Cloud says is really set up for this phone (GET /api/v1/devices/self). */
@@ -44,7 +48,7 @@ function parseStatus(v: unknown): Status | null {
   return { push: s.push, telegram: s.telegram, telegramAnyBrowser: s.telegramAnyBrowser };
 }
 
-export function Pair({ code, apiBase, pathname, search, store, history, env, fetchFn, subscribePush, openUrl }: PairProps) {
+export function Pair({ code, apiBase, pathname, search, store, history, env, fetchFn, subscribePush, openUrl, install }: PairProps) {
   const doFetch = fetchFn ?? ((...a: Parameters<typeof fetch>) => fetch(...a));
   const [phase, setPhase] = useState<Phase>('loading');
   const [label, setLabel] = useState(() => defaultLabel(env.userAgent, env.standalone, env.maxTouchPoints));
@@ -58,6 +62,10 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
   // Only the latest status answer applies: every read and every toggle takes a new number.
   const seq = useRef(0);
   const reading = useRef(false);
+  /** Re-render when the browser offers (or spends) its install prompt, or the app gets installed. */
+  const [, setInstallTick] = useState(0);
+  const [showSteps, setShowSteps] = useState(false);
+  useEffect(() => install?.subscribe(() => setInstallTick((n) => n + 1)), []);
 
   useEffect(() => {
     // The code is a credential: it leaves the address bar (and so history and sync) as soon as it is read.
@@ -204,6 +212,32 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
     </section>
   );
 
+  const INSTALL_COPY = 'Installs Unstuck as an app, so takeover links and notifications open in it.';
+  const installButton = (onClick: () => void, expanded?: boolean) => (
+    <button type="button" class="btn pair-btn install-btn" aria-expanded={expanded} onClick={onClick}>
+      <InstallIcon />
+      Install Unstuck
+    </button>
+  );
+  // Installed (the home-screen app, or Chrome's installed app): say so. Chrome offered a prompt: the button opens it.
+  // iPhone and iPad Safari have no prompt: the button shows the Share → Add to Home Screen steps. Elsewhere: nothing.
+  const installSection = env.standalone || install?.installed() ? (
+    <section>
+      <p role="status">Unstuck is installed on this phone.</p>
+    </section>
+  ) : install?.available() ? (
+    <section>
+      {installButton(() => void install.prompt())}
+      <p class="muted">{INSTALL_COPY}</p>
+    </section>
+  ) : needsHome ? (
+    <section>
+      {installButton(() => setShowSteps((v) => !v), showSteps)}
+      <p class="muted">{INSTALL_COPY}</p>
+      {showSteps && homeScreenSteps}
+    </section>
+  ) : null;
+
   return (
     <main class="message-card pair">
       <h1>Pair this phone</h1>
@@ -242,7 +276,7 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
       {phase === 'paired' && (
         <>
           <p role="status">{device?.label ? `This phone is paired as ${device.label}.` : 'This phone is paired.'} Clearing this browser's site data unpairs it.</p>
-          {needsHome && homeScreenSteps}
+          {installSection}
           {!needsHome && env.canPush && (
             <section>
               {status?.push && <p role="status">Phone notifications are on.</p>}

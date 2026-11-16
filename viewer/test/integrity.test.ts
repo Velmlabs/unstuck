@@ -68,7 +68,29 @@ describe('the pair page is installable', () => {
     expect(fs.existsSync(path.join(__dirname, '../public', m.icons[0].src))).toBe(true);
     const { version } = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
     const sums = path.join(__dirname, '../dist-hosted/v', version, 'SHA256SUMS.json');
-    if (fs.existsSync(sums)) expect(Object.keys(JSON.parse(fs.readFileSync(sums, 'utf8')).files)).toEqual(expect.arrayContaining(['manifest.webmanifest', 'icon.svg']));
+    if (fs.existsSync(sums)) expect(Object.keys(JSON.parse(fs.readFileSync(sums, 'utf8')).files)).toEqual(expect.arrayContaining(['manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png']));
+  });
+
+  it("has what Chrome needs to offer an install: an id and 192 and 512 PNG icons (one maskable) that match their generator", async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const m = JSON.parse(fs.readFileSync(path.join(__dirname, '../public/manifest.webmanifest'), 'utf8')) as {
+      id: string;
+      icons: { src: string; sizes: string; type: string; purpose: string }[];
+    };
+    expect(m.id).toBe('/pair');
+    // @ts-expect-error a plain .mjs script
+    const { iconPng } = await import('../scripts/apple-touch-icon.mjs');
+    for (const size of [192, 512]) {
+      const icon = m.icons.find((i) => i.sizes === `${size}x${size}` && i.purpose === 'any')!;
+      expect(icon).toMatchObject({ src: `icon-${size}.png`, type: 'image/png' });
+      const png = fs.readFileSync(path.join(__dirname, '../public', icon.src));
+      expect([png.readUInt32BE(16), png.readUInt32BE(20)]).toEqual([size, size]);
+      expect(Buffer.compare(iconPng(size), png)).toBe(0);
+    }
+    expect(m.icons.some((i) => i.purpose === 'maskable' && i.sizes === '512x512')).toBe(true);
+    // Relative icon paths: each hosted /v/<version>/ folder serves its own.
+    expect(m.icons.every((i) => !i.src.startsWith('/'))).toBe(true);
   });
 
   it('links a 180×180 PNG apple-touch-icon that matches its generator, and the hosted folder carries and links it', async () => {

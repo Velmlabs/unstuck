@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/preact';
+import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/preact';
 import { Pair, type PairProps } from '../src/pair/Pair';
+import { captureInstall, type Installer } from '../src/pair/install';
 import type { DeviceRecord, DeviceStore } from '../src/device-store';
 
 afterEach(() => cleanup());
@@ -238,6 +239,8 @@ describe('phone notifications', () => {
     await screen.findByText(/this phone is paired/i);
     expect(screen.queryByRole('button', { name: /turn on phone notifications/i })).toBeNull();
     expect(screen.getByRole('button', { name: /connect telegram/i })).toBeTruthy();
+    // Paired, the steps sit behind Install Unstuck (see 'install').
+    fireEvent.click(screen.getByRole('button', { name: 'Install Unstuck' }));
     expect(screen.getByRole('heading', { name: /add to home screen for phone notifications/i })).toBeTruthy();
   });
 
@@ -494,5 +497,117 @@ describe('"Telegram links open in any browser"', () => {
       expect(await screen.findByText('Could not change this setting. Try again.')).toBeTruthy();
       expect(box.checked).toBe(false);
     }
+  });
+});
+
+describe('install', () => {
+  /** A stand-in for Chrome's window: events can be fired at it, and display-mode is settable. */
+  function fakeWindow(standalone = false) {
+    const t = new EventTarget() as EventTarget & { matchMedia: (q: string) => { matches: boolean } };
+    t.matchMedia = (q) => ({ matches: standalone && q === '(display-mode: standalone)' });
+    return t;
+  }
+  function promptEvent(outcome: 'accepted' | 'dismissed') {
+    const e = new Event('beforeinstallprompt', { cancelable: true }) as Event & { prompt: ReturnType<typeof vi.fn>; userChoice: Promise<{ outcome: string }> };
+    e.prompt = vi.fn(async () => {});
+    e.userChoice = Promise.resolve({ outcome });
+    return e;
+  }
+  const paired = async (install: Installer, env: Partial<PairProps['env']> = {}) => {
+    setup({ install, env: { userAgent: ANDROID, standalone: false, maxTouchPoints: 5, canPush: true, ...env } });
+    fireEvent.click(await screen.findByRole('button', { name: /^Pair (this phone|Safari)/ }));
+    await screen.findByText(/this phone is paired/i);
+  };
+  const LINE = 'Installs Unstuck as an app, so takeover links and notifications open in it.';
+
+  it('offers Install Unstuck once Chrome gave its prompt, and hides it after the install is accepted', async () => {
+    const win = fakeWindow();
+    const install = captureInstall(win);
+    await paired(install);
+    expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull();
+    const e = promptEvent('accepted');
+    act(() => void win.dispatchEvent(e));
+    expect(e.defaultPrevented).toBe(true); // Chrome's own mini-infobar is kept away: the page offers it
+    const button = screen.getByRole('button', { name: 'Install Unstuck' });
+    expect(button.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
+    expect(screen.getByText(LINE)).toBeTruthy();
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull());
+    expect(e.prompt).toHaveBeenCalledOnce();
+    act(() => void win.dispatchEvent(new Event('appinstalled')));
+    expect(screen.getByText('Unstuck is installed on this phone.')).toBeTruthy();
+  });
+
+  it('after a dismissal the spent prompt goes, and a new one from the browser brings the button back', async () => {
+    const win = fakeWindow();
+    const install = captureInstall(win);
+    act(() => void win.dispatchEvent(promptEvent('dismissed')));
+    await paired(install);
+    fireEvent.click(screen.getByRole('button', { name: 'Install Unstuck' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull());
+    expect(screen.queryByText('Unstuck is installed on this phone.')).toBeNull();
+    act(() => void win.dispatchEvent(promptEvent('dismissed')));
+    expect(screen.getByRole('button', { name: 'Install Unstuck' })).toBeTruthy();
+  });
+
+  it('already installed (display-mode standalone, or the iPhone home-screen app): says so, no button', async () => {
+    const win = fakeWindow(true);
+    const install = captureInstall(win);
+    act(() => void win.dispatchEvent(promptEvent('accepted')));
+    await paired(install);
+    expect(screen.getByText('Unstuck is installed on this phone.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull();
+    cleanup();
+    await paired(captureInstall(fakeWindow(), { standalone: true }), { userAgent: IPHONE, standalone: true });
+    expect(screen.getByText('Unstuck is installed on this phone.')).toBeTruthy();
+  });
+
+  it('iPhone Safari (no prompt): the button opens and closes the Add to Home Screen steps', async () => {
+    await paired(captureInstall(fakeWindow()), { userAgent: IPHONE, canPush: false });
+    const button = screen.getByRole('button', { name: 'Install Unstuck' });
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.queryByRole('heading', { name: /add to home screen/i })).toBeNull();
+    fireEvent.click(button);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByText(/tap share, then add to home screen/i)).toBeTruthy();
+    fireEvent.click(button);
+    expect(screen.queryByRole('heading', { name: /add to home screen/i })).toBeNull();
+  });
+
+  it('browsers with no install prompt (and not iPhone) show nothing; so does a page with no installer', async () => {
+    await paired(captureInstall(fakeWindow()));
+    expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull();
+    expect(screen.queryByText(LINE)).toBeNull();
+    expect(screen.queryByText(/installed on this phone/i)).toBeNull();
+    cleanup();
+    setup({ env: { userAgent: ANDROID, standalone: false, maxTouchPoints: 5, canPush: true } });
+    await pairNow();
+    await screen.findByText(/this phone is paired/i);
+    expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull();
+  });
+});
+
+describe('captureInstall', () => {
+  it('a prompt that fails, or none at all, is unavailable; a window without matchMedia is not standalone', async () => {
+    const win = new EventTarget();
+    const install = captureInstall(win);
+    expect(install.installed()).toBe(false);
+    expect(await install.prompt()).toBe('unavailable');
+    const e = new Event('beforeinstallprompt', { cancelable: true }) as Event & { prompt: () => Promise<void>; userChoice: Promise<never> };
+    e.prompt = async () => {
+      throw new Error('not allowed');
+    };
+    e.userChoice = new Promise(() => {});
+    const seen = vi.fn();
+    const off = install.subscribe(seen);
+    win.dispatchEvent(e);
+    expect(install.available()).toBe(true);
+    expect(await install.prompt()).toBe('unavailable');
+    expect(install.available()).toBe(false);
+    expect(seen).toHaveBeenCalledTimes(2);
+    off();
+    win.dispatchEvent(new Event('appinstalled'));
+    expect(seen).toHaveBeenCalledTimes(2);
+    expect(install.installed()).toBe(true);
   });
 });

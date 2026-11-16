@@ -779,3 +779,11 @@ input:focus-visible {
   color: var(--color-muted-foreground);
   font-size: 14px;
 }
+
+/* Install Unstuck (pair page): the icon beside the label. */
+.pair .install-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}

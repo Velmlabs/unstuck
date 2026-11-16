@@ -79,3 +79,10 @@ export const ChevronDownIcon = () => (
     <path d="M6 9l6 6 6-6" />
   </Icon>
 );
+
+/** Install: an arrow down into a tray. */
+export const InstallIcon = () => (
+  <Icon>
+    <path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 15.5v2A2.5 2.5 0 0 0 7.5 20h9a2.5 2.5 0 0 0 2.5-2.5v-2" />
+  </Icon>
+);

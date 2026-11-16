@@ -3,9 +3,12 @@ import { b64urlDecode } from '@velmlabs/unstuck-protocol';
 import { indexedDbDeviceStore } from '../device-store';
 import { Pair } from './Pair';
 import { apiBaseFor, codeFromHash } from './env';
+import { captureInstall } from './install';
 import '../styles.css';
 
 const nav = navigator as Navigator & { standalone?: boolean };
+// First, before anything renders: Chrome fires its install prompt once, early, and only a kept event can be shown later.
+const install = captureInstall(window, nav);
 const canPush = 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
 
 async function subscribePush(vapidPublicKey: string): Promise<unknown> {
@@ -30,6 +33,7 @@ render(
     env={{ userAgent: navigator.userAgent, standalone: nav.standalone === true, maxTouchPoints: navigator.maxTouchPoints ?? 0, canPush }}
     subscribePush={subscribePush}
     openUrl={(u) => window.location.assign(u)}
+    install={install}
   />,
   document.getElementById('app')!,
 );
