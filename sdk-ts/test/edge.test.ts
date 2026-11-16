@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import fs from 'node:fs';
+import { describe, it, expect, expectTypeOf, vi } from 'vitest';
 import * as edge from '../src/edge';
 import * as node from '../src/index';
 import { InProcessUnstuck } from '../src/in-process';
@@ -8,6 +9,33 @@ describe('edge entry', () => {
     expect(Object.keys(edge).sort()).toEqual(Object.keys(node).sort());
     expect(edge.UnstuckConfigError).toBe(node.UnstuckConfigError);
     expect(edge.PageClosedError).toBe(node.PageClosedError);
+  });
+
+  // Checked by tsc (pnpm build type-checks test/): a Workers user and a Node user must see the same API.
+  it('exports the same types as the Node entry (type-level parity)', () => {
+    type Public<T> = { [K in keyof T]: T[K] }; // public members only (private ones differ by design)
+    expectTypeOf<keyof typeof edge>().toEqualTypeOf<keyof typeof node>();
+    expectTypeOf<ConstructorParameters<typeof edge.Unstuck>>().toEqualTypeOf<ConstructorParameters<typeof node.Unstuck>>();
+    expectTypeOf<Public<edge.Unstuck>>().toEqualTypeOf<Public<node.Unstuck>>();
+    expectTypeOf<edge.Unstuck['takeover']>().toEqualTypeOf<node.Unstuck['takeover']>();
+    expectTypeOf<edge.Unstuck['close']>().toEqualTypeOf<node.Unstuck['close']>();
+    expectTypeOf<edge.UnstuckOptions>().toEqualTypeOf<node.UnstuckOptions>();
+    expectTypeOf<edge.TakeoverOptions>().toEqualTypeOf<node.TakeoverOptions>();
+    expectTypeOf<edge.TakeoverLink>().toEqualTypeOf<node.TakeoverLink>();
+    expectTypeOf<edge.TakeoverResult>().toEqualTypeOf<node.TakeoverResult>();
+    expectTypeOf<edge.TakeoverStatus>().toEqualTypeOf<node.TakeoverStatus>();
+    expectTypeOf<typeof edge.UnstuckConfigError>().toEqualTypeOf<typeof node.UnstuckConfigError>();
+    expectTypeOf<typeof edge.UnstuckEngineError>().toEqualTypeOf<typeof node.UnstuckEngineError>();
+    expectTypeOf<typeof edge.PageClosedError>().toEqualTypeOf<typeof node.PageClosedError>();
+  });
+
+  it('re-exports the same type-only names as the Node entry (the list the type-level test above covers)', () => {
+    const typeNames = (file: string) =>
+      [...fs.readFileSync(new URL(`../src/${file}`, import.meta.url), 'utf8').matchAll(/^export type \{([^}]+)\}/gm)]
+        .flatMap((m) => m[1]!.split(',').map((n) => n.trim()))
+        .sort();
+    expect(typeNames('edge.ts')).toEqual(typeNames('index.ts'));
+    expect(typeNames('edge.ts')).toEqual(['TakeoverLink', 'TakeoverOptions', 'TakeoverResult', 'TakeoverStatus', 'UnstuckOptions']);
   });
 
   it('validates options in the constructor', () => {
