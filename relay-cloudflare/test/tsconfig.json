@@ -1,0 +1,15 @@
+// Type-checking the tests (pnpm build), against the same workerd types as src: @cloudflare/workers-types and
+// cloudflare:test. The tests also drive @velmlabs/unstuck-core, which is runtime-agnostic and checked with the DOM lib
+// (core/tsconfig.json); its sources don't type-check against workers-types (clearTimeout's signature, WebSocket's on*
+// handlers that workerd has but its types leave out). So the tests see core the way a Worker consuming the package
+// does: through its declarations, which `pnpm build` emits from core's own config just before this check.
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@velmlabs/unstuck-core": ["../node_modules/.cache/core-types/src/index.d.ts"],
+      "@velmlabs/unstuck-core/testing": ["../node_modules/.cache/core-types/src/testing/index.d.ts"]
+    }
+  },
+  "include": ["."]
+}

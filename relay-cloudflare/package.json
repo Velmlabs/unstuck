@@ -15,7 +15,7 @@
   },
   "scripts": {
     "copy-viewer": "node scripts/copy-viewer.mjs",
-    "build": "node scripts/copy-viewer.mjs && tsc -p tsconfig.json --noEmit",
+    "build": "node scripts/copy-viewer.mjs && tsc -p tsconfig.json --noEmit && tsc -p ../core/tsconfig.json --noEmit false --emitDeclarationOnly --outDir node_modules/.cache/core-types && tsc -p test/tsconfig.json --noEmit",
     "test": "node scripts/copy-viewer.mjs && vitest run --coverage",
     "dev": "node scripts/copy-viewer.mjs && wrangler dev",
     "deploy": "node scripts/copy-viewer.mjs && wrangler deploy"

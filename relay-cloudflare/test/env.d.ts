@@ -8,4 +8,9 @@ declare namespace Cloudflare {
     AGENT_LIMIT?: RateLimit;
     AGENT_IP_LIMIT?: RateLimit;
   }
+  // The test Worker (wrangler.test.toml `main`): types `exports` from cloudflare:workers.
+  interface GlobalProps {
+    mainModule: typeof import('./fixtures/worker');
+    durableNamespaces: 'RelaySessionDO';
+  }
 }

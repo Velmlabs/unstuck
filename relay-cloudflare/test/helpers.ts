@@ -1,5 +1,5 @@
 import { exports } from 'cloudflare:workers';
-import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
+import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer } from '@velmlabs/unstuck-protocol';
 
 /** A WebSocket-shaped client over the Worker's fetch (no real network inside workerd tests). */
 export class FetchWs {
@@ -42,8 +42,8 @@ export class FetchWs {
     });
     this.onopen?.();
   }
-  send(d: string | ArrayBufferLike | Uint8Array) {
-    this.ws?.send(d as never);
+  send(d: string | ArrayBuffer | Uint8Array) {
+    this.ws?.send(d);
   }
   close(code = 1000, reason?: string) {
     if (this.readyState === 3) return;
@@ -59,7 +59,7 @@ export async function viewerFor(link: string) {
   const key = await importE2eKey(b64urlDecode(frag.get('k')!)!);
   const sock = new FetchWs(`${u.origin.replace(/^http/, 'ws')}/ws/${id}`);
   const raw: Uint8Array[] = [];
-  const json: any[] = [];
+  const json: EngineToViewer[] = [];
   let closeCode: number | null = null;
   // Like the real viewer: the engine's sealed challenge comes first, then sequenced messages bound to its nonce.
   let nonce: string | null = null;

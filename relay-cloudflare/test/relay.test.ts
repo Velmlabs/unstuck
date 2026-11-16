@@ -3,12 +3,15 @@ import { env, exports } from 'cloudflare:workers';
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from 'cloudflare:test';
 import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
 import { FakeCdp } from '@velmlabs/unstuck-core/testing';
-import { probe } from './fixtures/worker';
+import type { SessionRecord } from '@velmlabs/unstuck-relay-core';
+import { probe, type RelaySessionDO } from './fixtures/worker';
 import { FetchWs, viewerFor, waitFor } from './helpers';
 
 const BASE = 'https://relay.test';
 const frame = { data: btoa(String.fromCharCode(...new Uint8Array(30_000).fill(7))), sessionId: 1, metadata: { deviceWidth: 1280, deviceHeight: 720 } };
 const get = (path: string) => exports.default.fetch(new Request(BASE + path));
+/** The test Worker's Durable Object; tests reach into its private state the way hibernation would reset it. */
+type Relay = InstanceType<typeof RelaySessionDO>;
 const stub = (id: string) => env.RELAY_SESSION.get(env.RELAY_SESSION.idFromName(id));
 
 async function agent(key = 'K') {
@@ -140,13 +143,13 @@ describe('takeover through a Durable Object', () => {
     await waitFor(() => v.json.some((m) => m.t === 'ready'));
     for (let i = 0; i < 5; i++) a.cdp.emit('Page.screencastFrame', frame);
     await waitFor(() => v.raw.filter((b) => b.length > 4096).length >= 2);
-    const rec = await runInDurableObject(stub(a.id), async (_i, state) => (await state.storage.get<any>('rec'))!);
+    const rec = await runInDurableObject(stub(a.id), async (_i, state) => (await state.storage.get<SessionRecord>('rec'))!);
     const received = v.raw.reduce((n, b) => n + b.length, 0);
     expect(rec.billed).toBe(true);
     // Stored counters lag behind: only the write that recorded billing happened, not one per frame.
     expect(rec.bytesToViewers).toBeLessThan(received);
     await runDurableObjectAlarm(stub(a.id));
-    const after = await runInDurableObject(stub(a.id), async (_i, state) => (await state.storage.get<any>('rec'))!);
+    const after = await runInDurableObject(stub(a.id), async (_i, state) => (await state.storage.get<SessionRecord>('rec'))!);
     expect(after.bytesToViewers).toBeGreaterThanOrEqual(received); // the alarm flushes them (more frames may have arrived)
     await a.engine.close();
   });
@@ -181,7 +184,7 @@ describe('takeover through a Durable Object', () => {
     const v = await viewerFor(a.link.url);
     await evictDurableObject(stub(a.id));
     // Hibernation drops the object's memory but keeps its sockets: the session must rebuild from storage.
-    await runInDurableObject(stub(a.id), async (inst: any) => void (inst.session = null));
+    await runInDurableObject(stub(a.id), async (inst: Relay) => void (inst['session'] = null));
     await v.send({ t: 'hello', token: v.token });
     await waitFor(() => v.json.some((m) => m.t === 'ready'));
     await v.send({ t: 'done' });
@@ -192,7 +195,7 @@ describe('takeover through a Durable Object', () => {
     const id = 'SESSIONCANDIDATE_00000';
     const first = new FetchWs(`wss://relay.test/agent/${id}`, ['unstuck-relay.1', 'key.K']);
     await waitFor(() => first.readyState === 1);
-    await runInDurableObject(stub(id), async (inst: any) => void (inst.session = null));
+    await runInDurableObject(stub(id), async (inst: Relay) => void (inst['session'] = null));
     const got: string[] = [];
     first.onmessage = (e) => got.push(String(e.data));
     first.send(JSON.stringify({ t: 'hello', expiresAt: Date.now() + 60_000, secret: 'S' }));
@@ -203,7 +206,7 @@ describe('takeover through a Durable Object', () => {
 
   it('a 5th viewer evicts the oldest unconfirmed one with 1013', async () => {
     const a = await agent();
-    const vs = [];
+    const vs: Awaited<ReturnType<typeof viewerFor>>[] = [];
     for (let i = 0; i < 4; i++) vs.push(await viewerFor(a.link.url));
     const fifth = await viewerFor(a.link.url);
     await waitFor(() => vs[0]!.closeCode() !== null);
@@ -282,9 +285,10 @@ describe('default authorizer and fallbacks', () => {
 
   it('an alarm or socket error with no stored session is harmless', async () => {
     const s = stub('SESSIONEMPTY_000000000');
-    await runInDurableObject(s, async (inst: any, state) => {
+    await runInDurableObject(s, async (inst: Relay, state) => {
       await inst.alarm();
-      await inst.webSocketError({ deserializeAttachment: () => null });
+      // A socket that was never attached to this object: no attachment, like a viewer refused before attaching.
+      await inst.webSocketError(new WebSocketPair()[1]);
       expect((await state.storage.list()).size).toBe(0);
     });
   });
@@ -303,7 +307,7 @@ describe('security fixes', () => {
 
   it('finding 2: four silent viewers cannot keep a human out; the oldest is evicted with 1013', async () => {
     const a = await agent();
-    const squatters = [];
+    const squatters: { code: number }[] = [];
     for (let i = 0; i < 4; i++) {
       const res = await exports.default.fetch(new Request(`${BASE}/ws/${a.id}`, { headers: { Upgrade: 'websocket', 'cf-connecting-ip': `6.6.6.${i}` } }));
       const ws = res.webSocket!;
@@ -322,7 +326,7 @@ describe('security fixes', () => {
       state.getWebSockets().map((ws) => ws.deserializeAttachment() as { role: string; confirmed?: boolean } | null).filter((x) => x?.role === 'viewer' && x.confirmed).length,
     );
     expect(confirmed).toBe(1);
-    await runInDurableObject(stub(a.id), async (inst: any) => void (inst.session = null));
+    await runInDurableObject(stub(a.id), async (inst: Relay) => void (inst['session'] = null));
     for (let i = 0; i < 4; i++) await exports.default.fetch(new Request(`${BASE}/ws/${a.id}`, { headers: { Upgrade: 'websocket', 'cf-connecting-ip': `7.7.7.${i}` } })).then((r) => r.webSocket!.accept());
     await new Promise((r) => setTimeout(r, 50));
     expect(human.closeCode()).toBeNull();
@@ -332,12 +336,12 @@ describe('security fixes', () => {
   it('finding 2: a viewer attached before attachments carried confirmed state counts as confirmed after a rebuild', async () => {
     const a = await agent();
     const old = await viewerFor(a.link.url);
-    await runInDurableObject(stub(a.id), async (inst: any, state) => {
+    await runInDurableObject(stub(a.id), async (inst: Relay, state) => {
       for (const ws of state.getWebSockets()) {
         const at = ws.deserializeAttachment() as { role: string; c: number };
         if (at.role === 'viewer') ws.serializeAttachment({ role: 'viewer', c: at.c });
       }
-      inst.session = null;
+      inst['session'] = null;
     });
     for (let i = 0; i < 4; i++) await viewerFor(a.link.url);
     await new Promise((r) => setTimeout(r, 50));
@@ -371,11 +375,11 @@ describe('security fixes', () => {
 
   it('finding 6: any request that finds a record past expiresAt + 60 s cleans it up first (backstop)', async () => {
     const a = await agent();
-    await runInDurableObject(stub(a.id), async (inst: any, state) => {
-      const rec = await state.storage.get<any>('rec');
+    await runInDurableObject(stub(a.id), async (inst: Relay, state) => {
+      const rec = (await state.storage.get<SessionRecord>('rec'))!;
       await state.storage.put('rec', { ...rec, expiresAt: Date.now() - 61_000 });
       await state.storage.deleteAlarm(); // the alarm was lost
-      inst.session = null;
+      inst['session'] = null;
     });
     expect((await get(`/s/${a.id}`)).status).toBe(404);
     expect(await storageOf(a.id)).toEqual({ keys: 0, alarm: null });
@@ -398,8 +402,8 @@ describe('security fixes', () => {
     const first = await connect();
     first.ws.onclose = null;
     const second = await connect();
-    const tags = await runInDurableObject(stub(id), async (inst: any, state) => {
-      inst.session = null; // hibernation
+    const tags = await runInDurableObject(stub(id), async (inst: Relay, state) => {
+      inst['session'] = null; // hibernation
       return state.getWebSockets().map((ws) => (ws.deserializeAttachment() as { active?: boolean }).active);
     });
     expect(tags.filter((t) => t === true)).toHaveLength(1);
@@ -432,7 +436,7 @@ describe('security fixes', () => {
   it('finding 9: a refusal error longer than a close reason allows still closes with the refusal code', async () => {
     const { createRelayWorker } = await import('../src/worker');
     const relay = createRelayWorker({ authorize: async () => ({ ok: false, status: 402, error: 'quota exceeded: '.repeat(20) }) });
-    const res = await relay.fetch(agentReq('SESSIONLONGERR_0000000', 'K'), { ...env, AGENT_LIMIT: undefined, AGENT_IP_LIMIT: undefined } as never);
+    const res = await relay.fetch(agentReq('SESSIONLONGERR_0000000', 'K'), { ...env, AGENT_LIMIT: undefined, AGENT_IP_LIMIT: undefined });
     const { code, reason } = await closeCodeOf(res);
     expect(code).toBe(4402);
     expect(JSON.parse(reason).error).toMatch(/^quota exceeded/);
