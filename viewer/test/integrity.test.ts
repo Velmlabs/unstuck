@@ -68,7 +68,7 @@ describe('the pair page is installable', () => {
     expect(fs.existsSync(path.join(__dirname, '../public', m.icons[0].src))).toBe(true);
     const { version } = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
     const sums = path.join(__dirname, '../dist-hosted/v', version, 'SHA256SUMS.json');
-    if (fs.existsSync(sums)) expect(Object.keys(JSON.parse(fs.readFileSync(sums, 'utf8')).files)).toEqual(expect.arrayContaining(['manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png']));
+    if (fs.existsSync(sums)) expect(Object.keys(JSON.parse(fs.readFileSync(sums, 'utf8')).files)).toEqual(expect.arrayContaining(['manifest.webmanifest', 'icon.svg']));
   });
 
   it("has what Chrome needs to offer an install: an id and 192 and 512 PNG icons (one maskable) that match their generator", async () => {

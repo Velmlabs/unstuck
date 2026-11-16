@@ -213,18 +213,25 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
   );
 
   const INSTALL_COPY = 'Installs Unstuck as an app, so takeover links and notifications open in it.';
+  const HOME_SCREEN_COPY = 'Adds Unstuck to your Home Screen so it can show phone notifications (pair it again there).';
+  // "Installed" is said on a phone only (a computer's installed app needs no word here).
+  const onPhone = env.maxTouchPoints > 0;
   const installButton = (onClick: () => void, expanded?: boolean) => (
     <button type="button" class="btn pair-btn install-btn" aria-expanded={expanded} onClick={onClick}>
       <InstallIcon />
       Install Unstuck
     </button>
   );
-  // Installed (the home-screen app, or Chrome's installed app): say so. Chrome offered a prompt: the button opens it.
-  // iPhone and iPad Safari have no prompt: the button shows the Share → Add to Home Screen steps. Elsewhere: nothing.
-  const installSection = env.standalone || install?.installed() ? (
-    <section>
-      <p role="status">Unstuck is installed on this phone.</p>
-    </section>
+  // Installed (the home-screen app, or Chrome's installed app): say so on a phone. Chrome offered a prompt: the button
+  // opens it. iPhone and iPad Safari have no prompt: the button shows the Share → Add to Home Screen steps. Elsewhere:
+  // nothing.
+  const installed = env.standalone || !!install?.installed();
+  const installSection = installed ? (
+    onPhone ? (
+      <section>
+        <p role="status">Unstuck is installed on this phone.</p>
+      </section>
+    ) : null
   ) : install?.available() ? (
     <section>
       {installButton(() => void install.prompt())}
@@ -233,7 +240,7 @@ export function Pair({ code, apiBase, pathname, search, store, history, env, fet
   ) : needsHome ? (
     <section>
       {installButton(() => setShowSteps((v) => !v), showSteps)}
-      <p class="muted">{INSTALL_COPY}</p>
+      <p class="muted">{HOME_SCREEN_COPY}</p>
       {showSteps && homeScreenSteps}
     </section>
   ) : null;

@@ -190,7 +190,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   /** Taps sent whose focus report hasn't arrived yet: only the newest tap's report may open or close anything. */
   const awaitingFocus = useRef(0);
   const [chip, setChip] = useState<FieldKind | null>(null);
-  /** The phone keyboard is open (the bridge has focus): the Keyboard button shows as pressed in. */
+  /** The phone keyboard is open (the bridge has focus): the Keyboard button shows as switched on (data-active). */
   const [typing, setTyping] = useState(false);
   /** The green outline around the field being typed into (Unstuck's own layer, never the page). */
   const [ring, setRing] = useState<Box | null>(null);
@@ -880,6 +880,11 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
             </TipButton>
           </div>
         </div>
+        {hint ? (
+          <p class="first-hint" role="note">
+            {hint}
+          </p>
+        ) : null}
         {ring ? (
           <div
             data-testid="focus-ring"
@@ -910,12 +915,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       </div>
 
       <footer class="bottombar">
-        {hint ? (
-          <p class="first-hint" role="note">
-            Tip: press and hold any button to see what it does.
-          </p>
-        ) : null}
-        <TipButton tips={tips} id="keyboard" side="top" align="start" class="btn bar-btn bar-neutral" pressed={typing} tip="Open your keyboard to type into the field you tapped." onClick={() => openBridge('text', null)}>
+        <TipButton tips={tips} id="keyboard" side="top" align="start" class="btn bar-btn bar-neutral" active={typing} tip="Open your keyboard to type into the field you tapped." onClick={() => openBridge('text', null)}>
           <KeyboardIcon />
           <span class="bar-label">Keyboard</span>
         </TipButton>
@@ -938,6 +938,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           id="done"
           side="top"
           align="end"
+          avoid={() => controlsRef.current}
           class="btn bar-btn bar-primary"
           tip="Finished. The agent takes the page back."
           onClick={() => {

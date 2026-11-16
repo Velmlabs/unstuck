@@ -532,7 +532,8 @@ describe('install', () => {
     expect(button.querySelector('svg')?.getAttribute('aria-hidden')).toBe('true');
     expect(screen.getByText(LINE)).toBeTruthy();
     fireEvent.click(button);
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull());
+    // Gone as soon as the prompt is up (the event can't be used twice), before the person answers.
+    expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull();
     expect(e.prompt).toHaveBeenCalledOnce();
     act(() => void win.dispatchEvent(new Event('appinstalled')));
     expect(screen.getByText('Unstuck is installed on this phone.')).toBeTruthy();
@@ -560,11 +561,18 @@ describe('install', () => {
     cleanup();
     await paired(captureInstall(fakeWindow(), { standalone: true }), { userAgent: IPHONE, standalone: true });
     expect(screen.getByText('Unstuck is installed on this phone.')).toBeTruthy();
+    cleanup();
+    // A computer's installed app (no touch): no "on this phone", and no button.
+    await paired(captureInstall(fakeWindow(true)), { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) Chrome/124.0 Safari/537.36', maxTouchPoints: 0 });
+    expect(screen.queryByText(/installed on this phone/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Install Unstuck' })).toBeNull();
   });
 
   it('iPhone Safari (no prompt): the button opens and closes the Add to Home Screen steps', async () => {
     await paired(captureInstall(fakeWindow()), { userAgent: IPHONE, canPush: false });
     const button = screen.getByRole('button', { name: 'Install Unstuck' });
+    expect(screen.getByText('Adds Unstuck to your Home Screen so it can show phone notifications (pair it again there).')).toBeTruthy();
+    expect(screen.queryByText(LINE)).toBeNull(); // that line is for Chrome's prompt only
     expect(button.getAttribute('aria-expanded')).toBe('false');
     expect(screen.queryByRole('heading', { name: /add to home screen/i })).toBeNull();
     fireEvent.click(button);
@@ -604,7 +612,7 @@ describe('captureInstall', () => {
     expect(install.available()).toBe(true);
     expect(await install.prompt()).toBe('unavailable');
     expect(install.available()).toBe(false);
-    expect(seen).toHaveBeenCalledTimes(2);
+    expect(seen).toHaveBeenCalledTimes(2); // the prompt arrived; it was used
     off();
     win.dispatchEvent(new Event('appinstalled'));
     expect(seen).toHaveBeenCalledTimes(2);

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, cleanup } from '@testing-library/preact';
 import type { ConnectionHandlers } from '../src/connection';
 import { App, type AppProps } from '../src/App';
-import { HINT_MS, HINT_SEEN_KEY, HOVER_MS, LONG_PRESS_MS, TOUCH_TIP_MS, TipButton, useTips } from '../src/tips';
+import { HINT_MOUSE, HINT_MS, HINT_SEEN_KEY, HINT_TOUCH, HOVER_MS, LONG_PRESS_MS, TOUCH_TIP_MS, TipButton, useTips } from '../src/tips';
 
 const NOW = 1_700_000_000_000;
 let handlers: ConnectionHandlers;
@@ -224,27 +224,58 @@ describe('control buttons', () => {
     expect(e.defaultPrevented).toBe(true);
   });
 
-  it('Keyboard shows as pressed while the phone keyboard is open', () => {
+  it('Keyboard is lit (data-active) while the phone keyboard is open, and is not a toggle', () => {
     live();
     const k = btn('Keyboard');
-    expect(k.getAttribute('aria-pressed')).toBe('false');
+    expect(k.hasAttribute('data-active')).toBe(false);
     fireEvent.click(k);
     expect(document.activeElement).toBe(screen.getByTestId('keyboard-bridge'));
-    expect(k.getAttribute('aria-pressed')).toBe('true');
+    expect(k.hasAttribute('data-active')).toBe(true);
     act(() => (screen.getByTestId('keyboard-bridge') as HTMLInputElement).blur());
-    expect(k.getAttribute('aria-pressed')).toBe('false');
-    // Done and Can't solve are plain buttons, not toggles.
-    expect(btn('Done').hasAttribute('aria-pressed')).toBe(false);
+    expect(k.hasAttribute('data-active')).toBe(false);
+    for (const name of Object.keys(COPY)) expect(btn(name).hasAttribute('aria-pressed'), name).toBe(false);
+  });
+
+  it('Esc hides a hover or long-press tooltip and still goes to the page', () => {
+    live();
+    hold(btn('Done'), LONG_PRESS_MS);
+    expect(screen.getByRole('tooltip')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    fireEvent.keyUp(window, { key: 'Escape', code: 'Escape' });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(sent.filter((m) => m.t === 'key').map((m) => m.key)).toEqual(['Escape', 'Escape']);
+    const a = anchor('Zoom in');
+    ptr(a, 'pointerenter', 'mouse');
+    tick(HOVER_MS);
+    fireEvent.keyDown(window, { key: 'Escape', code: 'Escape' });
+    expect(screen.queryByRole('tooltip')).toBeNull();
+    expect(sent.filter((m) => m.t === 'key')).toHaveLength(3);
+  });
+
+  it("Done's tooltip keeps clear of the tool rail above it", () => {
+    live();
+    const rail = btn('Zoom in').closest('.stage-controls')!;
+    const rect = (left: number, right: number) => () => ({ left, right, width: right - left, top: 0, bottom: 0, height: 0, x: left, y: 0, toJSON: () => ({}) });
+    rail.getBoundingClientRect = rect(294, 348);
+    anchor('Done').getBoundingClientRect = rect(219, 348);
+    hold(btn('Done'), LONG_PRESS_MS);
+    expect(anchor('Done').style.getPropertyValue('--tip-clear')).toBe('62px');
+    // No rail laid out (width 0): nothing to keep clear of.
+    tick(TOUCH_TIP_MS);
+    rail.getBoundingClientRect = rect(0, 0);
+    tick(1000);
+    hold(btn('Done'), LONG_PRESS_MS);
+    expect(anchor('Done').style.getPropertyValue('--tip-clear')).toBe('');
   });
 });
 
 describe('first-time hint', () => {
-  const hint = () => screen.queryByText('Tip: press and hold any button to see what it does.');
+  const hint = () => screen.queryByRole('note');
 
   it('shows once on this device, the first time the viewer is live', () => {
     localStorage.clear();
     const r = live();
-    expect(hint()).toBeTruthy();
+    expect(hint()?.textContent).toBe(HINT_MOUSE); // jsdom: no touch screen
     expect(localStorage.getItem(HINT_SEEN_KEY)).toBe('1');
     tick(HINT_MS);
     expect(hint()).toBeNull();
@@ -253,11 +284,26 @@ describe('first-time hint', () => {
     expect(hint()).toBeNull();
   });
 
-  it('a tap dismisses it', () => {
+  it('a tap dismisses it, and then stops listening', () => {
     localStorage.clear();
+    const off = vi.spyOn(document, 'removeEventListener');
     live();
     ptr(screen.getByRole('note'), 'pointerdown', 'touch');
     expect(hint()).toBeNull();
+    expect(off.mock.calls.filter(([type, , capture]) => type === 'pointerdown' && capture === true).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('on a touch screen it says press and hold', () => {
+    localStorage.clear();
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(pointer: coarse)' }));
+    live();
+    expect(hint()?.textContent).toBe(HINT_TOUCH);
+    cleanup();
+    localStorage.clear();
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q === '(hover: none)' }));
+    live();
+    expect(hint()?.textContent).toBe(HINT_TOUCH);
+    vi.unstubAllGlobals();
   });
 
   it('not before the session is live, and gone if it stops being live', () => {

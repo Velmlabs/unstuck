@@ -49,15 +49,14 @@ export function captureInstall(win: Win, nav: { standalone?: boolean } = {}): In
     async prompt() {
       const e = deferred;
       if (!e) return 'unavailable';
-      deferred = null; // a prompt event works once
+      deferred = null; // a prompt event works once: the button goes as soon as it is used
+      changed();
       try {
         await e.prompt();
         const { outcome } = await e.userChoice;
         return outcome;
       } catch {
         return 'unavailable';
-      } finally {
-        changed();
       }
     },
     subscribe(fn) {

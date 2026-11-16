@@ -15,7 +15,8 @@
   --color-surface-raised: #182033;
   --color-control: #252e44;
   --color-control-pressed: #1c2437;
-  --color-accent-pressed: #15803d;
+  /* Pressed Done: still dark text on green at a good contrast. */
+  --color-accent-pressed: #16a34a;
   --color-hairline: rgb(255 255 255 / 0.09);
   --color-tooltip: #f8fafc;
   --color-on-tooltip: #0f172a;
@@ -25,6 +26,10 @@
   --gap: 8px;
   --pad: 12px;
   --touch: 44px;
+  /* The tool rail's outer size: one button + 2 × 4 px padding + 2 × 1 px border wide as a column; as a row, 5 buttons,
+     3 × 2 px gaps and the 9 px divider long. What sits beside it (the first-time hint, Done's tooltip) keeps clear. */
+  --rail-col: calc(var(--touch) + 10px);
+  --rail-row: calc(5 * var(--touch) + 25px);
   --font: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --mono: ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   color-scheme: dark;
@@ -121,7 +126,7 @@ body {
   min-height: 0;
   background: #000;
   /* The controls lay themselves out by the stage's own height (below), not the window's. */
-  container-type: size;
+  container: stage / size;
 }
 
 /* The mirror's box. The canvas inside is zoomed and panned with a CSS transform (see mapping.ts); this box never
@@ -148,8 +153,8 @@ body {
 /* The tool rail: zoom (+, −, fit) above scroll (↑, ↓) in one floating panel, bottom right of the mirror, inside the
    stage so never over the bottom bar. */
 .stage-controls {
+  /* No z-index: the outline of the field being typed into (later in the stage) is drawn over the rail. */
   position: absolute;
-  z-index: 2;
   right: var(--pad);
   bottom: var(--pad);
   display: flex;
@@ -178,7 +183,7 @@ body {
 
 /* A stage too short for one column (a phone on its side): the two groups side by side. The column needs about
    5 × 44 px buttons + padding and divider ≈ 250 px, plus the margin. */
-@container (max-height: 300px) {
+@container stage (max-height: 300px) {
   .stage-controls {
     flex-direction: row;
     align-items: center;
@@ -213,11 +218,11 @@ body {
   .rail-btn:hover:not(:disabled) {
     background: rgb(255 255 255 / 0.07);
   }
-  .bar-neutral:hover:not([aria-pressed='true']) {
+  .bar-neutral:hover:not([data-active]) {
     background: #2c3650;
   }
   .bar-primary:hover {
-    background: #16a34a;
+    background: #1fb956;
   }
 }
 
@@ -327,9 +332,11 @@ body {
   position: relative;
   /* Above the stage, so a tooltip opening upward is drawn over the mirror. */
   z-index: 3;
+  /* The buttons lay themselves out by the bar's own width (below). */
+  container: bar / inline-size;
   display: grid;
-  /* Each button as wide as its content at least; Done gets the most of what is left. */
-  grid-template-columns: minmax(max-content, 1fr) minmax(max-content, 1fr) minmax(max-content, 1.35fr);
+  /* Never wider than the bar, whatever the text size: Done is always the widest; a label that can't fit ellipsizes. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.35fr);
   gap: var(--gap);
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
   background: var(--color-surface-raised);
@@ -361,7 +368,8 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
-/* Bottom bar: icon beside a short label; on a narrow phone (< 360 px) the icon sits above a smaller label. */
+/* Bottom bar: on a bar narrower than 400 px the icon sits above a small label; wider, beside it. Sizes in rem, so the
+   phone's text size setting applies (the grid above keeps the bar on screen). */
 .bar-btn {
   display: flex;
   flex-direction: column;
@@ -369,29 +377,34 @@ input:focus-visible {
   justify-content: center;
   gap: 3px;
   width: 100%;
-  height: 48px;
-  padding: 0 6px;
-  font: 600 12px/1 var(--font);
+  min-width: 0;
+  height: auto;
+  min-height: 48px;
+  padding: 4px 6px;
+  font: 600 0.75rem/1.15 var(--font);
   letter-spacing: 0.01em;
   -webkit-touch-callout: none;
   user-select: none;
   -webkit-user-select: none;
 }
 
-@media (min-width: 360px) {
-  .bar-btn {
-    flex-direction: row;
-    gap: 6px;
-    padding: 0 10px;
-    font-size: 14px;
-  }
+.bar-btn .icon {
+  flex: none;
 }
 
-@media (min-width: 420px) {
+.bar-label {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@container bar (min-width: 400px) {
   .bar-btn {
+    flex-direction: row;
     gap: 8px;
-    padding: 0 14px;
-    font-size: 15px;
+    padding: 4px 12px;
+    font-size: 0.9375rem;
   }
 }
 
@@ -407,8 +420,8 @@ input:focus-visible {
   background: var(--color-control-pressed);
 }
 
-/* Keyboard while the phone keyboard is open: pressed in, with the accent. */
-.bar-neutral[aria-pressed='true'] {
+/* Keyboard while the phone keyboard is open: lit with the accent (a state, not a toggle). */
+.bar-neutral[data-active] {
   background: rgb(34 197 94 / 0.14);
   border-color: rgb(34 197 94 / 0.55);
   color: #86efac;
@@ -441,7 +454,7 @@ input:focus-visible {
   border-radius: 8px;
   background: var(--color-tooltip);
   color: var(--color-on-tooltip);
-  font: 500 14px/1.35 var(--font);
+  font: 500 0.875rem/1.35 var(--font);
   text-align: left;
   white-space: normal;
   box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
@@ -472,8 +485,14 @@ input:focus-visible {
   left: 50%;
   transform: translateX(-50%);
 }
+/* Done's bubble keeps clear of the tool rail just above it (--tip-clear, measured when it opens: see tips.tsx), with its
+   arrow still over Done. */
 .tip-top.tip-align-end .tip {
-  right: 0;
+  right: var(--tip-clear, 0px);
+  max-width: min(260px, calc(100vw - 24px - var(--tip-clear, 0px)));
+}
+.tip-top.tip-align-end[data-open]::after {
+  left: min(calc(50% - 6px), calc(100% - var(--tip-clear, 0px) - 26px));
 }
 .tip-top[data-open]::after {
   bottom: calc(100% - 2px);
@@ -494,7 +513,7 @@ input:focus-visible {
 }
 
 /* The rail as a row (a phone on its side): its tooltips open above, lined up with the right edge. */
-@container (max-height: 300px) {
+@container stage (max-height: 300px) {
   .tip-left .tip {
     right: 0;
     top: auto;
@@ -516,36 +535,39 @@ input:focus-visible {
   }
 }
 
-/* The first time on this device: one line above the bar, gone at the first touch or after a few seconds. */
+/* The first time on this device: a line at the bottom of the mirror, beside the rail (never under it), gone at the first
+   touch or after a few seconds. */
 .first-hint {
   position: absolute;
-  left: 12px;
-  bottom: calc(100% + 10px);
-  max-width: min(340px, calc(100% - 24px - var(--touch) - 16px));
+  left: var(--pad);
+  bottom: var(--pad);
+  max-width: min(340px, calc(100% - 2 * var(--pad) - var(--rail-col) - 8px));
   margin: 0;
   padding: 8px 12px;
   border-radius: var(--radius);
   border: 1px solid var(--color-hairline);
   background: rgb(24 32 51 / 0.94);
   color: var(--color-foreground);
-  font: 500 13px/1.35 var(--font);
+  font: 500 0.8125rem/1.35 var(--font);
   box-shadow: 0 6px 20px rgb(0 0 0 / 0.4);
   animation: tip-in 200ms ease-out;
 }
 
+@container stage (max-height: 300px) {
+  .first-hint {
+    max-width: min(340px, calc(100% - 2 * var(--pad) - var(--rail-row) - 8px));
+  }
+}
+
 .btn-primary {
+  margin-left: auto;
+  flex: 0 1 160px;
   background: var(--color-accent);
   color: var(--color-on-accent);
 }
 
 .btn-primary:hover {
   background: #16a34a;
-}
-
-.btn-secondary {
-  background: var(--color-muted);
-  color: var(--color-foreground);
-  border-color: var(--color-border);
 }
 
 .btn-ghost {
