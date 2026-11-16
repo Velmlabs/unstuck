@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",
-    "@velmlabs/unstuck": "^0.2.5",
+    "@velmlabs/unstuck": "^0.2.6",
     "agents": "^0.33.0"
   },
   "devDependencies": {
