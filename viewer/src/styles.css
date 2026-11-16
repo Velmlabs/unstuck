@@ -109,6 +109,8 @@ body {
   position: relative;
   min-height: 0;
   background: #000;
+  /* The controls lay themselves out by the stage's own height (below), not the window's. */
+  container-type: size;
 }
 
 /* The mirror's box. The canvas inside is zoomed and panned with a CSS transform (see mapping.ts); this box never
@@ -140,6 +142,8 @@ body {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  /* A quick second tap on + is two zoom steps, never the browser's double-tap zoom. */
+  touch-action: manipulation;
 }
 
 .control-group {
@@ -147,8 +151,9 @@ body {
   gap: var(--gap);
 }
 
-/* A short stage (a phone on its side): the two groups side by side. */
-@media (max-height: 520px) {
+/* A stage too short for one column (a phone on its side): the two groups side by side. 5 × 44 px buttons, gaps and
+   padding need about 290 px. */
+@container (max-height: 300px) {
   .stage-controls {
     flex-direction: row;
     align-items: flex-end;
@@ -271,6 +276,7 @@ body {
 }
 
 .btn {
+  touch-action: manipulation;
   min-height: var(--touch);
   min-width: var(--touch);
   padding: 0 14px;

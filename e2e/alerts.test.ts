@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createCloudAlerter } from '../engine/src/cloud-alerts';
+import { waitFramed } from './framed';
 
 /** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
 async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
@@ -123,7 +124,7 @@ describe('a takeover alert reaches the paired phone, sealed', () => {
     const human = await phone.newPage();
     await human.goto(sealedLink);
     await tapStart(human);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+    await waitFramed(human, 20_000);
     expect(await human.getByText('Solve the test CAPTCHA').count()).toBe(1);
     // The engine's own viewer page allows no other origin (CSP connect-src 'self'), so it can't ask Cloud who sent the
     // alert: no key is named and no warning is shown (view.unstuck.sh's page allows the Cloud API).

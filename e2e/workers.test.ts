@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { freePort, RELAY_KEY, startRelay, stopGroup, tapStart, waitHealthy } from './relay-harness';
+import { waitFramed } from './framed';
 
 // An agent in a Durable Object under `wrangler dev` drives a real Chromium over CDP and hands it to a person through relay-cloudflare.
 
@@ -94,7 +95,7 @@ describe('takeover from a Durable Object under wrangler dev', () => {
     const human = await ctx.newPage();
     await human.goto(link.url);
     await tapStart(human);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+    await waitFramed(human, 20_000);
     const target = await page.locator('#robot').boundingBox();
     const box = await human.locator('canvas').boundingBox();
     const scale = Math.min(box.width / 1280, box.height / 720);

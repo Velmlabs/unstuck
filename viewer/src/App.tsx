@@ -4,9 +4,9 @@ import { connect as defaultConnect, e2eCodec, type Codec, type ConnectionHandler
 import { importE2eKey } from '@velmlabs/unstuck-protocol';
 import { drawFrameOnCanvas } from './draw';
 import { attachBridge, configureBridge } from './bridge';
-import { bridgeBox, fieldBox, hitField, liftOffset, type Box } from './fields';
+import { bridgeBox, clipBox, fieldBox, hitField, keepInside, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
-import { FIT_VIEW, MAX_ZOOM, clampToPage, clampView, isFit, pinchView, sizeChangedALot, toPagePoint, viewTransform, visiblePageRect, zoomAt, type Pinch, type Point, type Rect, type View } from './mapping';
+import { FIT_VIEW, MAX_ZOOM, NO_INSET, clampToPage, clampView, isFit, pinchView, sizeChangedALot, toPagePoint, viewTransform, visiblePageRect, zoomAt, type Inset, type Pinch, type Point, type Rect, type View } from './mapping';
 import { forgetFragment, parseFragment, relayFor, sessionIdFromPath } from './url';
 import { cleanLabel, type Sender } from './alert-link';
 
@@ -111,30 +111,34 @@ const TAP_SLOP_PX = 10;
 
 /*
  * Touch gestures on the mirror (a mouse or pen is sent as it comes, press on press):
- * - One finger is held back until it means something: a release within TAP_SLOP_PX is a tap (press and release sent
- *   together, so the first tap of a double tap is a click as always); moving past the slop is a drag (the press is
- *   sent where the finger landed, then the moves); staying down HOLD_MS is a press-and-hold (the press is sent then).
- *   Until then a second finger can still turn it into a pinch without the page ever seeing a click.
+ * - One finger is held back until it means something, so a second finger can still turn it into a pinch without the
+ *   page ever seeing a click:
+ *   - a tap (released within TAP_SLOP_PX): the press is sent at release, and the release follows after as long as the
+ *     finger was really down (TAP_MIN_MS..TAP_MAX_MS), at the press point, so the page sees a real tap's duration;
+ *   - a drag (moved past the slop): the press is sent where the finger landed, then a move where it crossed the slop
+ *     one throttle tick later, then moves as they come (one per MOVE_MS);
+ *   - a hold (still for HOLD_MS): the press is sent then (press-and-hold challenges).
  * - Two fingers pinch to zoom around their midpoint and pan as the midpoint moves. A second finger after a press was
  *   sent ends that press (a release where the first finger is) before the pinch starts. Nothing reaches the page;
- *   a finger left over after a pinch does nothing until it lifts.
- * - A double tap (a second tap within DOUBLE_TAP_MS of the first tap's release and DOUBLE_TAP_PX of it) zooms 2× around
- *   it, or back to fit when zoomed, instead of clicking a second time. Not after a tap on a mapped text field: a second
- *   tap there is a click (moving the caret, selecting a word).
+ *   a finger left over after a pinch, or a third finger, does nothing until it lifts.
+ * - No double-tap zoom: two quick taps are two clicks (a re-tap on a slow stream, two neighbouring tiles).
+ * - A new first finger (isPrimary: no other finger is down) starts from a clean state, in case a lift was never
+ *   reported; so do a lost pointer capture, the page being hidden and the session leaving live.
  */
 const HOLD_MS = 250;
-const DOUBLE_TAP_MS = 300;
-const DOUBLE_TAP_PX = 24;
-/** Zoom buttons step by √2 (fit, 1.4×, 2×, 2.8×, 4×); a double tap zooms 2×. */
-const DOUBLE_TAP_ZOOM = 2;
+const TAP_MIN_MS = 40;
+const TAP_MAX_MS = 250;
+const MOVE_MS = 16;
 const ZOOM_ANIM_MS = 180;
 const reducedMotion = () =>
   typeof window.matchMedia !== 'function' || typeof requestAnimationFrame !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-/** The next zoom button step from `scale`, on the √2 ladder (a pinch can leave the zoom between steps). */
+/** The next zoom button step from `scale`, on the √2 ladder: fit, 1.4×, 2×, 2.8×, 4× (a pinch can leave the zoom between steps). */
 const zoomStep = (scale: number, dir: 1 | -1) => {
   const level = Math.log2(scale) * 2;
   return 2 ** ((dir > 0 ? Math.floor(level + 1e-6) + 1 : Math.ceil(level - 1e-6) - 1) / 2);
 };
+const sameBox = (a: Box | null, b: Box | null) =>
+  a === b || (!!a && !!b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);
 const pinchOf = (a: Point, b: Point): Pinch => ({ mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, dist: Math.hypot(a.x - b.x, a.y - b.y) });
 
 /** "From your key <name> · <site>", both as plain text without control, zero-width or bidi characters. */
@@ -195,11 +199,17 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const viewRef = useRef<View>(FIT_VIEW);
   const [zoomed, setZoomed] = useState<'fit' | 'zoomed' | 'max'>('fit');
   const anim = useRef<{ id: number; target: View } | null>(null);
-  /** Touch pointers down on the mirror, a finger held back (see the gesture rules above), a pinch, the last tap. */
+  const controlsRef = useRef<HTMLDivElement>(null);
+  /**
+   * Touch pointers down on the mirror; a finger held back (see the gesture rules above); the finger whose press was
+   * sent, and where it is; a pinch; a tap's release on its way.
+   */
   const touches = useRef(new Map<number, Point>());
-  const held = useRef<{ id: number; x: number; y: number; p: Point | null; doubleTap: boolean; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const held = useRef<{ id: number; x: number; y: number; p: Point | null; downAt: number; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const pressTouch = useRef<{ id: number; x: number; y: number } | null>(null);
   const pinch = useRef<{ ids: [number, number]; from: Pinch; start: View } | null>(null);
-  const lastTap = useRef<{ x: number; y: number; at: number } | null>(null);
+  const pendingUp = useRef<{ p: Point; button: 'left' | 'middle' | 'right'; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const moveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Nothing drawn yet: the black area says it is waiting for the page, not broken. */
   const [framed, setFramed] = useState(false);
   const framedRef = useRef(false);
@@ -247,11 +257,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         pageSize.current = { width: f.width, height: f.height };
         // Another page or a popup: back to fit. The same page a little different (a scrollbar): keep the zoom, in range.
         if (before.width !== f.width || before.height !== f.height) {
-          if (sizeChangedALot(before, pageSize.current)) {
-            setView(FIT_VIEW);
-            lastTap.current = null; // a tap on another page is not the second half of a double tap
-          }
-          else if (!isFit(viewRef.current) && viewportRef.current) setView(clampView(viewRef.current, mirrorBox(), pageSize.current));
+          if (sizeChangedALot(before, pageSize.current)) setView(FIT_VIEW);
+          else if (!isFit(viewRef.current) && viewportRef.current) setView(clampView(viewRef.current, mirrorBox(), pageSize.current, controlsInset()));
         }
         // Frame credit: the engine sends the next frame once this one is on screen (a slow phone never builds a backlog).
         const drawn = (d: Frame) => sockRef.current?.ack(d);
@@ -366,7 +373,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     el.focus({ preventScroll: true }); // inside the tap's own handler, or iOS won't open the keyboard
     setChip(null);
     ringField.current = field;
-    setRing(field ? ringOver(field) : null);
+    showRing(field ? ringOver(field) : null);
     relift(); // the keyboard may already be open (another field was being typed into)
   };
   /** Where a field (or, for null, the mirror's bottom strip) sits over the mirror, in CSS px of the stage. */
@@ -375,9 +382,14 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const sr = stageRef.current!.getBoundingClientRect();
     return { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height };
   };
-  const boxOver = (field: Field | null): Box => bridgeBox(field, canvasRect(), pageSize.current, viewRef.current);
-  /** The outline: the field's exact box, with no minimum size. */
-  const ringOver = (field: Field): Box => fieldBox(field, canvasRect(), pageSize.current, viewRef.current);
+  /** Zoomed, a field can be partly or wholly panned off the mirror: the typing box stays on it, never over the bars. */
+  const boxOver = (field: Field | null): Box => {
+    const area = canvasRect();
+    return keepInside(bridgeBox(field, area, pageSize.current, viewRef.current), area);
+  };
+  /** The outline: the field's exact box, with no minimum size, cut to the mirror (none when the field is off it). */
+  const ringOver = (field: Field): Box | null => clipBox(fieldBox(field, canvasRect(), pageSize.current, viewRef.current), canvasRect());
+  const showRing = (box: Box | null) => setRing((prev) => (sameBox(prev, box) ? prev : box));
   /** Moves the outline and the typing box over the field the page now focuses, keeping the keyboard open. */
   const placeOver = (field: Field) => {
     const el = bridgeRef.current;
@@ -386,7 +398,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     Object.assign(el.style, { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` });
     bridgeBoxRef.current = box;
     ringField.current = field;
-    setRing(ringOver(field));
+    showRing(ringOver(field));
     relift();
   };
   /** Lifts the mirror so the tapped field sits above the keyboard (the visual viewport), or drops the lift. */
@@ -410,6 +422,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const mirrorBox = (): Rect => {
     const r = viewportRef.current!.getBoundingClientRect();
     return { left: r.left, top: r.top, width: r.width, height: r.height };
+  };
+  /** The corner the zoom and scroll buttons cover: zoomed, the page may pan out from under it. */
+  const controlsInset = (): Inset => {
+    const c = controlsRef.current?.getBoundingClientRect();
+    if (!c || !c.width || !viewportRef.current) return NO_INSET;
+    const b = mirrorBox();
+    return { right: Math.max(0, b.left + b.width - c.left), bottom: Math.max(0, b.top + b.height - c.top) };
   };
   const point = (e: { clientX: number; clientY: number }) =>
     viewportRef.current ? toPagePoint({ x: e.clientX, y: e.clientY }, mirrorBox(), pageSize.current, viewRef.current) : null;
@@ -446,28 +465,34 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     };
     anim.current = { id: requestAnimationFrame(step), target };
   };
-  /** Zooms to `scale` around a client point (the mirror's centre by default). */
-  const zoomTo = (scale: number, focal?: Point) => {
+  /** The zoom buttons: one √2 step around the mirror's centre (a second press mid-animation builds on its target). */
+  const zoomButton = (dir: 1 | -1) => {
     const page = pageSize.current;
-    if (!live || page.width === 0 || !viewportRef.current) return;
+    if (!liveRef.current || page.width === 0 || !viewportRef.current) return;
     const box = mirrorBox();
-    const from = anim.current?.target ?? viewRef.current; // a second press mid-animation builds on where it is going
-    animateTo(zoomAt(from, focal ?? { x: box.left + box.width / 2, y: box.top + box.height / 2 }, scale, box, page));
+    const from = anim.current?.target ?? viewRef.current;
+    animateTo(zoomAt(from, { x: box.left + box.width / 2, y: box.top + box.height / 2 }, zoomStep(from.scale, dir), box, page, controlsInset()));
   };
-  const zoomButton = (dir: 1 | -1) => zoomTo(zoomStep((anim.current?.target ?? viewRef.current).scale, dir));
-  /** A double tap: 2× around the finger, or back to fit when zoomed. */
-  const toggleZoomAt = (at: Point) => (isFit(viewRef.current) ? zoomTo(DOUBLE_TAP_ZOOM, at) : animateTo(FIT_VIEW));
 
+  /** Sends a tap's delayed release now (a new press, or its timer). */
+  const flushUp = () => {
+    const u = pendingUp.current;
+    if (!u) return;
+    clearTimeout(u.timer);
+    pendingUp.current = null;
+    pressed.current = null;
+    if (liveRef.current) send({ t: 'mouse', action: 'up', ...u.p, button: u.button, clickCount: 1, modifiers: 0 });
+  };
   /** Sends a press at page point `p`; `at` (client px) is where it started, for telling a tap from a drag. */
   const press = (at: Point, p: Point, button: 'left' | 'middle' | 'right', modifiers: number) => {
+    flushUp(); // a tap's release still on its way goes first
     pressed.current = button;
     tapRef.current = { x: at.x, y: at.y, field: hitField(fieldsRef.current, p) };
     send({ t: 'mouse', action: 'down', ...p, button, clickCount: 1, modifiers });
   };
 
-  /** A release; then, for a tap (not a drag), the keyboard for the field under it, or closing it elsewhere. */
-  const endPress = (e: PointerEvent) => {
-    release(e);
+  /** For a tap (not a drag): the keyboard for the field under it, or closing it elsewhere. */
+  const afterTap = (e: { clientX: number; clientY: number }) => {
     // Focusing on release is what iOS honours most reliably, and a drag that starts on a field doesn't open the keyboard.
     const tap = tapRef.current;
     tapRef.current = null;
@@ -481,29 +506,43 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   /** Always pair a press with a release, even if the pointer ended in the letterbox or was cancelled. */
   const release = (e: { clientX: number; clientY: number }, modifiers = modifiersOf(e as PointerEvent)) => {
     const button = pressed.current;
-    if (!button || !viewportRef.current) return;
+    if (!button || pendingUp.current || !viewportRef.current) return; // a tap's release is already on its way
     const p = clampToPage({ x: e.clientX, y: e.clientY }, mirrorBox(), pageSize.current, viewRef.current);
     if (!p) return;
     pressed.current = null;
+    pressTouch.current = null;
     (e as Partial<PointerEvent>).preventDefault?.();
     send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers });
   };
 
-  /** A held-back finger becomes a press (it moved past the slop, or stayed down): sent where it landed. */
-  const commitHeld = () => {
-    const h = held.current;
-    if (!h) return;
-    clearTimeout(h.timer);
-    held.current = null;
-    if (h.p) press(h, h.p, 'left', 0);
-  };
   const dropHeld = () => {
     if (held.current) clearTimeout(held.current.timer);
     held.current = null;
   };
+  /** A held-back finger becomes a press (it moved past the slop, or stayed down): sent where it landed. */
+  const commitHeld = () => {
+    const h = held.current;
+    dropHeld();
+    if (!h || !h.p || !liveRef.current) return;
+    press(h, h.p, 'left', 0);
+    pressTouch.current = { id: h.id, x: h.x, y: h.y };
+  };
+  /**
+   * Forgets every finger: a lift that was never reported (a lost capture, the page hidden, the session no longer live,
+   * a new first finger) must not leave a pinch or a held finger behind. A press already sent is released where its
+   * finger was last seen.
+   */
+  const resetTouches = () => {
+    dropHeld();
+    const pt = pressTouch.current;
+    if (pt && pressed.current) release({ clientX: pt.x, clientY: pt.y }, 0);
+    pressTouch.current = null;
+    touches.current.clear();
+    pinch.current = null;
+  };
 
   const onPointerDown = (e: PointerEvent) => {
-    if (!live) return;
+    if (!liveRef.current) return;
     if (e.pointerType !== 'touch') {
       const p = point(e);
       if (!p) return;
@@ -514,51 +553,50 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     e.preventDefault();
     (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
     stopZoomAnimation(); // a finger landing mid-zoom holds the view where it is
+    if (e.isPrimary ?? touches.current.size === 0) resetTouches();
     const at = { x: e.clientX, y: e.clientY };
     touches.current.set(e.pointerId, at);
     if (touches.current.size === 1) {
-      const last = lastTap.current;
-      const p = point(e);
-      const doubleTap =
-        !!last && performance.now() - last.at <= DOUBLE_TAP_MS && Math.hypot(at.x - last.x, at.y - last.y) <= DOUBLE_TAP_PX && !(p && hitField(fieldsRef.current, p));
-      held.current = { id: e.pointerId, ...at, p, doubleTap, timer: setTimeout(commitHeld, HOLD_MS) };
+      held.current = { id: e.pointerId, ...at, p: point(e), downAt: performance.now(), timer: setTimeout(commitHeld, HOLD_MS) };
       return;
     }
-    if (touches.current.size !== 2 || pinch.current) return;
+    if (touches.current.size !== 2 || pinch.current) return; // a third finger: ignored
     // A second finger: a pinch. A press already sent is released first, where the first finger is.
     dropHeld();
     const [firstId, first] = [...touches.current][0]!;
     if (pressed.current) release({ clientX: first.x, clientY: first.y }, 0);
+    pressTouch.current = null;
     tapRef.current = null;
-    lastTap.current = null;
     pinch.current = { ids: [firstId, e.pointerId], from: pinchOf(first, at), start: viewRef.current };
   };
 
   const onPointerUp = (e: PointerEvent) => {
-    if (e.pointerType === 'touch') touches.current.delete(e.pointerId);
+    if (e.pointerType !== 'touch') {
+      release(e); // a press is always released, even when the session stopped being live in between
+      if (liveRef.current) afterTap(e);
+      return;
+    }
+    const known = touches.current.delete(e.pointerId);
     if (pinch.current) {
       if (touches.current.size === 0) pinch.current = null;
       return;
     }
     const h = held.current;
-    if (h && h.id === e.pointerId) dropHeld();
-    if (!live) return;
-    if (e.pointerType !== 'touch') return endPress(e);
     if (h && h.id === e.pointerId) {
-      if (h.doubleTap) {
-        lastTap.current = null;
-        return toggleZoomAt(h);
-      }
-      if (h.p) {
-        press(h, h.p, 'left', 0);
-        const onField = tapRef.current?.field;
-        endPress(e);
-        lastTap.current = onField ? null : { x: h.x, y: h.y, at: performance.now() };
-      } else lastTap.current = { x: h.x, y: h.y, at: performance.now() }; // the letterbox: no click, but a double tap zooms
+      dropHeld();
+      if (!liveRef.current || !h.p) return; // not live, or the letterbox: nothing to tap
+      // A tap: the press now, the keyboard now (inside the touch's own handler, or iOS won't open it), and the
+      // release once the finger's real time down has passed, where it pressed.
+      press(h, h.p, 'left', 0);
+      afterTap(e);
+      const ms = Math.min(TAP_MAX_MS, Math.max(TAP_MIN_MS, performance.now() - h.downAt));
+      pendingUp.current = { p: h.p, button: 'left', timer: setTimeout(flushUp, ms) };
       return;
     }
-    lastTap.current = null;
-    endPress(e);
+    // The finger whose press was sent (a drag or a hold); a lift the mirror never saw go down sends nothing.
+    if (!known || pressTouch.current?.id !== e.pointerId) return;
+    release(e);
+    if (liveRef.current) afterTap(e);
   };
 
   const cancel = (e: PointerEvent) => {
@@ -566,22 +604,37 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       touches.current.delete(e.pointerId);
       if (held.current?.id === e.pointerId) dropHeld();
       if (pinch.current && touches.current.size === 0) pinch.current = null;
+      if (pressTouch.current?.id !== e.pointerId) return;
     }
     tapRef.current = null;
     release(e);
   };
+  /** The browser took the pointer away without a lift or a cancel (e.g. an element went away): start clean. */
+  const lostCapture = (e: PointerEvent) => {
+    if (touches.current.has(e.pointerId)) resetTouches();
+  };
 
   const scroll = (direction: 1 | -1) => {
     const page = pageSize.current;
-    if (!live || page.width === 0) return;
+    if (!liveRef.current || page.width === 0) return;
     // The part of the page on screen: at fit all of it, zoomed in only what the person sees.
     const seen = viewportRef.current ? visiblePageRect(mirrorBox(), page, viewRef.current) : null;
     const v = seen && seen.width > 0 ? seen : { left: 0, top: 0, ...page };
     send({ t: 'wheel', x: v.left + v.width / 2, y: v.top + v.height / 2, dx: 0, dy: Math.round(direction * v.height * SCROLL_FRACTION) });
   };
 
+  /** At most one move per MOVE_MS; `then` runs when the tick ends (a drag's first move). */
+  const throttleMoves = (then?: () => void) => {
+    moveQueued.current = true;
+    moveTimer.current = setTimeout(() => {
+      moveQueued.current = false;
+      moveTimer.current = null;
+      then?.();
+    }, MOVE_MS);
+  };
+
   const onMove = (e: PointerEvent) => {
-    if (!live) return;
+    if (!liveRef.current) return;
     if (e.pointerType === 'touch') {
       if (!touches.current.has(e.pointerId)) return;
       const at = { x: e.clientX, y: e.clientY };
@@ -589,30 +642,40 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       const pz = pinch.current;
       if (pz) {
         const [a, b] = pz.ids.map((id) => touches.current.get(id));
-        if (a && b && viewportRef.current) setView(pinchView(pz.start, pz.from, pinchOf(a, b), mirrorBox(), pageSize.current));
+        if (a && b && viewportRef.current) setView(pinchView(pz.start, pz.from, pinchOf(a, b), mirrorBox(), pageSize.current, controlsInset()));
         return;
       }
       const h = held.current;
-      if (h && Math.hypot(at.x - h.x, at.y - h.y) < TAP_SLOP_PX) return;
-      commitHeld();
-      if (!pressed.current) return;
+      if (h && h.id === e.pointerId) {
+        if (Math.hypot(at.x - h.x, at.y - h.y) < TAP_SLOP_PX) return;
+        // A drag: the press now, the move to where it crossed the slop one tick later (never in the same tick).
+        commitHeld();
+        const p = point(e);
+        if (!pressed.current || !p) return;
+        pressTouch.current = { id: e.pointerId, ...at };
+        return throttleMoves(() => {
+          if (pressed.current && liveRef.current) send({ t: 'mouse', action: 'move', ...p, button: 'left', clickCount: 0, modifiers: 0 });
+        });
+      }
+      if (pressTouch.current?.id !== e.pointerId) return;
+      pressTouch.current = { id: e.pointerId, ...at };
     }
     if (moveQueued.current) return;
     const p = point(e);
     if (!p) return;
-    moveQueued.current = true;
-    setTimeout(() => (moveQueued.current = false), 16);
+    throttleMoves();
     send({ t: 'mouse', action: 'move', ...p, button: e.buttons & 1 ? 'left' : 'none', clickCount: 0, modifiers: modifiersOf(e) });
   };
 
   const onWheel = (e: WheelEvent) => {
-    if (!live) return;
+    if (!liveRef.current) return;
     if (e.ctrlKey) {
       // A trackpad pinch on a computer (and ctrl + wheel): zoom the mirror around the pointer, nothing to the page.
       if (pageSize.current.width === 0 || !viewportRef.current) return;
       e.preventDefault();
       stopZoomAnimation();
-      return setView(zoomAt(viewRef.current, { x: e.clientX, y: e.clientY }, viewRef.current.scale * Math.exp(-e.deltaY / 100), mirrorBox(), pageSize.current));
+      const v = viewRef.current;
+      return setView(zoomAt(v, { x: e.clientX, y: e.clientY }, v.scale * Math.exp(-e.deltaY / 100), mirrorBox(), pageSize.current, controlsInset()));
     }
     const p = point(e);
     if (!p) return;
@@ -620,28 +683,51 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     send({ t: 'wheel', ...p, dx: e.deltaX, dy: e.deltaY });
   };
 
+  // The handlers read the session state from refs, so they are attached once per mirror, not on every render.
   useEffect(() => {
     // On the viewport, not the canvas: zoomed and panned, the canvas no longer covers all of the mirror's box.
     const c = viewportRef.current;
     if (!c) return;
-    const down = onPointerDown;
-    const up = onPointerUp;
     const noMenu = (e: Event) => e.preventDefault();
-    c.addEventListener('pointerdown', down);
-    c.addEventListener('pointerup', up);
+    // Safari's own page pinch (gesture events) would zoom the whole viewer, bars included.
+    const noGesture = (e: Event) => e.preventDefault();
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') resetTouches();
+    };
+    c.addEventListener('pointerdown', onPointerDown);
+    c.addEventListener('pointerup', onPointerUp);
     c.addEventListener('pointermove', onMove);
     c.addEventListener('pointercancel', cancel);
+    c.addEventListener('lostpointercapture', lostCapture);
     c.addEventListener('wheel', onWheel, { passive: false });
     c.addEventListener('contextmenu', noMenu);
+    document.addEventListener('gesturestart', noGesture);
+    document.addEventListener('gesturechange', noGesture);
+    document.addEventListener('visibilitychange', onHidden);
     return () => {
-      c.removeEventListener('pointerdown', down);
-      c.removeEventListener('pointerup', up);
+      c.removeEventListener('pointerdown', onPointerDown);
+      c.removeEventListener('pointerup', onPointerUp);
       c.removeEventListener('pointermove', onMove);
       c.removeEventListener('pointercancel', cancel);
+      c.removeEventListener('lostpointercapture', lostCapture);
       c.removeEventListener('wheel', onWheel);
       c.removeEventListener('contextmenu', noMenu);
+      document.removeEventListener('gesturestart', noGesture);
+      document.removeEventListener('gesturechange', noGesture);
+      document.removeEventListener('visibilitychange', onHidden);
+      // Nothing left running after the mirror goes: no held finger, no tap release, no move tick, no zoom animation.
+      dropHeld();
+      if (pendingUp.current) clearTimeout(pendingUp.current.timer);
+      pendingUp.current = null;
+      if (moveTimer.current) clearTimeout(moveTimer.current);
+      stopZoomAnimation();
     };
-  });
+  }, [screen.kind, started]);
+
+  // The session left live (reconnecting, ended): no finger state survives it.
+  useEffect(() => {
+    if (!live) resetTouches();
+  }, [live]);
 
   // The keyboard bridge: every key the person presses goes straight to the agent's page.
   useEffect(() => {
@@ -667,7 +753,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   useEffect(() => {
     const reposition = () => {
       // Zoomed: keep the view in range of the new size (setView also places the outline again).
-      if (!isFit(viewRef.current) && viewportRef.current) return setView(clampView(viewRef.current, mirrorBox(), pageSize.current));
+      if (!isFit(viewRef.current) && viewportRef.current) return setView(clampView(viewRef.current, mirrorBox(), pageSize.current, controlsInset()));
       const field = ringField.current;
       if (field && canvasRef.current && stageRef.current) placeOver(field);
     };
@@ -749,13 +835,14 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           <canvas
             ref={canvasRef}
             data-testid="screen"
+            data-framed={framed ? '' : undefined}
             class="screen"
-            aria-label="Live view of the agent's browser. Tap or click to interact. Pinch or double-tap to zoom."
+            aria-label="Live view of the agent's browser. Tap or click to interact. Pinch or use + to zoom."
           />
         </div>
-        <div class="stage-controls">
-          {/* mousedown is not allowed to move focus: zooming keeps the phone keyboard open over its field. */}
-          <div class="control-group" role="group" aria-label="Zoom" onMouseDown={(e) => e.preventDefault()}>
+        {/* mousedown is not allowed to move focus: zooming and scrolling keep the phone keyboard open over its field. */}
+        <div class="stage-controls" ref={controlsRef} onMouseDown={(e) => e.preventDefault()}>
+          <div class="control-group" role="group" aria-label="Zoom">
             <button type="button" class="btn btn-icon" aria-label="Zoom in" disabled={zoomed === 'max'} onClick={() => zoomButton(1)}>
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                 <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
@@ -766,7 +853,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
                 <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
               </svg>
             </button>
-            <button type="button" class="btn btn-icon" aria-label="Fit page to screen" disabled={zoomed === 'fit'} onClick={() => animateTo(FIT_VIEW)}>
+            <button type="button" class="btn btn-icon" aria-label="Fit page to screen" disabled={zoomed === 'fit'} onClick={() => liveRef.current && animateTo(FIT_VIEW)}>
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
                 <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
               </svg>

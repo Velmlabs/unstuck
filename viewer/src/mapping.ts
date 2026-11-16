@@ -24,6 +24,14 @@ export interface View {
   y: number;
 }
 
+/** Room on the right and bottom of the box that on-screen controls cover: when zoomed, the page may pan out past
+ * the box edge by this much, so whatever sits under the controls can be brought out from under them. */
+export interface Inset {
+  right: number;
+  bottom: number;
+}
+export const NO_INSET: Inset = Object.freeze({ right: 0, bottom: 0 });
+
 export const MIN_ZOOM = 1;
 export const MAX_ZOOM = 4;
 export const FIT_VIEW: View = Object.freeze({ scale: 1, x: 0, y: 0 });
@@ -85,26 +93,31 @@ export function toClientPoint(p: Point, box: Rect, page: Size, view: View = FIT_
 /**
  * Keeps a view in range: zoom between fit and MAX_ZOOM, and the pan such that the page image covers the box on every
  * axis where it is bigger than the box, and is centred where it is smaller. So the page never leaves the screen, and
- * no black band ever appears beyond the letterbox fit already has.
+ * no black band ever appears beyond the letterbox fit already has, except, when zoomed, up to `inset` on the right and
+ * bottom (the controls' corner), so nothing on the page stays stuck under the buttons.
  */
-export function clampView(view: View, box: Size, page: Size): View {
+export function clampView(view: View, box: Size, page: Size, inset: Inset = NO_INSET): View {
   const fit = fitContain(box, page);
   if (!Number.isFinite(view.scale) || fit.width === 0) return FIT_VIEW;
   const s = clamp(view.scale, MIN_ZOOM, MAX_ZOOM);
-  const axis = (t: number, boxLen: number, fitStart: number, fitLen: number) => {
+  const zoomed = s > MIN_ZOOM;
+  const axis = (t: number, boxLen: number, fitStart: number, fitLen: number, over: number) => {
     const len = s * fitLen;
-    const start = len <= boxLen + 1e-6 ? (boxLen - len) / 2 : clamp((Number.isFinite(t) ? t : 0) + s * fitStart, boxLen - len, 0);
+    const centre = (boxLen - len) / 2;
+    const hi = Math.max(0, centre);
+    const lo = Math.min(boxLen - len, centre) - (zoomed ? Math.max(0, over) : 0);
+    const start = lo >= hi - 1e-6 ? hi : clamp((Number.isFinite(t) ? t : 0) + s * fitStart, lo, hi);
     return start - s * fitStart || 0; // never -0
   };
-  return { scale: s, x: axis(view.x, box.width, fit.left, fit.width), y: axis(view.y, box.height, fit.top, fit.height) };
+  return { scale: s, x: axis(view.x, box.width, fit.left, fit.width, inset.right), y: axis(view.y, box.height, fit.top, fit.height, inset.bottom) };
 }
 
 /** Zooms to `scale` keeping the page point under `focal` (client px) where it is, then clamps. */
-export function zoomAt(view: View, focal: Point, scale: number, box: Rect, page: Size): View {
+export function zoomAt(view: View, focal: Point, scale: number, box: Rect, page: Size, inset: Inset = NO_INSET): View {
   const s = clamp(scale, MIN_ZOOM, MAX_ZOOM);
   const fx = focal.x - box.left;
   const fy = focal.y - box.top;
-  return clampView({ scale: s, x: fx - ((fx - view.x) / view.scale) * s, y: fy - ((fy - view.y) / view.scale) * s }, box, page);
+  return clampView({ scale: s, x: fx - ((fx - view.x) / view.scale) * s, y: fy - ((fy - view.y) / view.scale) * s }, box, page, inset);
 }
 
 /** Two fingers: where they started (midpoint and spread) and where they are now, from the view at the start. */
@@ -117,12 +130,12 @@ export interface Pinch {
  * A pinch: the zoom follows the fingers' spread and the page point that was under their midpoint stays under it,
  * so moving both fingers together pans.
  */
-export function pinchView(start: View, from: Pinch, to: Pinch, box: Rect, page: Size): View {
+export function pinchView(start: View, from: Pinch, to: Pinch, box: Rect, page: Size, inset: Inset = NO_INSET): View {
   if (!(from.dist > 0)) return start;
   const s = clamp((start.scale * to.dist) / from.dist, MIN_ZOOM, MAX_ZOOM);
   const lx = (from.mid.x - box.left - start.x) / start.scale;
   const ly = (from.mid.y - box.top - start.y) / start.scale;
-  return clampView({ scale: s, x: to.mid.x - box.left - lx * s, y: to.mid.y - box.top - ly * s }, box, page);
+  return clampView({ scale: s, x: to.mid.x - box.left - lx * s, y: to.mid.y - box.top - ly * s }, box, page, inset);
 }
 
 /** The part of the page that is on screen, in page px (all of it at fit). */

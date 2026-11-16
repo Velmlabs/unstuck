@@ -6,6 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
+import { waitFramed } from './framed';
 
 /** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
 async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
@@ -101,7 +102,7 @@ describe('local takeover end to end', () => {
 
     const wire: Buffer[] = [];
     const { ctx, human } = await openHuman(link.url, wire);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    await waitFramed(human, 15_000);
     // End-to-end encrypted even locally: no JPEG (FF D8) or JSON on the wire.
     await expect.poll(() => wire.filter((b) => b.length > 1000).length, { timeout: 10_000 }).toBeGreaterThan(0);
     const big = wire.filter((b) => b.length > 1000);
@@ -146,7 +147,7 @@ describe('local takeover end to end', () => {
     await human.waitForFunction(() => Object.keys(localStorage).some((k) => k.startsWith('unstuck:resume:')), null, { timeout: 15_000 });
     await human.reload();
     try {
-      await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+      await waitFramed(human, 15_000);
     } catch (e) {
       // Say what the human is looking at, so a timeout is diagnosable.
       const seen = await human.evaluate(() => ({
@@ -168,8 +169,7 @@ describe('local takeover end to end', () => {
   it('Review Focus 4: the human follows a popup, verifies in it, and lands back on the page', async () => {
     const { page, unstuck, result, link } = await startTakeover({ path: '/popup-opener' });
     const { ctx, human } = await openHuman(link.url);
-    // The page's first frame (a blank canvas is already 300 px wide): a tap before it has nothing to land on.
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width === 1280, null, { timeout: 15_000 });
+    await waitFramed(human, 15_000);
     const opener = await canvasPointFor(human, await centerOf(page, '#open'));
     await human.touchscreen.tap(opener.x, opener.y);
 
@@ -198,7 +198,7 @@ describe('local takeover end to end', () => {
   it('page lock: a tap on a link to another site never leaves the agent\'s browser; same-site links still work', async () => {
     const { page, unstuck, result, link } = await startTakeover({ path: '/links' });
     const { ctx, human } = await openHuman(link.url);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+    await waitFramed(human, 20_000);
     const tapOn = async (selector: string) => {
       const p = await canvasPointFor(human, await centerOf(page, selector));
       await human.touchscreen.tap(p.x, p.y);
@@ -254,7 +254,7 @@ describe('local takeover end to end', () => {
     await preview.close();
     // The person opens the same link afterwards and gets in normally.
     const { ctx, human } = await openHuman(link.url);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    await waitFramed(human, 15_000);
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved' });
     await unstuck.close();
@@ -307,7 +307,7 @@ describe('zoom on a phone', () => {
       document.addEventListener('click', (e) => (window as any).hits.push({ id: (e.target as HTMLElement).id, x: e.clientX, y: e.clientY }), true);
     });
     const { ctx, human } = await openHuman(link.url);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width === 1280, null, { timeout: 15_000 });
+    await waitFramed(human, 15_000);
     const fitBox = await human.locator('canvas').boundingBox();
 
     await human.getByRole('button', { name: 'Zoom in' }).tap();
@@ -368,7 +368,7 @@ describe('drag CAPTCHAs (sliders, drag-the-piece, drag and drop)', () => {
   it('a phone-sized human solves all three by dragging with a finger', async () => {
     const { page, unstuck, result, link } = await startTakeover({ path: '/drag' });
     const { ctx, human } = await openHuman(link.url);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width === 1280, null, { timeout: 15_000 });
+    await waitFramed(human, 15_000);
 
     const drag = async (fromSel: string, dx: number, dy: number) => {
       const from = await centerOf(page, fromSel);
@@ -415,12 +415,11 @@ describe('native typing on a simulated phone', () => {
   /** Taps an agent-page element on the phone until the bridge has focus (the field map arrives with the first frames). */
   async function tapToType(human: any, page: any, selector: string) {
     const at = await canvasPointFor(human, await centerOf(page, selector));
-    // Retried taps are spaced like a person's: two taps within 300 ms at one spot are a double tap (zoom).
     await expect
       .poll(async () => {
         await human.touchscreen.tap(at.x, at.y);
         return (await bridgeState(human)).focused;
-      }, { timeout: 15_000, interval: 400 })
+      }, { timeout: 15_000 })
       .toBe(true);
     return at;
   }
@@ -428,7 +427,7 @@ describe('native typing on a simulated phone', () => {
   it('a tap opens the number pad over the code field; whole codes, held Backspace, Shift, Tab and Return reach the page; a covered field does not open the keyboard', async () => {
     const { page, unstuck, result, link } = await startTakeover({ path: '/otp' });
     const { ctx, human } = await openHuman(link.url);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    await waitFramed(human, 15_000);
 
     // The single code field: the number pad with the SMS code suggestion, the bridge over the field.
     const at = await tapToType(human, page, '#single');

@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
 import { cdpFor, freePort, RELAY_KEY, startRelay, tapStart } from './relay-harness';
+import { waitFramed } from './framed';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
@@ -54,7 +55,7 @@ async function humanSolves(url: string, page: any, code?: string) {
     await human.getByLabel('Enter the 6-digit code').fill(code);
     await human.getByRole('button', { name: 'Continue' }).click();
   }
-  await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+  await waitFramed(human, 20_000);
   const target = await page.locator('#robot').boundingBox();
   const box = await human.locator('canvas').boundingBox();
   const scale = Math.min(box.width / 1280, box.height / 720);
@@ -118,7 +119,7 @@ describe('takeover through a relay, end to end', () => {
     });
     await human.goto(link.url);
     await tapStart(human);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+    await waitFramed(human, 20_000);
     away = true;
     for (const ws of sockets) await ws.close();
     await expect.poll(() => human.getByText(/Reconnecting/).isVisible(), { timeout: 5_000 }).toBe(true);
@@ -172,7 +173,7 @@ describe('takeover through a relay, end to end', () => {
       human.on('console', (m: any) => m.type() === 'error' && errors.push(m.text()));
       await human.goto(link.url);
       await tapStart(human);
-      await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+      await waitFramed(human, 20_000);
       expect(await human.evaluate(() => [...document.querySelectorAll('script[src], link[rel=stylesheet]')].every((e) => e.getAttribute('integrity')?.startsWith('sha384-')))).toBe(true);
       expect(new URL(human.url()).hash).toBe(''); // the secret left the address bar
       await human.getByRole('button', { name: 'Done' }).click();
@@ -201,7 +202,7 @@ describe('takeover through a relay, end to end', () => {
     const human = await ctx.newPage();
     await human.goto(lines[0].url);
     await tapStart(human);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+    await waitFramed(human, 20_000);
     await human.getByRole('button', { name: 'Done' }).click();
     await expect.poll(() => lines.length, { timeout: 20_000 }).toBe(2);
     expect(lines[1]).toMatchObject({ status: 'resolved' });

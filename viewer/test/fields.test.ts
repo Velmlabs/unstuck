@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { bridgeBox, fieldBox, hitField, liftOffset } from '../src/fields';
+import { bridgeBox, clipBox, fieldBox, hitField, keepInside, liftOffset } from '../src/fields';
 
 const otp = { x: 100, y: 200, w: 300, h: 40, kind: 'otp' as const };
 const email = { x: 100, y: 300, w: 300, h: 40, kind: 'email' as const };
@@ -62,5 +62,18 @@ describe('field boxes while zoomed', () => {
     expect(bridgeBox(otp, canvas, page, view)).toEqual({ left: 0, top: 210, width: 300, height: 40 });
     // The bottom strip is the mirror's own, whatever the zoom.
     expect(bridgeBox(null, canvas, page, view)).toEqual({ left: 0, top: 50 + 360 - 44, width: 640, height: 44 });
+  });
+});
+
+describe('keeping the outline and the typing box on the mirror', () => {
+  const area = { left: 0, top: 0, width: 640, height: 360 };
+  it('clips the outline to the mirror, or drops it when the field is off it', () => {
+    expect(clipBox({ left: -20, top: 340, width: 100, height: 40 }, area)).toEqual({ left: 0, top: 340, width: 80, height: 20 });
+    expect(clipBox({ left: 10, top: 10, width: 10, height: 10 }, area)).toEqual({ left: 10, top: 10, width: 10, height: 10 });
+    expect(clipBox({ left: 10, top: -50, width: 10, height: 40 }, area)).toBeNull();
+  });
+  it('moves the typing box inside the mirror, shrinking it only if it is bigger', () => {
+    expect(keepInside({ left: -20, top: 340, width: 100, height: 40 }, area)).toEqual({ left: 0, top: 320, width: 100, height: 40 });
+    expect(keepInside({ left: 600, top: -10, width: 1000, height: 32 }, area)).toEqual({ left: 0, top: 0, width: 640, height: 32 });
   });
 });

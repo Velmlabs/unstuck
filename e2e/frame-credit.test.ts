@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
 import { cdpFor, RELAY_KEY, startRelay, tapStart } from './relay-harness';
+import { waitFramed } from './framed';
 
 // Frame credit on a slow phone link: the viewer is throttled to 1.5 Mbit/s down / 150 ms, the agent page repaints
 // every animation frame and shows the time in its pixels. Without credit, frames queue up in front of the phone and
@@ -137,7 +138,7 @@ async function measure(url: string): Promise<Measurement> {
   const human = await ctx.newPage();
   await human.goto(url);
   await tapStart(human);
-  await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 20_000 });
+  await waitFramed(human, 20_000);
   await installReader(human);
   await changes(human, true);
   await new Promise((r) => setTimeout(r, 2_000));

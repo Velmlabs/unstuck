@@ -47,6 +47,24 @@ export function bridgeBox(field: Field | null, canvas: Rect, page: Size, view: V
   return { ...box, width: Math.max(MIN_W, box.width), height: Math.max(MIN_H, box.height) };
 }
 
+/** The part of `box` inside `area` (the outline over a field partly panned off the mirror), or null if none. */
+export function clipBox(box: Box, area: Box): Box | null {
+  const left = Math.max(box.left, area.left);
+  const top = Math.max(box.top, area.top);
+  const right = Math.min(box.left + box.width, area.left + area.width);
+  const bottom = Math.min(box.top + box.height, area.top + area.height);
+  return right > left && bottom > top ? { left, top, width: right - left, height: bottom - top } : null;
+}
+
+/** `box` moved (and if need be shrunk) to lie inside `area`: the typing box never sits over the bars. */
+export function keepInside(box: Box, area: Box): Box {
+  const width = Math.min(box.width, area.width);
+  const height = Math.min(box.height, area.height);
+  const left = Math.min(Math.max(box.left, area.left), area.left + area.width - width);
+  const top = Math.min(Math.max(box.top, area.top), area.top + area.height - height);
+  return { left, top, width, height };
+}
+
 /** How many px to move the mirror up so `box` (relative to a container at `containerTop`) sits above the keyboard. */
 export function liftOffset(box: Pick<Box, 'top' | 'height'>, visibleHeight: number, containerTop: number): number {
   if (visibleHeight <= 0) return 0;

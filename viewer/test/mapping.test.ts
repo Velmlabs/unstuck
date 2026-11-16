@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FIT_VIEW, MAX_ZOOM, clampToPage, clampView, fitContain, imageRect, isFit, pinchView, sizeChangedALot, toClientPoint, toPagePoint, viewTransform, visiblePageRect, zoomAt } from '../src/mapping';
+import { FIT_VIEW, MAX_ZOOM, NO_INSET, clampToPage, clampView, fitContain, imageRect, isFit, pinchView, sizeChangedALot, toClientPoint, toPagePoint, viewTransform, visiblePageRect, zoomAt } from '../src/mapping';
 
 const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height });
 const page = { width: 1280, height: 720 };
@@ -147,6 +147,25 @@ describe('zoom and pan (the view)', () => {
     expect(tall2.top + tall2.height).toBeCloseTo(box.top + box.height);
     expect(clampView({ scale: Number.NaN, x: 1, y: 1 }, box, desk)).toEqual(FIT_VIEW);
     expect(clampView({ scale: 2, x: 1, y: 1 }, box, { width: 0, height: 0 })).toEqual(FIT_VIEW);
+  });
+
+  it('when zoomed, the page can pan out past the right and bottom edges by the controls inset, never at fit', () => {
+    const inset = { right: 56, bottom: 270 };
+    // 2×: image 780×487.5 in 390×600. Horizontally it may now end 56 px short of the right edge.
+    const far = imageRect(box, desk, clampView({ scale: 2, x: -5000, y: -5000 }, box, desk, inset));
+    expect(far.left + far.width).toBeCloseTo(box.left + box.width - 56);
+    // Vertically it is narrower than the box: centred, or up to 270 px higher, never lower.
+    const centred = (600 - far.height) / 2;
+    expect(far.top - box.top).toBeCloseTo(centred - 270);
+    const low = imageRect(box, desk, clampView({ scale: 2, x: 0, y: 5000 }, box, desk, inset));
+    expect(low.top - box.top).toBeCloseTo(centred);
+    expect(low.left).toBe(box.left);
+    // The usual range is unchanged inside the inset.
+    const v = zoomAt(FIT_VIEW, { x: 195, y: 400 }, 2, box, desk, inset);
+    expect(v).toEqual(zoomAt(FIT_VIEW, { x: 195, y: 400 }, 2, box, desk, NO_INSET));
+    expect(pinchView(FIT_VIEW, { mid: { x: 195, y: 400 }, dist: 100 }, { mid: { x: 100, y: 100 }, dist: 400 }, box, desk, inset).scale).toBe(4);
+    // At fit the inset is ignored: fit is always exactly centred.
+    expect(clampView({ scale: 1, x: -40, y: -40 }, box, desk, inset)).toEqual(FIT_VIEW);
   });
 
   it('a pinch zooms around its centre and a moving centre pans', () => {
