@@ -42,7 +42,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json --noEmit",
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p test-workers/tsconfig.json --noEmit",
     "test": "vitest run --coverage",
     "build:dist": "tsup",
     "test:workers": "vitest run --config vitest.workers.config.ts"
@@ -79,6 +79,7 @@
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.8.1",
     "@cloudflare/workers-types": "^5.20261112.1",
+    "@velmlabs/unstuck-relay-cloudflare": "workspace:*",
     "wrangler": "^4.161.0"
   }
 }

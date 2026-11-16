@@ -9,7 +9,9 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./worker": "./src/worker.ts"
+    "./worker": "./src/worker.ts",
+    "./testing": "./test/helpers.ts",
+    "./testing/worker": "./test/fixtures/worker.ts"
   },
   "scripts": {
     "copy-viewer": "node scripts/copy-viewer.mjs",

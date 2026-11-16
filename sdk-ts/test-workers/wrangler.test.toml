@@ -1,7 +1,7 @@
 # The relay under test is relay-cloudflare's own Worker + Durable Object, loaded into the same miniflare as the SDK test.
 # No nodejs_compat: the SDK's edge entry must run on plain workerd.
 name = "unstuck-sdk-workers-test"
-main = "../../relay-cloudflare/test/fixtures/worker.ts"
+main = "relay-worker.ts"
 compatibility_date = "2026-11-01"
 
 [[durable_objects.bindings]]

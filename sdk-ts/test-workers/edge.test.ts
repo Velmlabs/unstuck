@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeCdp } from '@velmlabs/unstuck-core/testing';
 import { Unstuck, UnstuckConfigError, type TakeoverLink } from '@velmlabs/unstuck';
-import { FetchWs, viewerFor, waitFor } from '../../relay-cloudflare/test/helpers';
+import { FetchWs, viewerFor, waitFor } from '@velmlabs/unstuck-relay-cloudflare/testing';
 
 /** A Puppeteer-shaped page whose CDP session is a FakeCdp. */
 function fakePuppeteerPage(cdp: FakeCdp) {
@@ -19,7 +19,10 @@ beforeEach(() => {
   // No real network inside workerd tests: the engine's relay socket goes to the relay Worker in this miniflare.
   vi.stubGlobal('WebSocket', FetchWs);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 
 describe('Unstuck in workerd (edge entry)', () => {
   it('resolves a takeover inside workerd', async () => {
