@@ -1230,13 +1230,53 @@ describe('zoom', () => {
     finger(canvas, 'pointerup', 1, 100, 100);
     expect(sent).toEqual([]);
     act(() => handlers.onPhase('live'));
-    // A tap whose release is due after the session dropped.
+    // A tap whose release is due after the session dropped: still released, like any press.
     finger(canvas, 'pointerdown', 1, 100, 100);
     clock += 100;
     finger(canvas, 'pointerup', 1, 100, 100);
     act(() => handlers.onPhase('reconnecting'));
     tick(300);
-    expect(mice().map((m) => m.action)).toEqual(['down']);
+    expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
+  });
+
+  describe("a tap's release still on its way goes before anything else", () => {
+    const tapNoWait = (canvas: Element) => {
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      clock += 100;
+      finger(canvas, 'pointerup', 1, 100, 100);
+    };
+    const kinds = () => sent.map((m) => { const x = m as { t: string; action?: string }; return x.action ? `${x.t}:${x.action}` : x.t; });
+
+    it('Done', () => {
+      setup();
+      const canvas = goLive();
+      tapNoWait(canvas);
+      fireEvent.click(btn('Done'));
+      expect(kinds()).toEqual(['mouse:down', 'mouse:up', 'done']);
+      tick(300);
+      expect(kinds()).toHaveLength(3);
+    });
+
+    it("Can't solve", () => {
+      setup();
+      const canvas = goLive();
+      tapNoWait(canvas);
+      fireEvent.click(btn("Can't solve"));
+      expect(kinds()).toEqual(['mouse:down', 'mouse:up']);
+      expect(screen.getByRole('dialog')).toBeTruthy();
+    });
+
+    it('a key or text typed on the page or into the keyboard bridge', () => {
+      setup();
+      const canvas = goLive();
+      tapNoWait(canvas);
+      act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA', bubbles: true, cancelable: true })));
+      expect(kinds()).toEqual(['mouse:down', 'mouse:up', 'key:down']);
+      tapNoWait(canvas);
+      const bridge = screen.getByTestId('keyboard-bridge') as HTMLInputElement;
+      act(() => void bridge.dispatchEvent(new InputEvent('beforeinput', { inputType: 'insertText', data: 'é', bubbles: true, cancelable: true })));
+      expect(kinds().slice(-3)).toEqual(['mouse:down', 'mouse:up', 'text']);
+    });
   });
 
   it('a mouse press is released even if the session stopped being live before the button came up', () => {

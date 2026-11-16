@@ -222,6 +222,9 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   liveRef.current = live && !asking;
 
   const send = useCallback((m: ViewerToEngine) => {
+    // A tap's release still on its way goes before anything else (a key, typed text, Done): the page sees the tap end
+    // before what follows it.
+    if (m.t !== 'mouse' && pendingUp.current) flushUp();
     // The engine answers each tap and each typed key with a focus report: count them, so only the newest report acts.
     if ((m.t === 'mouse' && m.action === 'up') || (m.t === 'key' && m.action === 'down') || m.t === 'text') awaitingFocus.current++;
     sockRef.current?.send(m);
@@ -475,14 +478,16 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   };
 
   /** Sends a tap's delayed release now (a new press, or its timer). */
-  const flushUp = () => {
+  // A function declaration (hoisted): `send`, created on the first render, flushes through it too. Refs only.
+  function flushUp() {
     const u = pendingUp.current;
     if (!u) return;
     clearTimeout(u.timer);
     pendingUp.current = null;
     pressed.current = null;
-    if (liveRef.current) send({ t: 'mouse', action: 'up', ...u.p, button: u.button, clickCount: 1, modifiers: 0 });
-  };
+    // Always sent, like any release: a press is never left down on the page.
+    send({ t: 'mouse', action: 'up', ...u.p, button: u.button, clickCount: 1, modifiers: 0 });
+  }
   /** Sends a press at page point `p`; `at` (client px) is where it started, for telling a tap from a drag. */
   const press = (at: Point, p: Point, button: 'left' | 'middle' | 'right', modifiers: number) => {
     flushUp(); // a tap's release still on its way goes first
@@ -720,6 +725,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       if (pendingUp.current) clearTimeout(pendingUp.current.timer);
       pendingUp.current = null;
       if (moveTimer.current) clearTimeout(moveTimer.current);
+      moveTimer.current = null;
+      moveQueued.current = false; // a mirror mounted again must not start with its moves throttled away
       stopZoomAnimation();
     };
   }, [screen.kind, started]);
@@ -907,10 +914,16 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         <button type="button" class="btn btn-ghost" onClick={() => openBridge('text', null)}>
           Keyboard
         </button>
-        <button type="button" class="btn btn-secondary" onClick={() => setAsking(true)}>
+        <button type="button" class="btn btn-secondary" onClick={() => {
+            flushUp(); // the sheet takes the session off the mirror: end a tap first
+            setAsking(true);
+          }}>
           Can't solve
         </button>
-        <button type="button" class="btn btn-primary" onClick={() => send({ t: 'done' })}>
+        <button type="button" class="btn btn-primary" onClick={() => {
+            flushUp();
+            send({ t: 'done' });
+          }}>
           Done
         </button>
       </footer>
