@@ -1,4 +1,4 @@
-// Publishing 0.2.2: the TypeScript packages pack as built ES modules + bundled types, and the SDK imports from a clean folder.
+// Publishing 0.2.3: the TypeScript packages pack as built ES modules + bundled types, and the SDK imports from a clean folder.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -42,7 +42,7 @@ describe('packed packages', () => {
     for (const dir of Object.keys(PKGS)) {
       const pkg = JSON.parse(execFileSync('tar', ['-xzOf', tarballs[dir], 'package/package.json'], { encoding: 'utf8' }));
       expect(pkg.name, dir).toBe(PKGS[dir]);
-      expect(pkg.version, dir).toBe('0.2.2');
+      expect(pkg.version, dir).toBe('0.2.3');
       expect(pkg.main, dir).toBe('./dist/index.js');
       expect(pkg.types, dir).toBe('./dist/index.d.ts');
       expect(JSON.stringify(pkg.exports), dir).not.toContain('src/');
@@ -66,7 +66,7 @@ describe('packed packages', () => {
     const app = tmpDir('app-');
     fs.writeFileSync(path.join(app, 'package.json'), '{"type":"module"}');
     // The SDK depends on core and the generated launcher package; the launcher's platform packages are optional (not packed here).
-    const launcher = execFileSync('npm', ['pack', '--pack-destination', out], { cwd: stageLauncher(tmpDir('stage-'), '0.2.2'), encoding: 'utf8' }).trim().split('\n').pop();
+    const launcher = execFileSync('npm', ['pack', '--pack-destination', out], { cwd: stageLauncher(tmpDir('stage-'), '0.2.3'), encoding: 'utf8' }).trim().split('\n').pop();
     execFileSync('npm', ['install', '--no-audit', '--no-fund', '--ignore-scripts', '--omit=optional', tarballs.protocol, tarballs.core, tarballs['sdk-ts'], path.join(out, launcher)], { cwd: app, stdio: 'ignore' });
     const r = execFileSync('node', ['-e', "import('@velmlabs/unstuck').then((m) => console.log(typeof m.Unstuck, typeof m.UnstuckEngineError))"], { cwd: app, encoding: 'utf8' });
     expect(r.trim()).toBe('function function');

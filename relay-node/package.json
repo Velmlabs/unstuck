@@ -1,7 +1,7 @@
 {
   "name": "@velmlabs/unstuck-relay",
   "private": true,
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "Self-hostable Unstuck relay for Node (and Docker): agents and humans meet here, end-to-end encrypted",
   "license": "AGPL-3.0-only",
   "type": "module",
