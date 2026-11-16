@@ -24,7 +24,7 @@ export class Unstuck {
     return this.inner.takeover(page, o);
   }
 
-  /** Waits for in-flight takeovers: do not await it from inside onLink. */
+  /** Cancels running takeovers (`engine_closed`) and resolves once they have ended; safe to call from inside onLink. */
   close(): Promise<void> {
     return this.inner.close();
   }

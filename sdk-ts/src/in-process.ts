@@ -39,6 +39,12 @@ function defaultOnLink(l: TakeoverLink, alert: Promise<AlertOutcome> | null, ale
   });
 }
 
+function newSignal(): { promise: Promise<void>; fire: () => void } {
+  let fire!: () => void;
+  const promise = new Promise<void>((r) => (fire = r));
+  return { promise, fire };
+}
+
 /** Playwright and Puppeteer pages are event emitters that emit 'popup' with the new page (attachPage needs `on`). */
 type PageEvents = { on(e: string, cb: (p: unknown) => void): unknown; off?(e: string, cb: (p: unknown) => void): unknown };
 
@@ -58,6 +64,8 @@ export class InProcessUnstuck {
   private engine: Engine | null = null;
   /** Bumped by close(): a takeover that was still attaching when it ran must not start a new engine. */
   private generation = 0;
+  /** Resolved by close(): a page still attaching (createCDPSession may never answer) must not hold close() up. */
+  private closing = newSignal();
   private readonly inFlight = new Set<Promise<TakeoverResult>>();
 
   constructor(
@@ -91,17 +99,25 @@ export class InProcessUnstuck {
     if (requireCode && !this.opts.onLink)
       throw new TypeError('requireCode needs an onLink handler that sends the 6-digit code by a different channel than the link (printed together, the code protects nothing)');
     const generation = this.generation;
+    const engineClosed: TakeoverResult = { status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' };
     let attached: AttachedPage;
     try {
-      attached = await attachPage(page);
+      const attaching = attachPage(page);
+      const first = await Promise.race([attaching, this.closing.promise.then(() => null)]);
+      if (!first) {
+        // close() ran while the page was attaching: cancelled like the takeovers it ended (core's engine_closed shape),
+        // without waiting for the attach; if it ever finishes, the page is let go at once.
+        attaching.then((a) => a.detach(), () => {}).catch(() => {});
+        return engineClosed;
+      }
+      attached = first;
     } catch (e) {
       if (e instanceof PageClosedError) return { status: 'failed', sessionId: '', url: '', durationS: 0, detail: 'page_closed' };
       throw e;
     }
     if (generation !== this.generation) {
-      // close() ran while the page was attaching: cancelled like the takeovers it ended (core's engine_closed shape).
       await attached.detach();
-      return { status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' };
+      return engineClosed;
     }
     const cdp = toCdpClient(attached);
     const stopKeepAlive = startKeepAlive(cdp);
@@ -158,10 +174,14 @@ export class InProcessUnstuck {
 
   /**
    * Cancels running takeovers (`engine_closed`), also those still attaching their page, closes the relay sockets and
-   * resolves once they have all ended. A later takeover starts a new engine.
+   * resolves once they have all ended. A later takeover starts a new engine. Safe to call (and to await) from inside
+   * onLink: the takeover that called it ends with `engine_closed` like the others.
    */
   async close(): Promise<void> {
     this.generation++;
+    const closing = this.closing;
+    this.closing = newSignal();
+    closing.fire();
     const engine = this.engine;
     this.engine = null;
     await engine?.close();

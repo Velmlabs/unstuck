@@ -416,13 +416,13 @@ describe('InProcessUnstuck', () => {
     const u = new InProcessUnstuck({ relay: 'wss://own.example', onLink: () => {} }, {});
     const box = track(u.takeover(page, { reason: 'x' }));
     await settle();
-    let closed = false;
-    const closing = u.close().then(() => (closed = true));
+    // close() does not wait for the attach (createCDPSession may never answer): the takeover ends at once.
+    await u.close();
     await settle();
-    expect(closed).toBe(false); // close() waits for the takeover it cancelled
-    attach();
-    await closing;
     expect(box.result).toEqual({ status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' });
+    expect(page.detached).toBe(0);
+    attach(); // the attach finishes later: the page is let go at once
+    await settle();
     expect(createEngine).not.toHaveBeenCalled();
     expect(page.detached).toBe(1);
     expect(page.listenerCount('popup')).toBe(0);
@@ -432,6 +432,56 @@ describe('InProcessUnstuck', () => {
     await settle();
     expect(lastTransport().published.size).toBe(1);
     await u.close();
+  });
+
+  it('close() is not held up by a page whose createCDPSession never answers, nor by one that later fails', async () => {
+    const hung = new FakePage();
+    hung.createCDPSession = () => new Promise(() => {});
+    const failing = new FakePage();
+    let fail!: () => void;
+    failing.createCDPSession = () => new Promise((_, reject) => (fail = () => reject(new Error('target closed'))));
+    const u = new InProcessUnstuck({ relay: 'wss://own.example', onLink: () => {} }, {});
+    const a = track(u.takeover(hung, { reason: 'a' }));
+    const b = track(u.takeover(failing, { reason: 'b' }));
+    await settle();
+    await u.close();
+    await settle();
+    expect(a.result).toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
+    expect(b.result).toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
+    fail(); // no unhandled rejection
+    await settle();
+    expect(createEngine).not.toHaveBeenCalled();
+  });
+
+  it('close() called from inside onLink (sync, or awaited in an async onLink) ends the takeover with engine_closed', async () => {
+    for (const style of ['sync', 'awaited'] as const) {
+      let closed: Promise<void> | null = null;
+      let closedDone = false;
+      const u: InProcessUnstuck = new InProcessUnstuck(
+        {
+          relay: 'wss://own.example',
+          onLink:
+            style === 'sync'
+              ? () => void (closed = u.close().then(() => void (closedDone = true)))
+              : async () => {
+                  closed = u.close();
+                  await closed;
+                  closedDone = true;
+                },
+        },
+        {},
+      );
+      const page = new FakePage();
+      const result = await u.takeover(page, { reason: 'x' });
+      expect(result, style).toMatchObject({ status: 'cancelled', detail: 'engine_closed' });
+      await closed;
+      await settle();
+      expect(closedDone, style).toBe(true);
+      expect(page.detached, style).toBe(1);
+      expect(lastTransport().closed, style).toBe(true);
+      expect(lastTransport().published.size, style).toBe(0);
+      expect(vi.getTimerCount(), style).toBe(0);
+    }
   });
 
   it('close() right after the engine got the takeover still cancels it (nothing published, nothing left running)', async () => {
