@@ -199,7 +199,7 @@ body {
   }
 }
 
-.rail-btn {
+.btn.rail-btn {
   display: grid;
   place-items: center;
   width: var(--touch);

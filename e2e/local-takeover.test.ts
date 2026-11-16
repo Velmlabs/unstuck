@@ -309,6 +309,16 @@ describe('zoom on a phone', () => {
     const { ctx, human } = await openHuman(link.url);
     await waitFramed(human, 15_000);
     const fitBox = await human.locator('canvas').boundingBox();
+    // The rail's icons sit in the middle of their buttons (a general .btn padding once pushed them 3 px right).
+    const offCentre = await human.evaluate(() =>
+      [...document.querySelectorAll('.stage-controls button')].map((b) => {
+        const a = b.getBoundingClientRect();
+        const s = b.querySelector('svg')!.getBoundingClientRect();
+        return Math.abs(s.left - a.left - (a.right - s.right));
+      }),
+    );
+    expect(offCentre.length).toBe(5);
+    for (const d of offCentre) expect(d).toBeLessThanOrEqual(1);
 
     await human.getByRole('button', { name: 'Zoom in' }).tap();
     await human.getByRole('button', { name: 'Zoom in' }).tap();
