@@ -8,7 +8,7 @@ import time
 import pytest
 
 from conftest import ENGINE, scripted_engine, write_engine
-from unstuck import TakeoverResult, Unstuck, UnstuckEngineError
+from unstuck import TakeoverResult, Unstuck, UnstuckConfigError, UnstuckEngineError
 from unstuck._rpc import RpcCallError
 
 
@@ -319,14 +319,23 @@ async def test_alerts_false_is_sent_and_otherwise_left_to_the_engine(browser, tm
     await page.close()
 
 
-async def test_alerts_required_without_unstuck_cloud_is_a_value_error(browser, monkeypatch):
+async def test_alerts_required_without_unstuck_cloud_is_an_unstuck_config_error(browser, monkeypatch):
     monkeypatch.delenv("UNSTUCK_API_KEY", raising=False)
     monkeypatch.delenv("UNSTUCK_RELAY_URL", raising=False)
     page = await browser.new_page()
     async with Unstuck(engine_path=str(ENGINE), on_link=lambda l: None) as u:
-        with pytest.raises(ValueError, match=r"alerts: 'required' needs Unstuck Cloud \(apiKey or UNSTUCK_API_KEY\)"):
+        with pytest.raises(UnstuckConfigError, match=r"alerts: 'required' needs Unstuck Cloud \(apiKey or UNSTUCK_API_KEY\)") as e:
             await u.takeover(page, reason="x", alerts="required")
+    assert isinstance(e.value, ValueError)  # it was a plain ValueError before: except ValueError still catches it
     await page.close()
+
+
+def test_relay_must_be_wss_except_to_localhost():
+    for bad in ["ws://relay.example.com", "http://relay.example.com", "relay.example.com", "wss//nope", "ws://[::1"]:
+        with pytest.raises(UnstuckConfigError, match=r"^relay must be a wss:// URL \(ws:// only to localhost, 127\.0\.0\.1 or \[::1\]\)$"):
+            Unstuck(relay=bad)
+    for good in [None, "", "wss://relay.example.com", "ws://localhost:8787", "ws://127.0.0.1:1", "ws://[::1]:2"]:
+        Unstuck(relay=good)
 
 
 async def test_other_engine_errors_are_raised_as_they_are(browser, tmp_path):

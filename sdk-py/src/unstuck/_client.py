@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from ._attach import AttachedPage, attach_page
 from ._engine import EngineProcess, resolve_engine_path, spawn_engine
-from ._errors import PageClosedError, UnstuckEngineError
+from ._errors import PageClosedError, UnstuckConfigError, UnstuckEngineError
 from ._rpc import RpcCallError
 from ._types import TakeoverLink, TakeoverResult
 
@@ -21,6 +21,23 @@ _PAGE_CLOSED = TakeoverResult(status="failed", session_id="", url="", duration_s
 def _default_on_link(link: TakeoverLink) -> None:
     # Never prints a 6-digit code: require_code needs its own on_link, so the code travels apart from the link.
     print(f"Unstuck: a human is needed ({link.reason}) → {link.url}", file=sys.stderr, flush=True)
+
+
+_LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _check_relay_url(relay: str | None) -> None:
+    """wss:// anywhere, ws:// only to this machine (as the TypeScript SDK checks its ``relay`` option)."""
+    if not relay:
+        return  # unset (an empty string is unset too)
+    try:
+        url = urlparse(relay)
+        host = url.hostname
+    except ValueError:
+        url, host = None, None
+    if url is not None and (url.scheme == "wss" or (url.scheme == "ws" and host in _LOCAL_HOSTS)):
+        return
+    raise UnstuckConfigError("relay must be a wss:// URL (ws:// only to localhost, 127.0.0.1 or [::1])")
 
 
 def _site_of(url: str) -> str | None:
@@ -47,7 +64,9 @@ class Unstuck:
     ) -> None:
         """``relay``/``agent_key`` use a relay instead of the local server (or set UNSTUCK_RELAY_URL /
         UNSTUCK_AGENT_KEY; with only UNSTUCK_API_KEY set, Unstuck Cloud is used). ``require_code`` asks the
-        human for a 6-digit code delivered with the link."""
+        human for a 6-digit code delivered with the link. Raises UnstuckConfigError for a ``relay`` that is not
+        wss:// (ws:// only to localhost)."""
+        _check_relay_url(relay)
         self._engine_path = engine_path
         self._host = host
         self._port = port
@@ -75,7 +94,8 @@ class Unstuck:
         allowed_sites: list[str] | None = None,
         alerts: bool | Literal["required"] | None = None,
     ) -> TakeoverResult:
-        """Returns the outcome; raises only UnstuckEngineError when the engine can't run (and ValueError for misuse).
+        """Returns the outcome; raises only UnstuckEngineError when the engine can't run (and ValueError for misuse:
+        UnstuckConfigError, a ValueError, for inconsistent options).
 
         The human can only navigate the page within its own site (example.com and its subdomains); list any other
         sites the flow needs in ``allowed_sites``, e.g. ``["accounts.google.com"]``.
@@ -83,7 +103,7 @@ class Unstuck:
         With Unstuck Cloud (``UNSTUCK_API_KEY``) the link is also sent to your paired phones; ``alerts=False`` skips that.
         ``alerts="required"`` ends the takeover at once with status ``failed``, detail ``alert_failed``, if Unstuck
         Cloud can't accept the link for at least one paired phone (alerts not allowed for the key, no paired phone, every seal
-        failed, or Cloud refused it); without Unstuck Cloud it raises ValueError.
+        failed, or Cloud refused it); without Unstuck Cloud it raises UnstuckConfigError.
         """
         wants_code = self._require_code if require_code is None else require_code
         if wants_code is None:
@@ -152,7 +172,7 @@ class Unstuck:
                 if e.code == "closed":
                     raise UnstuckEngineError(f"engine exited with code {await engine.wait()}") from None
                 if e.code == "config_error":  # the engine refused the options, e.g. alerts="required" without Unstuck Cloud
-                    raise ValueError(e.message) from None
+                    raise UnstuckConfigError(e.message) from None
                 raise
         finally:
             if notify_close and not answered:

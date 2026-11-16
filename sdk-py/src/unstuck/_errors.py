@@ -9,6 +9,13 @@ class UnstuckEngineError(Exception):
         self.engine_path = engine_path
 
 
+class UnstuckConfigError(ValueError):
+    """The options passed to Unstuck are inconsistent (the TypeScript SDK's UnstuckConfigError).
+
+    A subclass of ValueError, which these errors were before, so ``except ValueError`` keeps catching them.
+    """
+
+
 class PageClosedError(Exception):
     """The page was already closed when Unstuck tried to attach."""
 

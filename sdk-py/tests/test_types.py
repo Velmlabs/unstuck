@@ -1,4 +1,5 @@
-from unstuck import PageClosedError, TakeoverLink, TakeoverResult, UnstuckEngineError, __version__
+import unstuck
+from unstuck import PageClosedError, TakeoverLink, TakeoverResult, UnstuckConfigError, UnstuckEngineError, __version__
 from unstuck._rpc import PROTOCOL_VERSION
 
 
@@ -27,4 +28,6 @@ def test_errors_and_versions():
     assert str(e) == "boom" and e.engine_path == "/x"
     assert UnstuckEngineError("b").engine_path is None
     assert str(PageClosedError()) == "page closed"
+    assert issubclass(UnstuckConfigError, ValueError) and str(UnstuckConfigError("bad")) == "bad"
+    assert "UnstuckConfigError" in unstuck.__all__
     assert PROTOCOL_VERSION == 1 and __version__ == "0.2.6"
