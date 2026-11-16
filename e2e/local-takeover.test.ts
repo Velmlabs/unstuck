@@ -168,7 +168,8 @@ describe('local takeover end to end', () => {
   it('Review Focus 4: the human follows a popup, verifies in it, and lands back on the page', async () => {
     const { page, unstuck, result, link } = await startTakeover({ path: '/popup-opener' });
     const { ctx, human } = await openHuman(link.url);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    // The page's first frame (a blank canvas is already 300 px wide): a tap before it has nothing to land on.
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width === 1280, null, { timeout: 15_000 });
     const opener = await canvasPointFor(human, await centerOf(page, '#open'));
     await human.touchscreen.tap(opener.x, opener.y);
 
@@ -284,6 +285,68 @@ describe('local takeover end to end', () => {
   });
 });
 
+describe('zoom on a phone', () => {
+  const transform = (human: any) => human.evaluate(() => (document.querySelector('canvas') as HTMLCanvasElement).style.transform);
+  /** Two fingers spreading apart around a point (real multi-touch through CDP: Playwright has no pinch). */
+  async function pinchOut(human: any, at: { x: number; y: number }, from: number, to: number, steps = 10) {
+    const s = await human.context().newCDPSession(human);
+    const points = (d: number) => ({ touchPoints: [{ x: at.x - d / 2, y: at.y, id: 1 }, { x: at.x + d / 2, y: at.y, id: 2 }] });
+    await s.send('Input.dispatchTouchEvent', { type: 'touchStart', ...points(from) });
+    for (let i = 1; i <= steps; i++) {
+      await s.send('Input.dispatchTouchEvent', { type: 'touchMove', ...points(from + ((to - from) * i) / steps) });
+      await new Promise((r) => setTimeout(r, 16));
+    }
+    await s.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  }
+
+  it('zoomed in with + (and by pinching), a tap still lands on the right element of the page', async () => {
+    const { page, unstuck, result, link } = await startTakeover();
+    // Where the page really got each click, and on what.
+    await page.evaluate(() => {
+      (window as any).hits = [];
+      document.addEventListener('click', (e) => (window as any).hits.push({ id: (e.target as HTMLElement).id, x: e.clientX, y: e.clientY }), true);
+    });
+    const { ctx, human } = await openHuman(link.url);
+    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width === 1280, null, { timeout: 15_000 });
+    const fitBox = await human.locator('canvas').boundingBox();
+
+    await human.getByRole('button', { name: 'Zoom in' }).tap();
+    await human.getByRole('button', { name: 'Zoom in' }).tap();
+    await expect.poll(() => transform(human), { timeout: 5_000 }).toMatch(/scale\(2\)$/);
+    const zoomedBox = await human.locator('canvas').boundingBox();
+    expect(zoomedBox.width).toBeCloseTo(fitBox.width * 2, 0);
+    // The zoomed canvas box is the same affine map the viewer uses, so the letterbox maths still finds the element.
+    const robot = await centerOf(page, '#robot');
+    const at = await canvasPointFor(human, robot);
+    await human.touchscreen.tap(at.x, at.y);
+    await expect.poll(() => page.evaluate('window.clicks'), { timeout: 10_000 }).toBe(1);
+    const hit = (await page.evaluate('window.hits'))[0];
+    expect(hit.id).toBe('robot');
+    // At 2× on a 390 px phone one CSS px is ~1.6 page px: the click lands within a couple of px of where we aimed.
+    expect(Math.abs(hit.x - robot.x)).toBeLessThan(3);
+    expect(Math.abs(hit.y - robot.y)).toBeLessThan(3);
+
+    // Fit, then pinch out around the button: zoomed, and nothing reached the page.
+    await human.getByRole('button', { name: 'Fit page to screen' }).tap();
+    await expect.poll(() => transform(human), { timeout: 5_000 }).toBe('');
+    const atFit = await canvasPointFor(human, robot);
+    await pinchOut(human, atFit, 60, 240);
+    await expect.poll(() => transform(human), { timeout: 5_000 }).toMatch(/scale\(([2-4](\.\d+)?)\)$/);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(await page.evaluate('window.hits.length')).toBe(1);
+    const again = await canvasPointFor(human, robot);
+    await human.touchscreen.tap(again.x, again.y);
+    await expect.poll(() => page.evaluate('window.clicks'), { timeout: 10_000 }).toBe(2);
+    expect((await page.evaluate('window.hits'))[1].id).toBe('robot');
+
+    await human.getByRole('button', { name: 'Done' }).tap();
+    await expect(result).resolves.toMatchObject({ status: 'resolved' });
+    await unstuck.close();
+    await ctx.close();
+    await page.close();
+  }, 90_000);
+});
+
 /** A finger dragging across the human's screen, with a slightly wobbly, human-like path. */
 async function fingerDrag(human: any, from: { x: number; y: number }, to: { x: number; y: number }, steps = 24) {
   const s = await human.context().newCDPSession(human);
@@ -352,11 +415,12 @@ describe('native typing on a simulated phone', () => {
   /** Taps an agent-page element on the phone until the bridge has focus (the field map arrives with the first frames). */
   async function tapToType(human: any, page: any, selector: string) {
     const at = await canvasPointFor(human, await centerOf(page, selector));
+    // Retried taps are spaced like a person's: two taps within 300 ms at one spot are a double tap (zoom).
     await expect
       .poll(async () => {
         await human.touchscreen.tap(at.x, at.y);
         return (await bridgeState(human)).focused;
-      }, { timeout: 15_000 })
+      }, { timeout: 15_000, interval: 400 })
       .toBe(true);
     return at;
   }

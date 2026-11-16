@@ -52,8 +52,13 @@ function goLive() {
     handlers.onFrame({ width: 1280, height: 720, jpeg: new Uint8Array([1]) });
   });
   const canvas = screen.getByTestId('screen') as HTMLCanvasElement;
-  canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0, toJSON: () => ({}) });
+  setBox(canvas, 0, 0, 640, 360);
   return canvas;
+}
+/** The mirror's untransformed box (the viewport around the canvas, which the zoom transform never moves). */
+function setBox(canvas: Element, left: number, top: number, width: number, height: number) {
+  const viewport = canvas.parentElement!;
+  viewport.getBoundingClientRect = () => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) });
 }
 
 beforeEach(() => {
@@ -292,7 +297,7 @@ describe('App', () => {
     pointer(canvas, 'pointerdown', { clientX: 10, clientY: 10, button: 0 });
     expect(sent).toEqual([]);
     const c = goLive();
-    c.getBoundingClientRect = () => ({ left: 0, top: 0, width: 390, height: 844, right: 390, bottom: 844, x: 0, y: 0, toJSON: () => ({}) });
+    setBox(c, 0, 0, 390, 844);
     pointer(c, 'pointerdown', { clientX: 100, clientY: 20, button: 0 });
     expect(sent).toEqual([]);
   });
@@ -313,7 +318,7 @@ describe('App', () => {
   it('suppresses the context menu on the canvas', () => {
     setup();
     const canvas = goLive();
-    const e = new MouseEvent('contextmenu', { cancelable: true });
+    const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true });
     act(() => void canvas.dispatchEvent(e));
     expect(e.defaultPrevented).toBe(true);
   });
@@ -321,7 +326,7 @@ describe('App', () => {
   it('sends wheel events', () => {
     setup();
     const canvas = goLive();
-    act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { clientX: 320, clientY: 180, deltaX: 0, deltaY: 120, cancelable: true })));
+    act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, clientX: 320, clientY: 180, deltaX: 0, deltaY: 120, cancelable: true })));
     expect(sent).toEqual([{ t: 'wheel', x: 640, y: 360, dx: 0, dy: 120 }]);
   });
 
@@ -498,7 +503,7 @@ describe('App', () => {
     setup();
     const canvas = goLive();
     pointer(canvas, 'pointerdown', { clientX: 320, clientY: 180, button: 0 });
-    act(() => void canvas.dispatchEvent(new MouseEvent('pointercancel', { clientX: 320, clientY: 180 })));
+    act(() => void canvas.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true, clientX: 320, clientY: 180 })));
     expect(sent.at(-1)).toMatchObject({ t: 'mouse', action: 'up', x: 640, y: 360, button: 'left' });
   });
 
@@ -506,7 +511,7 @@ describe('App', () => {
     setup();
     const canvas = goLive();
     pointer(canvas, 'pointerup', { clientX: 700, clientY: 180, button: 0 });
-    act(() => void canvas.dispatchEvent(new MouseEvent('pointercancel', { clientX: 1, clientY: 1 })));
+    act(() => void canvas.dispatchEvent(new MouseEvent('pointercancel', { bubbles: true, clientX: 1, clientY: 1 })));
     expect(sent).toEqual([]);
   });
 
@@ -688,12 +693,12 @@ describe('incomplete links and the six-digit code', () => {
         act(() => handlers.onFocus?.('otp', otp));
         expect(boxOf(ring()!)).toEqual(['100px', '150px', '200px', '40px']);
         // The keyboard hides: the page grows and the mirror is centred 58 px lower in its area.
-        canvas.getBoundingClientRect = () => ({ left: 0, top: 58, width: 640, height: 360, right: 640, bottom: 418, x: 0, y: 58, toJSON: () => ({}) });
+        setBox(canvas, 0, 58, 640, 360);
         act(() => observers.forEach((cb) => cb([])));
         expect(boxOf(ring()!)).toEqual(['100px', '208px', '200px', '40px']);
         expect(boxOf(bridge)!.slice(0, 2)).toEqual(['100px', '208px']);
         // The same after a window resize, for browsers without ResizeObserver callbacks on that change.
-        canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360, right: 640, bottom: 360, x: 0, y: 0, toJSON: () => ({}) });
+        setBox(canvas, 0, 0, 640, 360);
         act(() => void window.dispatchEvent(new Event('resize')));
         expect(boxOf(ring()!)).toEqual(['100px', '150px', '200px', '40px']);
       } finally {
@@ -770,7 +775,7 @@ describe('incomplete links and the six-digit code', () => {
         tap(canvas, 150, 170);
         vv.height = 220;
         fire();
-        const stage = canvas.parentElement as HTMLElement;
+        const stage = canvas.closest('.stage') as HTMLElement;
         const first = Number(/-(\d+)px/.exec(stage.style.transform)?.[1] ?? 0);
         tap(canvas, 150, 270); // the lower text field: no resize event this time
         const second = Number(/-(\d+)px/.exec(stage.style.transform)?.[1] ?? 0);
@@ -785,7 +790,7 @@ describe('incomplete links and the six-digit code', () => {
       try {
         const { canvas, bridge } = live();
         tap(canvas, 150, 170);
-        const stage = canvas.parentElement as HTMLElement;
+        const stage = canvas.closest('.stage') as HTMLElement;
         vv.height = 120;
         act(() => listeners.resize?.());
         expect(stage.style.transform).toMatch(/^translateY\(-\d+px\)$/);
@@ -876,5 +881,338 @@ describe('sealed alert links', () => {
     const p = container.querySelector('.from')!;
     expect(p.textContent).toBe('From your key ' + ('<b>' + 'x'.repeat(100)).slice(0, 64) + ' · ab.com');
     expect(container.querySelector('.from b')).toBeNull();
+  });
+});
+
+describe('zoom', () => {
+  /** A finger (pointerType touch) on the mirror; jsdom has no PointerEvent, so the fields are set on a MouseEvent. */
+  function finger(el: Element, type: 'pointerdown' | 'pointerup' | 'pointermove' | 'pointercancel', id: number, x: number, y: number) {
+    const ev = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0, buttons: type === 'pointerup' ? 0 : 1 });
+    Object.defineProperty(ev, 'pointerType', { value: 'touch' });
+    Object.defineProperty(ev, 'pointerId', { value: id });
+    act(() => void el.dispatchEvent(ev));
+  }
+  const fingerTap = (el: Element, x: number, y: number, id = 1) => {
+    finger(el, 'pointerdown', id, x, y);
+    finger(el, 'pointerup', id, x, y);
+  };
+  let clock = 0;
+  beforeEach(() => {
+    clock = 1000;
+    vi.spyOn(performance, 'now').mockImplementation(() => clock);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+  const btn = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
+  const scaleOf = (c: HTMLCanvasElement) => Number(/scale\(([\d.]+)\)/.exec(c.style.transform)?.[1] ?? 1);
+  const mice = () => sent.filter((m) => (m as { t: string }).t === 'mouse') as { action: string; x: number; y: number }[];
+
+  it('has labelled zoom in, zoom out and fit buttons next to the scroll buttons; fit resets', () => {
+    setup();
+    const canvas = goLive();
+    const group = screen.getByRole('group', { name: 'Zoom' });
+    expect(group.closest('.stage')).toBeTruthy();
+    expect(btn('Zoom out').disabled).toBe(true);
+    expect(btn('Fit page to screen').disabled).toBe(true);
+    fireEvent.click(btn('Zoom in'));
+    expect(scaleOf(canvas)).toBeCloseTo(Math.SQRT2, 3);
+    expect(canvas.style.transform).toMatch(/^translate\(/);
+    fireEvent.click(btn('Zoom in'));
+    expect(scaleOf(canvas)).toBe(2);
+    expect(btn('Zoom out').disabled).toBe(false);
+    fireEvent.click(btn('Zoom out'));
+    expect(scaleOf(canvas)).toBeCloseTo(Math.SQRT2, 3);
+    fireEvent.click(btn('Fit page to screen'));
+    expect(canvas.style.transform).toBe('');
+    expect(btn('Fit page to screen').disabled).toBe(true);
+    for (let i = 0; i < 6; i++) fireEvent.click(btn('Zoom in'));
+    expect(scaleOf(canvas)).toBe(4);
+    expect(btn('Zoom in').disabled).toBe(true);
+    expect(sent).toEqual([]); // zooming is the phone's own business: nothing reaches the page
+  });
+
+  it('the zoom buttons do nothing before the first frame and never take focus from the keyboard', () => {
+    setup();
+    act(() => handlers.onPhase('live'));
+    fireEvent.click(btn('Zoom in'));
+    expect((screen.getByTestId('screen') as HTMLCanvasElement).style.transform).toBe('');
+    const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    btn('Zoom in').dispatchEvent(down);
+    expect(down.defaultPrevented).toBe(true);
+  });
+
+  it('a tap while zoomed sends the page point under the finger', () => {
+    setup();
+    const canvas = goLive();
+    fireEvent.click(btn('Zoom in'));
+    fireEvent.click(btn('Zoom in')); // 2× around the centre: 1 CSS px = 1 page px, page (320,180) at the top-left
+    pointer(canvas, 'pointerdown', { clientX: 0, clientY: 0, button: 0 });
+    pointer(canvas, 'pointerup', { clientX: 0, clientY: 0, button: 0 });
+    fingerTap(canvas, 100, 50);
+    expect(mice().map((m) => [m.action, m.x, m.y])).toEqual([
+      ['down', 320, 180],
+      ['up', 320, 180],
+      ['down', 420, 230],
+      ['up', 420, 230],
+    ]);
+  });
+
+  it('a finger tap is sent on release, as a press and a release, with the keyboard flow unchanged', () => {
+    setup();
+    const canvas = goLive();
+    finger(canvas, 'pointerdown', 1, 320, 180);
+    expect(mice()).toEqual([]); // could still become a pinch
+    finger(canvas, 'pointerup', 1, 322, 181);
+    expect(mice().map((m) => [m.action, m.x, m.y])).toEqual([
+      ['down', 640, 360],
+      ['up', 644, 362],
+    ]);
+  });
+
+  it('a finger drag becomes a page drag once it moves past the tap slop, from where it started', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    setup();
+    const canvas = goLive();
+    finger(canvas, 'pointerdown', 1, 100, 100);
+    finger(canvas, 'pointermove', 1, 104, 100); // within the slop: nothing yet
+    expect(mice()).toEqual([]);
+    finger(canvas, 'pointermove', 1, 130, 100);
+    act(() => void vi.advanceTimersByTime(20));
+    finger(canvas, 'pointermove', 1, 160, 100);
+    finger(canvas, 'pointerup', 1, 160, 100);
+    expect(mice().map((m) => [m.action, m.x, m.y])).toEqual([
+      ['down', 200, 200],
+      ['move', 260, 200],
+      ['move', 320, 200],
+      ['up', 320, 200],
+    ]);
+  });
+
+  it('a finger held still is pressed after a moment (press-and-hold challenges), and a tap in the letterbox sends nothing', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    setup();
+    const canvas = goLive();
+    finger(canvas, 'pointerdown', 1, 100, 100);
+    act(() => void vi.advanceTimersByTime(300));
+    expect(mice().map((m) => m.action)).toEqual(['down']);
+    finger(canvas, 'pointerup', 1, 100, 100);
+    expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
+    setBox(canvas, 0, 0, 640, 720); // letterboxed: the page sits between y 180 and 540
+    fingerTap(canvas, 100, 20);
+    finger(canvas, 'pointerdown', 1, 100, 20);
+    act(() => void vi.advanceTimersByTime(300));
+    finger(canvas, 'pointermove', 1, 100, 80);
+    finger(canvas, 'pointerup', 1, 100, 80);
+    expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
+  });
+
+  it('a double tap zooms in 2× around the finger without a second click; another double tap fits again', () => {
+    setup();
+    const canvas = goLive();
+    fingerTap(canvas, 160, 90);
+    expect(mice().map((m) => m.action)).toEqual(['down', 'up']); // the first tap is a click, as always
+    clock += 200;
+    fingerTap(canvas, 165, 92);
+    expect(mice().map((m) => m.action)).toEqual(['down', 'up']); // the second is not
+    expect(scaleOf(canvas)).toBe(2);
+    // The page point under the finger stayed under it.
+    clock += 1000;
+    fingerTap(canvas, 165, 92);
+    expect(mice().slice(-1)[0]).toMatchObject({ x: 330, y: 184 });
+    clock += 200;
+    fingerTap(canvas, 165, 92);
+    expect(canvas.style.transform).toBe('');
+    expect(mice()).toHaveLength(4);
+  });
+
+  it('two taps far apart in time or space are two clicks; so are two taps on a text field (caret, word select)', () => {
+    setup();
+    const canvas = goLive();
+    act(() => handlers.onFields?.([{ x: 200, y: 300, w: 400, h: 80, kind: 'text' }]));
+    fingerTap(canvas, 20, 20);
+    clock += 400;
+    fingerTap(canvas, 20, 20);
+    clock += 100;
+    fingerTap(canvas, 80, 20);
+    clock += 100;
+    fingerTap(canvas, 150, 170); // the field: opens the keyboard
+    clock += 100;
+    fingerTap(canvas, 150, 170);
+    expect(mice()).toHaveLength(10);
+    // The field map can arrive between two quick taps: a second tap that lands on a field is a click too.
+    act(() => handlers.onFields?.([]));
+    clock += 400;
+    fingerTap(canvas, 400, 300);
+    act(() => handlers.onFields?.([{ x: 700, y: 500, w: 400, h: 200, kind: 'text' }]));
+    clock += 100;
+    fingerTap(canvas, 400, 300);
+    expect(mice()).toHaveLength(14);
+    expect(canvas.style.transform).toBe('');
+    expect(document.activeElement).toBe(screen.getByTestId('keyboard-bridge'));
+  });
+
+  it('a pinch zooms around its centre, sends nothing to the page, and two fingers moving together pan', () => {
+    setup();
+    const canvas = goLive();
+    finger(canvas, 'pointerdown', 1, 220, 180);
+    finger(canvas, 'pointerdown', 2, 420, 180);
+    finger(canvas, 'pointermove', 1, 120, 180);
+    finger(canvas, 'pointermove', 2, 520, 180); // spread 200 → 400 around (320,180)
+    expect(scaleOf(canvas)).toBe(2);
+    finger(canvas, 'pointermove', 3, 0, 0); // a third finger that never went down is ignored
+    finger(canvas, 'pointerup', 1, 120, 180);
+    finger(canvas, 'pointermove', 2, 300, 300); // one finger left after a pinch: nothing until it lifts
+    finger(canvas, 'pointerup', 2, 300, 300);
+    expect(sent).toEqual([]);
+    fingerTap(canvas, 320, 180);
+    expect(mice().map((m) => [m.action, m.x, m.y])).toEqual([
+      ['down', 640, 360],
+      ['up', 640, 360],
+    ]);
+    // Pan: both fingers 40 px left at the same spread.
+    clock += 1000;
+    finger(canvas, 'pointerdown', 1, 220, 180);
+    finger(canvas, 'pointerdown', 2, 420, 180);
+    finger(canvas, 'pointermove', 1, 180, 180);
+    finger(canvas, 'pointermove', 2, 380, 180);
+    finger(canvas, 'pointercancel', 1, 180, 180);
+    finger(canvas, 'pointercancel', 2, 380, 180);
+    clock += 1000;
+    fingerTap(canvas, 280, 180);
+    expect(mice().slice(-1)[0]).toMatchObject({ x: 640, y: 360 });
+  });
+
+  it('a finger lifted after the session stopped being live sends nothing', () => {
+    setup();
+    const canvas = goLive();
+    finger(canvas, 'pointerdown', 1, 100, 100);
+    act(() => handlers.onPhase('reconnecting'));
+    finger(canvas, 'pointerup', 1, 100, 100);
+    pointer(canvas, 'pointerup', { clientX: 100, clientY: 100, button: 0 });
+    expect(sent).toEqual([]);
+  });
+
+  it('a second finger after a press has started ends that press first', () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    setup();
+    const canvas = goLive();
+    finger(canvas, 'pointerdown', 1, 100, 100);
+    act(() => void vi.advanceTimersByTime(300));
+    finger(canvas, 'pointerdown', 2, 300, 100);
+    expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
+    finger(canvas, 'pointermove', 2, 400, 100);
+    expect(scaleOf(canvas)).toBeCloseTo(1.5);
+    finger(canvas, 'pointerup', 1, 100, 100);
+    finger(canvas, 'pointerup', 2, 400, 100);
+    expect(mice()).toHaveLength(2);
+    // A cancelled single finger sends nothing.
+    finger(canvas, 'pointerdown', 1, 100, 100);
+    finger(canvas, 'pointercancel', 1, 100, 100);
+    expect(mice()).toHaveLength(2);
+  });
+
+  it('places the keyboard bridge and the outline over a field while zoomed, and follows the zoom', () => {
+    setup();
+    const canvas = goLive();
+    const field = { x: 500, y: 300, w: 200, h: 60, kind: 'email' as const };
+    act(() => handlers.onFields?.([field]));
+    fireEvent.click(btn('Zoom in'));
+    fireEvent.click(btn('Zoom in')); // 2×: page (320,180) at the top-left, 1 CSS px per page px → field at 180,120
+    fingerTap(canvas, 200, 140);
+    const bridge = screen.getByTestId('keyboard-bridge') as HTMLInputElement;
+    expect(document.activeElement).toBe(bridge);
+    expect([bridge.style.left, bridge.style.top, bridge.style.width, bridge.style.height]).toEqual(['180px', '120px', '200px', '60px']);
+    const ring = screen.getByTestId('focus-ring') as HTMLElement;
+    expect([ring.style.left, ring.style.top]).toEqual(['180px', '120px']);
+    fireEvent.click(btn('Fit page to screen'));
+    expect([bridge.style.left, bridge.style.top, bridge.style.width, bridge.style.height]).toEqual(['250px', '150px', '100px', '32px']);
+    expect(document.activeElement).toBe(bridge);
+  });
+
+  it('the scroll buttons scroll the part of the page on screen, by a share of what is visible', () => {
+    setup();
+    const canvas = goLive();
+    fireEvent.click(btn('Zoom in'));
+    fireEvent.click(btn('Zoom in'));
+    expect(scaleOf(canvas)).toBe(2);
+    fireEvent.click(btn('Scroll down'));
+    expect(sent).toEqual([{ t: 'wheel', x: 640, y: 360, dx: 0, dy: 216 }]);
+  });
+
+  it('resets to fit on a very different page size, keeps the zoom on normal frames', () => {
+    setup();
+    const canvas = goLive();
+    fireEvent.click(btn('Zoom in'));
+    fireEvent.click(btn('Zoom in'));
+    act(() => handlers.onFrame({ width: 1280, height: 720, jpeg: new Uint8Array([1]) }));
+    expect(scaleOf(canvas)).toBe(2);
+    act(() => handlers.onFrame({ width: 1265, height: 720, jpeg: new Uint8Array([1]) })); // a scrollbar appeared
+    expect(scaleOf(canvas)).toBe(2);
+    act(() => handlers.onFrame({ width: 500, height: 600, jpeg: new Uint8Array([1]) })); // a popup
+    expect(canvas.style.transform).toBe('');
+    expect(btn('Fit page to screen').disabled).toBe(true);
+    // A tap that opens a popup, then a quick tap at the same spot in the popup: two clicks, not a double tap.
+    fingerTap(canvas, 320, 180);
+    act(() => handlers.onFrame({ width: 1280, height: 720, jpeg: new Uint8Array([1]) }));
+    clock += 100;
+    fingerTap(canvas, 320, 180);
+    expect(mice()).toHaveLength(4);
+    expect(canvas.style.transform).toBe('');
+  });
+
+  it('keeps the zoom in range when the mirror resizes (a phone rotates)', () => {
+    setup();
+    const canvas = goLive();
+    fireEvent.click(btn('Zoom in'));
+    fireEvent.click(btn('Zoom in'));
+    expect(canvas.style.transform).toBe('translate(-320px, -180px) scale(2)');
+    setBox(canvas, 0, 0, 160, 90);
+    act(() => void window.dispatchEvent(new Event('resize')));
+    // The pan from the bigger box would show black beyond the page's right and bottom edges: pulled back.
+    expect(canvas.style.transform).toBe('translate(-160px, -90px) scale(2)');
+  });
+
+  it('ctrl + wheel (a trackpad pinch on a computer) zooms; a plain wheel still scrolls the page at the zoomed point', () => {
+    setup();
+    const canvas = goLive();
+    act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 320, clientY: 180, deltaY: -100, ctrlKey: true })));
+    expect(scaleOf(canvas)).toBeCloseTo(Math.E, 2);
+    expect(sent).toEqual([]);
+    act(() => void canvas.dispatchEvent(new WheelEvent('wheel', { bubbles: true, cancelable: true, clientX: 320, clientY: 180, deltaY: 50 })));
+    expect(sent).toEqual([{ t: 'wheel', x: 640, y: 360, dx: 0, dy: 50 }]);
+  });
+
+  it('animates button and double-tap zooms unless the person prefers reduced motion', () => {
+    const frames: FrameRequestCallback[] = [];
+    vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => frames.push(cb));
+    vi.stubGlobal('cancelAnimationFrame', () => void frames.splice(0));
+    let reduce = false;
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('reduce') && reduce }));
+    setup();
+    const canvas = goLive();
+    fireEvent.click(btn('Zoom in'));
+    fireEvent.click(btn('Zoom in')); // a second press while animating builds on where the first is going
+    expect(canvas.style.transform).toBe('');
+    clock += 90;
+    act(() => frames.shift()!(clock));
+    const mid = scaleOf(canvas);
+    expect(mid).toBeGreaterThan(1);
+    expect(mid).toBeLessThan(2);
+    clock += 200;
+    act(() => frames.shift()!(clock));
+    expect(scaleOf(canvas)).toBe(2);
+    expect(frames).toHaveLength(0);
+    // A finger landing mid-animation stops it where it is.
+    fireEvent.click(btn('Fit page to screen'));
+    finger(canvas, 'pointerdown', 1, 10, 10);
+    finger(canvas, 'pointercancel', 1, 10, 10);
+    expect(frames).toHaveLength(0);
+    expect(scaleOf(canvas)).toBe(2);
+    reduce = true;
+    fireEvent.click(btn('Fit page to screen'));
+    expect(canvas.style.transform).toBe('');
   });
 });

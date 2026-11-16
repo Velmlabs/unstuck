@@ -6,7 +6,7 @@ import { drawFrameOnCanvas } from './draw';
 import { attachBridge, configureBridge } from './bridge';
 import { bridgeBox, fieldBox, hitField, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
-import { clampToPage, toPagePoint } from './mapping';
+import { FIT_VIEW, MAX_ZOOM, clampToPage, clampView, isFit, pinchView, sizeChangedALot, toPagePoint, viewTransform, visiblePageRect, zoomAt, type Pinch, type Point, type Rect, type View } from './mapping';
 import { forgetFragment, parseFragment, relayFor, sessionIdFromPath } from './url';
 import { cleanLabel, type Sender } from './alert-link';
 
@@ -109,6 +109,34 @@ const FIRST_FRAME_HINT_MS = 10_000;
 /** A press that moves less than this (CSS px) before release is a tap, not a drag. */
 const TAP_SLOP_PX = 10;
 
+/*
+ * Touch gestures on the mirror (a mouse or pen is sent as it comes, press on press):
+ * - One finger is held back until it means something: a release within TAP_SLOP_PX is a tap (press and release sent
+ *   together, so the first tap of a double tap is a click as always); moving past the slop is a drag (the press is
+ *   sent where the finger landed, then the moves); staying down HOLD_MS is a press-and-hold (the press is sent then).
+ *   Until then a second finger can still turn it into a pinch without the page ever seeing a click.
+ * - Two fingers pinch to zoom around their midpoint and pan as the midpoint moves. A second finger after a press was
+ *   sent ends that press (a release where the first finger is) before the pinch starts. Nothing reaches the page;
+ *   a finger left over after a pinch does nothing until it lifts.
+ * - A double tap (a second tap within DOUBLE_TAP_MS of the first tap's release and DOUBLE_TAP_PX of it) zooms 2× around
+ *   it, or back to fit when zoomed, instead of clicking a second time. Not after a tap on a mapped text field: a second
+ *   tap there is a click (moving the caret, selecting a word).
+ */
+const HOLD_MS = 250;
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_PX = 24;
+/** Zoom buttons step by √2 (fit, 1.4×, 2×, 2.8×, 4×); a double tap zooms 2×. */
+const DOUBLE_TAP_ZOOM = 2;
+const ZOOM_ANIM_MS = 180;
+const reducedMotion = () =>
+  typeof window.matchMedia !== 'function' || typeof requestAnimationFrame !== 'function' || window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/** The next zoom button step from `scale`, on the √2 ladder (a pinch can leave the zoom between steps). */
+const zoomStep = (scale: number, dir: 1 | -1) => {
+  const level = Math.log2(scale) * 2;
+  return 2 ** ((dir > 0 ? Math.floor(level + 1e-6) + 1 : Math.ceil(level - 1e-6) - 1) / 2);
+};
+const pinchOf = (a: Point, b: Point): Pinch => ({ mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, dist: Math.hypot(a.x - b.x, a.y - b.y) });
+
 /** "From your key <name> · <site>", both as plain text without control, zero-width or bidi characters. */
 function fromLine(keyName: string, sealedSite: string): string {
   const site = cleanLabel(sealedSite, 253);
@@ -162,6 +190,16 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const ringField = useRef<Field | null>(null);
   const sockRef = useRef<ViewerSocket | null>(null);
   const pageSize = useRef({ width: 0, height: 0 });
+  /** Zoom and pan of the mirror (see mapping.ts); the viewport is the untransformed box the canvas is zoomed in. */
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const viewRef = useRef<View>(FIT_VIEW);
+  const [zoomed, setZoomed] = useState<'fit' | 'zoomed' | 'max'>('fit');
+  const anim = useRef<{ id: number; target: View } | null>(null);
+  /** Touch pointers down on the mirror, a finger held back (see the gesture rules above), a pinch, the last tap. */
+  const touches = useRef(new Map<number, Point>());
+  const held = useRef<{ id: number; x: number; y: number; p: Point | null; doubleTap: boolean; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const pinch = useRef<{ ids: [number, number]; from: Pinch; start: View } | null>(null);
+  const lastTap = useRef<{ x: number; y: number; at: number } | null>(null);
   /** Nothing drawn yet: the black area says it is waiting for the page, not broken. */
   const [framed, setFramed] = useState(false);
   const framedRef = useRef(false);
@@ -205,7 +243,16 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         setInfo({ reason: r.reason, site: r.site, expiresAt: r.expiresAt });
       },
       onFrame: (f) => {
+        const before = pageSize.current;
         pageSize.current = { width: f.width, height: f.height };
+        // Another page or a popup: back to fit. The same page a little different (a scrollbar): keep the zoom, in range.
+        if (before.width !== f.width || before.height !== f.height) {
+          if (sizeChangedALot(before, pageSize.current)) {
+            setView(FIT_VIEW);
+            lastTap.current = null; // a tap on another page is not the second half of a double tap
+          }
+          else if (!isFit(viewRef.current) && viewportRef.current) setView(clampView(viewRef.current, mirrorBox(), pageSize.current));
+        }
         // Frame credit: the engine sends the next frame once this one is on screen (a slow phone never builds a backlog).
         const drawn = (d: Frame) => sockRef.current?.ack(d);
         if (canvasRef.current) drawFrame(canvasRef.current, f, drawn);
@@ -324,13 +371,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   };
   /** Where a field (or, for null, the mirror's bottom strip) sits over the mirror, in CSS px of the stage. */
   const canvasRect = () => {
-    const cr = canvasRef.current!.getBoundingClientRect();
+    const cr = viewportRef.current!.getBoundingClientRect();
     const sr = stageRef.current!.getBoundingClientRect();
     return { left: cr.left - sr.left, top: cr.top - sr.top, width: cr.width, height: cr.height };
   };
-  const boxOver = (field: Field | null): Box => bridgeBox(field, canvasRect(), pageSize.current);
+  const boxOver = (field: Field | null): Box => bridgeBox(field, canvasRect(), pageSize.current, viewRef.current);
   /** The outline: the field's exact box, with no minimum size. */
-  const ringOver = (field: Field): Box => fieldBox(field, canvasRect(), pageSize.current);
+  const ringOver = (field: Field): Box => fieldBox(field, canvasRect(), pageSize.current, viewRef.current);
   /** Moves the outline and the typing box over the field the page now focuses, keeping the keyboard open. */
   const placeOver = (field: Field) => {
     const el = bridgeRef.current;
@@ -359,26 +406,69 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     if (stageRef.current) stageRef.current.style.transform = '';
   };
 
-  const point = (e: { clientX: number; clientY: number }) => {
-    const c = canvasRef.current;
-    return c ? toPagePoint({ x: e.clientX, y: e.clientY }, c.getBoundingClientRect(), pageSize.current) : null;
+  /** The mirror's untransformed box in client px: every client↔page conversion is relative to it (mapping.ts). */
+  const mirrorBox = (): Rect => {
+    const r = viewportRef.current!.getBoundingClientRect();
+    return { left: r.left, top: r.top, width: r.width, height: r.height };
+  };
+  const point = (e: { clientX: number; clientY: number }) =>
+    viewportRef.current ? toPagePoint({ x: e.clientX, y: e.clientY }, mirrorBox(), pageSize.current, viewRef.current) : null;
+
+  /** Shows the mirror at a zoom and pan, and keeps the outline and the typing box over their field. */
+  const setView = (v: View) => {
+    viewRef.current = v;
+    if (canvasRef.current) canvasRef.current.style.transform = viewTransform(v);
+    setZoomed(isFit(v) ? 'fit' : v.scale >= MAX_ZOOM ? 'max' : 'zoomed');
+    const field = ringField.current;
+    if (field && canvasRef.current && stageRef.current) placeOver(field);
+  };
+  const stopZoomAnimation = () => {
+    if (!anim.current) return;
+    cancelAnimationFrame(anim.current.id);
+    anim.current = null;
+  };
+  /**
+   * Zooms to a view: eased over ZOOM_ANIM_MS, or at once for people who prefer reduced motion. Each animation frame
+   * sets the real view, so a tap mid-animation still maps to what is on screen.
+   */
+  const animateTo = (target: View) => {
+    stopZoomAnimation();
+    if (reducedMotion()) return setView(target);
+    const from = viewRef.current;
+    const t0 = performance.now();
+    const step = () => {
+      const t = Math.min(1, (performance.now() - t0) / ZOOM_ANIM_MS);
+      const e = 1 - (1 - t) ** 3;
+      const mix = (a: number, b: number) => a + (b - a) * e;
+      // Scale and pan move together linearly in e, so the zoom's focal point stays put all the way.
+      setView(t >= 1 ? target : { scale: mix(from.scale, target.scale), x: mix(from.x, target.x), y: mix(from.y, target.y) });
+      anim.current = t >= 1 ? null : { id: requestAnimationFrame(step), target };
+    };
+    anim.current = { id: requestAnimationFrame(step), target };
+  };
+  /** Zooms to `scale` around a client point (the mirror's centre by default). */
+  const zoomTo = (scale: number, focal?: Point) => {
+    const page = pageSize.current;
+    if (!live || page.width === 0 || !viewportRef.current) return;
+    const box = mirrorBox();
+    const from = anim.current?.target ?? viewRef.current; // a second press mid-animation builds on where it is going
+    animateTo(zoomAt(from, focal ?? { x: box.left + box.width / 2, y: box.top + box.height / 2 }, scale, box, page));
+  };
+  const zoomButton = (dir: 1 | -1) => zoomTo(zoomStep((anim.current?.target ?? viewRef.current).scale, dir));
+  /** A double tap: 2× around the finger, or back to fit when zoomed. */
+  const toggleZoomAt = (at: Point) => (isFit(viewRef.current) ? zoomTo(DOUBLE_TAP_ZOOM, at) : animateTo(FIT_VIEW));
+
+  /** Sends a press at page point `p`; `at` (client px) is where it started, for telling a tap from a drag. */
+  const press = (at: Point, p: Point, button: 'left' | 'middle' | 'right', modifiers: number) => {
+    pressed.current = button;
+    tapRef.current = { x: at.x, y: at.y, field: hitField(fieldsRef.current, p) };
+    send({ t: 'mouse', action: 'down', ...p, button, clickCount: 1, modifiers });
   };
 
-  const onPointer = (action: 'down' | 'up') => (e: PointerEvent) => {
-    if (!live) return;
-    if (action === 'down') {
-      const p = point(e);
-      if (!p) return;
-      e.preventDefault();
-      (e.target as Element).setPointerCapture?.(e.pointerId);
-      pressed.current = BUTTONS[e.button] ?? 'left';
-      tapRef.current = { x: e.clientX, y: e.clientY, field: hitField(fieldsRef.current, p) };
-      send({ t: 'mouse', action, ...p, button: pressed.current, clickCount: 1, modifiers: modifiersOf(e) });
-      return;
-    }
+  /** A release; then, for a tap (not a drag), the keyboard for the field under it, or closing it elsewhere. */
+  const endPress = (e: PointerEvent) => {
     release(e);
-    // A tap (not a drag): open the right keyboard for the field under it, or close it elsewhere. Focusing on release
-    // is what iOS honours most reliably, and a drag that starts on a field doesn't open the keyboard.
+    // Focusing on release is what iOS honours most reliably, and a drag that starts on a field doesn't open the keyboard.
     const tap = tapRef.current;
     tapRef.current = null;
     if (!tap || Math.hypot(e.clientX - tap.x, e.clientY - tap.y) >= TAP_SLOP_PX) return;
@@ -389,30 +479,125 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   };
 
   /** Always pair a press with a release, even if the pointer ended in the letterbox or was cancelled. */
-  const release = (e: PointerEvent) => {
+  const release = (e: { clientX: number; clientY: number }, modifiers = modifiersOf(e as PointerEvent)) => {
     const button = pressed.current;
-    const c = canvasRef.current;
-    if (!button || !c) return;
-    const p = clampToPage({ x: e.clientX, y: e.clientY }, c.getBoundingClientRect(), pageSize.current);
+    if (!button || !viewportRef.current) return;
+    const p = clampToPage({ x: e.clientX, y: e.clientY }, mirrorBox(), pageSize.current, viewRef.current);
     if (!p) return;
     pressed.current = null;
+    (e as Partial<PointerEvent>).preventDefault?.();
+    send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers });
+  };
+
+  /** A held-back finger becomes a press (it moved past the slop, or stayed down): sent where it landed. */
+  const commitHeld = () => {
+    const h = held.current;
+    if (!h) return;
+    clearTimeout(h.timer);
+    held.current = null;
+    if (h.p) press(h, h.p, 'left', 0);
+  };
+  const dropHeld = () => {
+    if (held.current) clearTimeout(held.current.timer);
+    held.current = null;
+  };
+
+  const onPointerDown = (e: PointerEvent) => {
+    if (!live) return;
+    if (e.pointerType !== 'touch') {
+      const p = point(e);
+      if (!p) return;
+      e.preventDefault();
+      (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+      return press({ x: e.clientX, y: e.clientY }, p, BUTTONS[e.button] ?? 'left', modifiersOf(e));
+    }
     e.preventDefault();
-    send({ t: 'mouse', action: 'up', ...p, button, clickCount: 1, modifiers: modifiersOf(e) });
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+    stopZoomAnimation(); // a finger landing mid-zoom holds the view where it is
+    const at = { x: e.clientX, y: e.clientY };
+    touches.current.set(e.pointerId, at);
+    if (touches.current.size === 1) {
+      const last = lastTap.current;
+      const p = point(e);
+      const doubleTap =
+        !!last && performance.now() - last.at <= DOUBLE_TAP_MS && Math.hypot(at.x - last.x, at.y - last.y) <= DOUBLE_TAP_PX && !(p && hitField(fieldsRef.current, p));
+      held.current = { id: e.pointerId, ...at, p, doubleTap, timer: setTimeout(commitHeld, HOLD_MS) };
+      return;
+    }
+    if (touches.current.size !== 2 || pinch.current) return;
+    // A second finger: a pinch. A press already sent is released first, where the first finger is.
+    dropHeld();
+    const [firstId, first] = [...touches.current][0]!;
+    if (pressed.current) release({ clientX: first.x, clientY: first.y }, 0);
+    tapRef.current = null;
+    lastTap.current = null;
+    pinch.current = { ids: [firstId, e.pointerId], from: pinchOf(first, at), start: viewRef.current };
+  };
+
+  const onPointerUp = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') touches.current.delete(e.pointerId);
+    if (pinch.current) {
+      if (touches.current.size === 0) pinch.current = null;
+      return;
+    }
+    const h = held.current;
+    if (h && h.id === e.pointerId) dropHeld();
+    if (!live) return;
+    if (e.pointerType !== 'touch') return endPress(e);
+    if (h && h.id === e.pointerId) {
+      if (h.doubleTap) {
+        lastTap.current = null;
+        return toggleZoomAt(h);
+      }
+      if (h.p) {
+        press(h, h.p, 'left', 0);
+        const onField = tapRef.current?.field;
+        endPress(e);
+        lastTap.current = onField ? null : { x: h.x, y: h.y, at: performance.now() };
+      } else lastTap.current = { x: h.x, y: h.y, at: performance.now() }; // the letterbox: no click, but a double tap zooms
+      return;
+    }
+    lastTap.current = null;
+    endPress(e);
   };
 
   const cancel = (e: PointerEvent) => {
+    if (e.pointerType === 'touch') {
+      touches.current.delete(e.pointerId);
+      if (held.current?.id === e.pointerId) dropHeld();
+      if (pinch.current && touches.current.size === 0) pinch.current = null;
+    }
     tapRef.current = null;
     release(e);
   };
 
   const scroll = (direction: 1 | -1) => {
-    const { width, height } = pageSize.current;
-    if (!live || width === 0) return;
-    send({ t: 'wheel', x: width / 2, y: height / 2, dx: 0, dy: Math.round(direction * height * SCROLL_FRACTION) });
+    const page = pageSize.current;
+    if (!live || page.width === 0) return;
+    // The part of the page on screen: at fit all of it, zoomed in only what the person sees.
+    const seen = viewportRef.current ? visiblePageRect(mirrorBox(), page, viewRef.current) : null;
+    const v = seen && seen.width > 0 ? seen : { left: 0, top: 0, ...page };
+    send({ t: 'wheel', x: v.left + v.width / 2, y: v.top + v.height / 2, dx: 0, dy: Math.round(direction * v.height * SCROLL_FRACTION) });
   };
 
   const onMove = (e: PointerEvent) => {
-    if (moveQueued.current || !live) return;
+    if (!live) return;
+    if (e.pointerType === 'touch') {
+      if (!touches.current.has(e.pointerId)) return;
+      const at = { x: e.clientX, y: e.clientY };
+      touches.current.set(e.pointerId, at);
+      const pz = pinch.current;
+      if (pz) {
+        const [a, b] = pz.ids.map((id) => touches.current.get(id));
+        if (a && b && viewportRef.current) setView(pinchView(pz.start, pz.from, pinchOf(a, b), mirrorBox(), pageSize.current));
+        return;
+      }
+      const h = held.current;
+      if (h && Math.hypot(at.x - h.x, at.y - h.y) < TAP_SLOP_PX) return;
+      commitHeld();
+      if (!pressed.current) return;
+    }
+    if (moveQueued.current) return;
     const p = point(e);
     if (!p) return;
     moveQueued.current = true;
@@ -421,17 +606,26 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   };
 
   const onWheel = (e: WheelEvent) => {
+    if (!live) return;
+    if (e.ctrlKey) {
+      // A trackpad pinch on a computer (and ctrl + wheel): zoom the mirror around the pointer, nothing to the page.
+      if (pageSize.current.width === 0 || !viewportRef.current) return;
+      e.preventDefault();
+      stopZoomAnimation();
+      return setView(zoomAt(viewRef.current, { x: e.clientX, y: e.clientY }, viewRef.current.scale * Math.exp(-e.deltaY / 100), mirrorBox(), pageSize.current));
+    }
     const p = point(e);
-    if (!p || !live) return;
+    if (!p) return;
     e.preventDefault();
     send({ t: 'wheel', ...p, dx: e.deltaX, dy: e.deltaY });
   };
 
   useEffect(() => {
-    const c = canvasRef.current;
+    // On the viewport, not the canvas: zoomed and panned, the canvas no longer covers all of the mirror's box.
+    const c = viewportRef.current;
     if (!c) return;
-    const down = onPointer('down');
-    const up = onPointer('up');
+    const down = onPointerDown;
+    const up = onPointerUp;
     const noMenu = (e: Event) => e.preventDefault();
     c.addEventListener('pointerdown', down);
     c.addEventListener('pointerup', up);
@@ -472,11 +666,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   // hides, a phone rotates): place the outline and the typing box over the field again.
   useEffect(() => {
     const reposition = () => {
+      // Zoomed: keep the view in range of the new size (setView also places the outline again).
+      if (!isFit(viewRef.current) && viewportRef.current) return setView(clampView(viewRef.current, mirrorBox(), pageSize.current));
       const field = ringField.current;
       if (field && canvasRef.current && stageRef.current) placeOver(field);
     };
     const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(reposition) : null;
-    if (canvasRef.current) observer?.observe(canvasRef.current);
+    if (viewportRef.current) observer?.observe(viewportRef.current);
     if (stageRef.current) observer?.observe(stageRef.current);
     window.addEventListener('resize', reposition);
     return () => {
@@ -549,13 +745,34 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       </header>
 
       <div class="stage" ref={stageRef}>
-        <canvas
-          ref={canvasRef}
-          data-testid="screen"
-          class="screen"
-          aria-label="Live view of the agent's browser. Tap or click to interact."
-        />
-        <div class="scroll-controls">
+        <div class="viewport" ref={viewportRef}>
+          <canvas
+            ref={canvasRef}
+            data-testid="screen"
+            class="screen"
+            aria-label="Live view of the agent's browser. Tap or click to interact. Pinch or double-tap to zoom."
+          />
+        </div>
+        <div class="stage-controls">
+          {/* mousedown is not allowed to move focus: zooming keeps the phone keyboard open over its field. */}
+          <div class="control-group" role="group" aria-label="Zoom" onMouseDown={(e) => e.preventDefault()}>
+            <button type="button" class="btn btn-icon" aria-label="Zoom in" disabled={zoomed === 'max'} onClick={() => zoomButton(1)}>
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+              </svg>
+            </button>
+            <button type="button" class="btn btn-icon" aria-label="Zoom out" disabled={zoomed === 'fit'} onClick={() => zoomButton(-1)}>
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+              </svg>
+            </button>
+            <button type="button" class="btn btn-icon" aria-label="Fit page to screen" disabled={zoomed === 'fit'} onClick={() => animateTo(FIT_VIEW)}>
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          </div>
+          <div class="control-group" role="group" aria-label="Scroll">
           <button type="button" class="btn btn-icon" aria-label="Scroll up" onClick={() => scroll(-1)}>
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
               <path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
@@ -566,6 +783,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
               <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>
+          </div>
         </div>
         {ring ? (
           <div

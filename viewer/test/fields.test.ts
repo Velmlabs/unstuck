@@ -51,3 +51,16 @@ describe('fieldBox (the outline)', () => {
     expect(bridgeBox(otp, canvas, page)).toEqual({ left: 50, top: 150, width: 150, height: 32 });
   });
 });
+
+describe('field boxes while zoomed', () => {
+  const canvas = { left: 0, top: 50, width: 640, height: 360 };
+  const page = { width: 1280, height: 720 };
+  it('follow the zoom and pan: 2× panned so the page origin sits 100 px left and 40 px above the box', () => {
+    const view = { scale: 2, x: -100, y: -40 };
+    // fit scale 0.5 → 1 CSS px per page px at 2×: otp (100,200 300×40) → (0-100+100, 50-40+200)
+    expect(fieldBox(otp, canvas, page, view)).toEqual({ left: 0, top: 210, width: 300, height: 40 });
+    expect(bridgeBox(otp, canvas, page, view)).toEqual({ left: 0, top: 210, width: 300, height: 40 });
+    // The bottom strip is the mirror's own, whatever the zoom.
+    expect(bridgeBox(null, canvas, page, view)).toEqual({ left: 0, top: 50 + 360 - 44, width: 640, height: 44 });
+  });
+});

@@ -1,7 +1,7 @@
 // Native typing helpers: which mapped field a tap lands on, where the keyboard bridge sits over the mirror, and how
 // far to lift the mirror so the field stays visible above the phone's keyboard.
 import type { Field } from '@velmlabs/unstuck-protocol';
-import { fitContain, type Rect, type Size } from './mapping';
+import { FIT_VIEW, imageRect, type Rect, type Size, type View } from './mapping';
 
 export interface Box {
   left: number;
@@ -22,13 +22,16 @@ export function hitField(fields: Field[], p: { x: number; y: number }): Field | 
   return fields.find((f) => p.x >= f.x && p.x <= f.x + f.w && p.y >= f.y && p.y <= f.y + f.h) ?? null;
 }
 
-/** Where a field sits over the mirror, in CSS px relative to the mirror's container, exactly (the focus outline). */
-export function fieldBox(field: Field, canvas: Rect, page: Size): Box {
-  const fit = fitContain(canvas, page);
-  const k = fit.width / page.width || 0;
+/**
+ * Where a field sits over the mirror, in CSS px relative to the mirror's container, exactly (the focus outline), at
+ * the current zoom and pan.
+ */
+export function fieldBox(field: Field, canvas: Rect, page: Size, view: View = FIT_VIEW): Box {
+  const img = imageRect(canvas, page, view);
+  const k = img.width / page.width || 0;
   return {
-    left: Math.round(canvas.left + fit.left + field.x * k),
-    top: Math.round(canvas.top + fit.top + field.y * k),
+    left: Math.round(img.left + field.x * k),
+    top: Math.round(img.top + field.y * k),
     width: Math.round(field.w * k),
     height: Math.round(field.h * k),
   };
@@ -38,9 +41,9 @@ export function fieldBox(field: Field, canvas: Rect, page: Size): Box {
  * Where the bridge goes: over the field, at least MIN_W×MIN_H (iOS won't repeat a held Backspace in a tiny input),
  * or over the bottom strip of the mirror when there is no field.
  */
-export function bridgeBox(field: Field | null, canvas: Rect, page: Size): Box {
+export function bridgeBox(field: Field | null, canvas: Rect, page: Size, view: View = FIT_VIEW): Box {
   if (!field) return { left: canvas.left, top: canvas.top + canvas.height - STRIP_H, width: canvas.width, height: STRIP_H };
-  const box = fieldBox(field, canvas, page);
+  const box = fieldBox(field, canvas, page, view);
   return { ...box, width: Math.max(MIN_W, box.width), height: Math.max(MIN_H, box.height) };
 }
 
