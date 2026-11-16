@@ -60,7 +60,7 @@ describe('engine builds', () => {
     const out = tmpDir('eng-');
     const bin = buildEngine(PLATFORMS.find((p) => p.id === 'linux-x64'), out);
     checkBinaryType(bin, PLATFORMS.find((p) => p.id === 'linux-x64'));
-    expect(execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim()).toBe('0.2.4');
+    expect(execFileSync(bin, ['--version'], { encoding: 'utf8' }).trim()).toBe('0.2.5');
   }, 300_000);
 });
 
