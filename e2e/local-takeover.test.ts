@@ -142,7 +142,8 @@ describe('local takeover end to end', () => {
   it('Final I1: the human reloads mid-takeover and carries on (not locked out)', async () => {
     const { page, unstuck, result, link } = await startTakeover();
     const { ctx, human } = await openHuman(link.url);
-    await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
+    // In: the engine's ready stored the resume key (a canvas exists before that, at the default 300px width).
+    await human.waitForFunction(() => Object.keys(localStorage).some((k) => k.startsWith('unstuck:resume:')), null, { timeout: 15_000 });
     await human.reload();
     try {
       await human.waitForFunction(() => (document.querySelector('canvas') as HTMLCanvasElement | null)?.width! > 100, null, { timeout: 15_000 });
