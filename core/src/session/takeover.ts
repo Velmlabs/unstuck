@@ -10,6 +10,7 @@ import {
   type TakeoverResult,
   type TakeoverStatus,
   type ViewerErrorCode,
+  type ViewerInput,
 } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
 import type { EventLog } from '../events';
@@ -34,6 +35,11 @@ export const MAX_CODE_ATTEMPTS = 5;
 export const DRAIN_INTERVAL_MS = 50;
 /** Upper bound on waiting for CDP during cleanup, so a dead browser can never stall the result. */
 export const STOP_TIMEOUT_MS = 2_000;
+/** Viewer input waiting to be replayed into the page; beyond this, pointer moves and wheels go first, then new input. */
+export const MAX_PENDING_INPUT = 256;
+
+/** Rejects a CDP call that a takeover's input queue may no longer make (the takeover ended, or the sender lost hold). */
+const DROPPED = new Error('input dropped');
 
 export interface LinkInfo {
   sessionId: string;
@@ -154,7 +160,14 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   const targets: Target[] = [];
   const active = (): Target => targets[targets.length - 1] ?? { cdp, caps, off: () => {} };
   let offPopups: () => void = () => {};
-  let inputChain: Promise<void> = Promise.resolve();
+  /** Input accepted from viewers, replayed one at a time (in order) by pumpInput(). */
+  const pendingInput: { conn: ViewerConnection; input: ViewerInput }[] = [];
+  let pumping = false;
+  /** The dispatch in progress: finish() waits for it before unlocking the page. */
+  let inFlight: Promise<void> | null = null;
+  let inputDropped = 0;
+  /** A mouse button the human pressed and has not released yet (where the pointer last was): released when ending. */
+  let pressed: { target: Target; x: number; y: number; button: string; clickCount: number } | null = null;
   const helloTimers = new Set<ReturnType<typeof setTimeout>>();
   let resolveResult!: (r: TakeoverResult) => void;
   const result = new Promise<TakeoverResult>((r) => (resolveResult = r));
@@ -213,19 +226,99 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       sendJson(viewer, { t: 'state', status });
       viewer.close(1000, status);
     }
+    // No input from this takeover may reach the page once it has ended: what is still queued is discarded, the
+    // dispatch in progress is waited for, and a button left pressed is released, all before the lock comes off.
+    inputDropped += pendingInput.splice(0).length;
+    const lastDispatch = inFlight;
     const durationS = Math.round(now() - startedAt) / 1000;
     void (async () => {
+      await bounded((async () => {
+        await lastDispatch;
+        await releasePressed();
+      })());
       await stopStream();
       // Unlocking talks to the page, which may never answer (SDK gone, page closed): bounded like stopping the stream.
-      let unlockTimer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([Promise.all(locks.map((l) => l?.stop())), new Promise<void>((r) => (unlockTimer = setTimeout(r, STOP_TIMEOUT_MS)))]);
-      clearTimeout(unlockTimer);
+      await bounded(Promise.all(locks.map((l) => l?.stop())));
       if (published) await transport.unpublish(sessionId).catch(() => {});
-      emit('finished', { status: final, durationS, inputCount, ...(logged ?? (detail ? { detail } : {})) });
+      emit('finished', { status: final, durationS, inputCount, ...(inputDropped ? { inputDropped } : {}), ...(logged ?? (detail ? { detail } : {})) });
       const fallbacks = [!caps.screencast && 'screenshots', !caps.insertText && 'per-key typing'].filter(Boolean).join(', ');
       const shown = detail ?? (fallbacks ? `fallback: ${fallbacks}` : undefined);
       resolveResult({ status: final, sessionId, url, durationS, ...(shown ? { detail: shown } : {}) });
     })();
+  }
+
+  /** Waits for `p`, but never longer than STOP_TIMEOUT_MS (a dead browser must not stall the result). */
+  async function bounded(p: Promise<unknown>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([p, new Promise<void>((r) => (timer = setTimeout(r, STOP_TIMEOUT_MS)))]);
+    clearTimeout(timer);
+  }
+
+  /** Lets go of a mouse button the human still holds, so the agent doesn't get the page back mid-drag. */
+  async function releasePressed(): Promise<void> {
+    const p = pressed;
+    pressed = null;
+    if (!p) return;
+    const { x, y, button, clickCount } = p;
+    await p.target.cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button, clickCount, modifiers: 0 }).catch(() => {});
+  }
+
+  /**
+   * Queues one input from `conn`. Bounded: over MAX_PENDING_INPUT, the oldest pending pointer move or wheel is
+   * dropped first; failing that, new input is dropped, except a mouse release, which takes the place of the oldest
+   * pending non-release (a dropped release could leave a button held down).
+   */
+  function enqueueInput(conn: ViewerConnection, input: ViewerInput): void {
+    if (isTerminal(status) || conn !== holder) return void inputDropped++;
+    if (pendingInput.length >= MAX_PENDING_INPUT) {
+      let i = pendingInput.findIndex((p) => p.input.t === 'wheel' || (p.input.t === 'mouse' && p.input.action === 'move'));
+      if (i < 0 && isRelease(input)) i = pendingInput.findIndex((p) => !isRelease(p.input));
+      inputDropped++;
+      if (i < 0) return; // nothing to make room with: this one is dropped
+      pendingInput.splice(i, 1);
+    }
+    pendingInput.push({ conn, input });
+    if (!pumping) void pumpInput();
+  }
+
+  async function pumpInput(): Promise<void> {
+    pumping = true;
+    for (let next = pendingInput.shift(); next; next = pendingInput.shift()) {
+      inFlight = dispatchInput(next.conn, next.input);
+      await inFlight;
+    }
+    inFlight = null;
+    pumping = false;
+  }
+
+  /** Replays one input into the shown page, checking before every CDP call that `conn` may still act on it. */
+  async function dispatchInput(conn: ViewerConnection, input: ViewerInput): Promise<void> {
+    const live = () => !isTerminal(status) && conn === holder;
+    if (!live()) return void inputDropped++;
+    const target = active();
+    const guarded: Pick<CdpClient, 'send'> = {
+      send: (method, params) => (live() ? target.cdp.send(method, params) : Promise.reject(DROPPED)),
+    };
+    inputCount++;
+    try {
+      // Shortcuts follow the agent browser's system (Cmd+A from a Mac reaches a Linux browser as Ctrl+A).
+      const msgs = input.t === 'key' ? translateShortcut(input, await browserPlatformIsMac(target.cdp)) : [input];
+      for (const m of msgs) {
+        await applyInput(guarded, m, target.caps);
+        if (m.t === 'mouse') trackButton(target, m);
+      }
+    } catch (e) {
+      if (e === DROPPED) return;
+      return onTargetError(target, e as Error);
+    }
+    // After the input has landed, so a tap's new focus and a scroll's new positions are what gets scanned.
+    if (live()) fieldFeed.onInput(input);
+  }
+
+  function trackButton(target: Target, m: Extract<ViewerInput, { t: 'mouse' }>): void {
+    if (m.action === 'down') pressed = { target, x: m.x, y: m.y, button: m.button, clickCount: m.clickCount };
+    else if (m.action === 'up') pressed = null;
+    else if (pressed) pressed = { ...pressed, x: m.x, y: m.y };
   }
 
   async function attachViewer(conn: ViewerConnection, vn?: string): Promise<void> {
@@ -417,20 +510,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       }
       default: {
         const safe = safeInput(msg);
-        if (!safe) return;
-        inputCount++;
-        inputChain = inputChain.then(async () => {
-          const target = active();
-          try {
-            // Shortcuts follow the agent browser's system (Cmd+A from a Mac reaches a Linux browser as Ctrl+A).
-            const msgs = safe.t === 'key' ? translateShortcut(safe, await browserPlatformIsMac(target.cdp)) : [safe];
-            for (const m of msgs) await applyInput(target.cdp, m, target.caps);
-          } catch (e) {
-            return onTargetError(target, e as Error);
-          }
-          // After the input has landed, so a tap's new focus and a scroll's new positions are what gets scanned.
-          fieldFeed.onInput(safe);
-        });
+        if (safe) enqueueInput(conn, safe);
       }
     }
   }
@@ -526,6 +606,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   }
 
   return { result, cancel: (detail) => finish('cancelled', detail), fail, joined };
+}
+
+function isRelease(m: ViewerInput): boolean {
+  return m.t === 'mouse' && m.action === 'up';
 }
 
 /** Uniform 000000–999999 from the CSPRNG (rejection sampling avoids modulo bias). */

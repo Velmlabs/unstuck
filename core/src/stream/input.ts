@@ -29,7 +29,7 @@ function virtualKey(key: string): number | undefined {
 const MOUSE_TYPES = { down: 'mousePressed', up: 'mouseReleased', move: 'mouseMoved' } as const;
 
 /** Replays one viewer input message into the page via CDP Input.* */
-export async function applyInput(cdp: CdpClient, msg: ViewerInput, caps?: Capabilities): Promise<void> {
+export async function applyInput(cdp: Pick<CdpClient, 'send'>, msg: ViewerInput, caps?: Capabilities): Promise<void> {
   switch (msg.t) {
     case 'mouse':
       await cdp.send('Input.dispatchMouseEvent', {
