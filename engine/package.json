@@ -1,7 +1,7 @@
 {
   "name": "@velmlabs/unstuck-engine",
   "private": true,
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Unstuck engine: Node host for @velmlabs/unstuck-core (stdio bridge, embedded server, CLI, binary)",
   "license": "Apache-2.0",
   "type": "module",

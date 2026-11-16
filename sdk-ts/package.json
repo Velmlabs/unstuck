@@ -1,6 +1,6 @@
 {
   "name": "@velmlabs/unstuck",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Human takeover for AI browser agents: when your agent gets stuck, a person takes over the live browser and hands it back.",
   "keywords": [
     "ai",
