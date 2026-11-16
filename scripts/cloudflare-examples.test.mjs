@@ -60,6 +60,8 @@ describe.each(examples)('$dir', ({ dir, extra }) => {
     expect(wrangler.main).toBe('src/index.ts');
     expect(existsSync(new URL(`../${dir}/src/index.ts`, import.meta.url))).toBe(true);
     expect(wrangler.compatibility_flags).toContain('nodejs_compat');
+    // A relay on the same account over workers.dev is refused with error 1042 without it.
+    expect(wrangler.compatibility_flags).toContain('global_fetch_strictly_public');
     expect(wrangler.browser).toEqual({ binding: 'BROWSER' });
     const [binding] = wrangler.durable_objects.bindings;
     expect(binding.class_name).toBe('PortalAgent');
@@ -74,6 +76,21 @@ describe.each(examples)('$dir', ({ dir, extra }) => {
     const secrets = [...read(`${dir}/.dev.vars.example`).matchAll(/^(\w+)=/gm)].map((m) => m[1]);
     expect(secrets.sort()).toEqual(['CONTROL_TOKEN', 'UNSTUCK_API_KEY']);
     for (const name of [...secrets, ...Object.keys(wrangler.vars)]) expect(pkg.cloudflare.bindings[name]?.description, name).toBeTruthy();
+  });
+
+  it('can send the link to LINK_WEBHOOK_URL at once (Workers Logs only show it after the run), never into state', () => {
+    const source = read(`${dir}/src/index.ts`);
+    expect(source).toContain('LINK_WEBHOOK_URL?: string;');
+    expect(source).toMatch(/onLink = env\.LINK_WEBHOOK_URL \? linkWebhook\(env\.LINK_WEBHOOK_URL\) : undefined/);
+    expect(source).toContain('{ apiKey: env.UNSTUCK_API_KEY, onLink }');
+    expect(source).toContain('agentKey: env.UNSTUCK_AGENT_KEY, onLink }');
+    expect(source).toContain('JSON.stringify({ text, content: text, url, reason, sessionId, expiresAt })');
+    expect(source).toContain('AbortSignal.timeout(5000)');
+    expect(source).not.toMatch(/(setState|storage\.put)\([^)]*\burl\b/);
+    expect(pkg.cloudflare.bindings.LINK_WEBHOOK_URL.description).toBeTruthy();
+    expect(readme).toContain('wrangler secret put LINK_WEBHOOK_URL');
+    expect(readme).toContain('only when the invocation that wrote them ends');
+    expect(readme).toContain('global_fetch_strictly_public');
   });
 
   it('has a README with the Deploy to Cloudflare button for this folder', () => {

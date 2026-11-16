@@ -20,7 +20,7 @@
   "cloudflare": {
     "bindings": {
       "UNSTUCK_API_KEY": {
-        "description": "Your Unstuck Cloud API key (`uk_live_…`), from [unstuck.sh/dashboard/keys](https://unstuck.sh/dashboard/keys). Running your own relay instead? Leave this empty and set `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY` with `wrangler secret put` after deploying."
+        "description": "Your Unstuck Cloud API key (`uk_live_\u2026`), from [unstuck.sh/dashboard/keys](https://unstuck.sh/dashboard/keys). Running your own relay instead? Leave this empty and set `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY` with `wrangler secret put` after deploying."
       },
       "CONTROL_TOKEN": {
         "description": "A shared secret that protects `/start` and `/status`. Generate one with `openssl rand -hex 32` and send it as `Authorization: Bearer <token>`."
@@ -30,6 +30,9 @@
       },
       "UNSTUCK_ALERTS": {
         "description": "Phone alerts with Unstuck Cloud: `on` (default: alert your paired phones, log the link if none got it), `required` (fail at once with `alert_failed` if no paired phone got it: for unattended runs) or `off`."
+      },
+      "LINK_WEBHOOK_URL": {
+        "description": "Optional secret: an incoming webhook (Slack, Discord or your own `https://` endpoint) that gets the takeover link as JSON the moment a person is needed. Recommended with a self-hosted relay, which sends no phone alerts. Set it with `wrangler secret put LINK_WEBHOOK_URL`."
       }
     }
   }

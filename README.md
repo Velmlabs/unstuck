@@ -186,7 +186,7 @@ export class PortalAgent extends DurableObject<Env> {
 
 A Durable Object stays alive while the takeover holds its sockets open; `ctx.waitUntil` is there for clarity, and an alarm is a sturdier trigger if you need retries.
 
-Without an `onLink`, the link goes to your paired phones and the Worker logs one line naming them (no link). The link itself is logged with `console.log` only when no phone got it, or when there is no phone alert (a relay you host, or `alerts: false`).
+Without an `onLink`, the link goes to your paired phones and the Worker logs one line naming them (no link). The link itself is logged with `console.log` only when no phone got it, or when there is no phone alert (a relay you host, or `alerts: false`). Workers Logs show a Durable Object's logs only when its invocation ends, which is after the takeover, so for a relay you host pass an `onLink` that sends the link at once (the examples post it to `LINK_WEBHOOK_URL`). A relay on the same Cloudflare account needs the `global_fetch_strictly_public` compatibility flag (else error 1042).
 
 Two deployable examples, each with a **Deploy to Cloudflare** button: [`examples/cloudflare-worker`](examples/cloudflare-worker) (this Durable Object, with `/start` and `/status`) and [`examples/cloudflare-agent`](examples/cloudflare-agent) (the same flow with the Agents SDK).
 

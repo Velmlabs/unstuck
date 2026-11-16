@@ -4,7 +4,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
   // @cloudflare/puppeteer needs Node compatibility. Unstuck itself does not.
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public: reach a relay you run as a Worker on this same Cloudflare account (otherwise Cloudflare
+  // refuses Worker-to-Worker requests over workers.dev with error 1042). Harmless with Unstuck Cloud.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "upload_source_maps": true,
   // Workers Logs: where the default link handler writes (see the README).
   "observability": { "enabled": true },

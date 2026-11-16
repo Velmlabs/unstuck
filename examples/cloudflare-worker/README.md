@@ -32,7 +32,10 @@ With your own relay, set these two instead of `UNSTUCK_API_KEY`:
 ```bash
 npx wrangler secret put UNSTUCK_RELAY_URL   # wss://relay.example.com
 npx wrangler secret put UNSTUCK_AGENT_KEY
+npx wrangler secret put LINK_WEBHOOK_URL    # recommended: see Where the link goes
 ```
+
+A relay that runs as a Worker on the same Cloudflare account works over its `workers.dev` address thanks to the `global_fetch_strictly_public` flag in `wrangler.jsonc`. Without that flag, Cloudflare refuses the Worker-to-Worker request (error 1042) and the takeover fails.
 
 If `UNSTUCK_API_KEY` is set, Unstuck Cloud is used.
 
@@ -47,6 +50,7 @@ To run it locally, copy `.dev.vars.example` to `.dev.vars`, fill it in, and run 
 | `CONTROL_TOKEN` | secret | Shared secret for `/start` and `/status`. Without it, every request gets `503` |
 | `TARGET_URL` | var | The page to open. Default `https://example.com` |
 | `UNSTUCK_ALERTS` | var | `on` (default), `required` or `off`. See below |
+| `LINK_WEBHOOK_URL` | secret, optional | An incoming webhook (`https://`) that gets the link at once. See below |
 
 ## Run it
 
@@ -73,13 +77,13 @@ curl -H "Authorization: Bearer $TOKEN" $URL/status          # until it is no lon
 
 ## Where the link goes
 
-Watch the logs with `npx wrangler tail`, or open **Workers Logs** in the dashboard (`observability` is on in `wrangler.jsonc`).
+- **With Unstuck Cloud and alerts on** (the default), your paired phones get the link at once. This is the way to go.
+- **With `LINK_WEBHOOK_URL` set**, the link is also POSTed to that webhook at once, as JSON: `{ text, content, url, reason, sessionId, expiresAt }`. `text` makes a Slack incoming webhook show it, `content` a Discord one; your own endpoint can read the other fields. The request gives up after 5 seconds, and a failure is logged without the link. Use this with a self-hosted relay, which sends no phone alerts.
+- **Otherwise the link goes to the logs** (`npx wrangler tail`, or **Workers Logs** in the dashboard; `observability` is on in `wrangler.jsonc`). With alerts on, the log line names the phones instead: `Unstuck: a human is needed (<reason>), link sent to 1 paired phone(s) (session <id>)`. The full link is logged only when no phone got it, or when there is no alert (your own relay, or `UNSTUCK_ALERTS=off`).
 
-- **With Unstuck Cloud and alerts on** (the default), your paired phones get the link. The log line names them without the link: `Unstuck: a human is needed (<reason>), link sent to 1 paired phone(s) (session <id>)`.
-- **If no phone got it**, the full link is logged instead, so you can open it from the log.
-- **With your own relay, or `UNSTUCK_ALERTS=off`**, there is no alert, so the link is logged at once.
+**The logs come too late to act on.** Workers Logs and `wrangler tail` show a Durable Object's logs only when the invocation that wrote them ends, and here that is the whole run: you see the link only after the takeover has ended, usually by timing out. So don't rely on the log for the link: use phone alerts (Unstuck Cloud) or `LINK_WEBHOOK_URL`.
 
-Workers Logs are stored, so a logged link stays readable there until it expires. To send the link somewhere else (Slack, email, your app), pass an `onLink` handler to `new Unstuck()`.
+The link carries the session's secret. It never goes into the object's state or `/status`. Workers Logs are stored, so a logged link stays readable there until it expires.
 
 ### Unattended runs
 

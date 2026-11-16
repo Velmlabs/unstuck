@@ -6,7 +6,7 @@
 //
 // Both need `Authorization: Bearer <CONTROL_TOKEN>`. Guide: https://unstuck.sh/docs/cloudflare-workers/
 import puppeteer from '@cloudflare/puppeteer';
-import { Unstuck, UnstuckConfigError, type UnstuckOptions } from '@velmlabs/unstuck';
+import { Unstuck, UnstuckConfigError, type TakeoverLink, type UnstuckOptions } from '@velmlabs/unstuck';
 import { Agent, routeAgentRequest, type Connection } from 'agents';
 
 interface Env {
@@ -23,6 +23,8 @@ interface Env {
   TARGET_URL?: string;
   /** Phone alerts with Unstuck Cloud: 'on' (default), 'required' or 'off'. */
   UNSTUCK_ALERTS?: string;
+  /** Optional: an incoming webhook (Slack, Discord, your app) that gets the link the moment a person is needed. */
+  LINK_WEBHOOK_URL?: string;
 }
 
 /** The agent's state: the outcome, never the link. `runId` and `launched` guard against running one start twice. */
@@ -127,9 +129,34 @@ function unstuckConfig(env: Env): { options: UnstuckOptions; alerts: boolean | '
   const mode = (env.UNSTUCK_ALERTS ?? 'on').trim().toLowerCase();
   if (!['on', 'off', 'required'].includes(mode)) throw new UnstuckConfigError("UNSTUCK_ALERTS must be 'on', 'off' or 'required'");
   const alerts = mode === 'required' ? 'required' : mode === 'on';
-  if (env.UNSTUCK_API_KEY) return { options: { apiKey: env.UNSTUCK_API_KEY }, alerts };
-  // A self-hosted relay sends no phone alerts ('required' would throw), so the link is logged.
-  return { options: { relay: env.UNSTUCK_RELAY_URL, agentKey: env.UNSTUCK_AGENT_KEY }, alerts: false };
+  // Without a webhook, Unstuck's default handler logs (see the README: Workers Logs show it only after the run ends).
+  const onLink = env.LINK_WEBHOOK_URL ? linkWebhook(env.LINK_WEBHOOK_URL) : undefined;
+  if (env.UNSTUCK_API_KEY) return { options: { apiKey: env.UNSTUCK_API_KEY, onLink }, alerts };
+  // A self-hosted relay sends no phone alerts ('required' would throw): the link goes to the webhook, or the log.
+  return { options: { relay: env.UNSTUCK_RELAY_URL, agentKey: env.UNSTUCK_AGENT_KEY, onLink }, alerts: false };
+}
+
+/**
+ * An onLink handler that POSTs the link to an incoming webhook: `text` for Slack-style webhooks, `content` for Discord.
+ * The link carries the session's secret: it goes only to this webhook, never to the agent's state or the log.
+ */
+function linkWebhook(webhookUrl: string): (link: TakeoverLink) => Promise<void> {
+  if (new URL(webhookUrl).protocol !== 'https:') throw new UnstuckConfigError('LINK_WEBHOOK_URL must be an https:// URL');
+  return async ({ url, reason, sessionId, expiresAt }) => {
+    const text = `A person is needed: ${reason}\n${url}`;
+    try {
+      const res = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, content: text, url, reason, sessionId, expiresAt }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) console.error(`LINK_WEBHOOK_URL answered ${res.status} (session ${sessionId})`);
+    } catch (e) {
+      // Name the error only: its message could quote the webhook's address or the link.
+      console.error(`LINK_WEBHOOK_URL failed: ${e instanceof Error ? e.name : 'error'} (session ${sessionId})`);
+    }
+  };
 }
 
 function targetUrl(env: Env): string {
