@@ -97,7 +97,7 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
     if (cache && now() - cache.at < CACHE_MS) return cache.devices;
     const list = await within('devices lookup', async (signal) => {
       const res = await doFetch(`${base}/api/v1/agent/devices`, { headers, signal });
-      if (res.status === 403 && (await res.json().catch(() => null))?.error === 'alerts_not_allowed') {
+      if (res.status === 403 && ((await res.json().catch(() => null)) as { error?: string } | null)?.error === 'alerts_not_allowed') {
         log('[unstuck] alerts are not enabled for this API key (turn them on in your unstuck.sh dashboard)');
         return null;
       }
