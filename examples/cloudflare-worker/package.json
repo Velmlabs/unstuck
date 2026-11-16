@@ -1,0 +1,36 @@
+{
+  "name": "unstuck-cloudflare-worker",
+  "private": true,
+  "description": "A Durable Object opens a page in Cloudflare Browser Rendering, hands a step to a person with Unstuck, and carries on.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "^1.4.0",
+    "@velmlabs/unstuck": "^0.2.3"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261116.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.161.0"
+  },
+  "cloudflare": {
+    "bindings": {
+      "UNSTUCK_API_KEY": {
+        "description": "Your Unstuck Cloud API key (`uk_live_…`), from [unstuck.sh/dashboard/keys](https://unstuck.sh/dashboard/keys). Running your own relay instead? Leave this empty and set `UNSTUCK_RELAY_URL` and `UNSTUCK_AGENT_KEY` with `wrangler secret put` after deploying."
+      },
+      "CONTROL_TOKEN": {
+        "description": "A shared secret that protects `/start` and `/status`. Generate one with `openssl rand -hex 32` and send it as `Authorization: Bearer <token>`."
+      },
+      "TARGET_URL": {
+        "description": "The page the agent opens and hands to you. Default: `https://example.com`."
+      },
+      "UNSTUCK_ALERTS": {
+        "description": "Phone alerts with Unstuck Cloud: `on` (default: alert your paired phones, log the link if none got it), `required` (fail at once with `alert_failed` if no paired phone got it: for unattended runs) or `off`."
+      }
+    }
+  }
+}

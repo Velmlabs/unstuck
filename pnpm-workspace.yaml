@@ -9,3 +9,6 @@ packages:
   - sdk-ts
   - e2e
   - examples/*
+  # Standalone, deployable examples: they install the published @velmlabs/unstuck, exactly as a user would.
+  - '!examples/cloudflare-worker'
+  - '!examples/cloudflare-agent'

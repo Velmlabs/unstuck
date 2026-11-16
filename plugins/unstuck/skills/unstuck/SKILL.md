@@ -90,6 +90,7 @@ const result = await unstuck.takeover(page, { reason: 'Solve the CAPTCHA', alert
 - A browser connection that drops ends the takeover as `failed` with `page_closed`.
 
 Guide: https://unstuck.sh/docs/cloudflare-workers/
+Deployable examples (Durable Object, Agents SDK): https://github.com/velmlabs/unstuck/tree/main/examples/cloudflare-worker and https://github.com/velmlabs/unstuck/tree/main/examples/cloudflare-agent
 
 ## After the takeover
 

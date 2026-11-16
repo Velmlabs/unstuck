@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "unstuck-cloudflare-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-01",
+  // @cloudflare/puppeteer needs Node compatibility. Unstuck itself does not.
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+  // Workers Logs: where the default link handler writes (see the README).
+  "observability": { "enabled": true },
+
+  // Cloudflare Browser Rendering.
+  "browser": { "binding": "BROWSER" },
+
+  // The Durable Object that runs the takeover. It can stay alive while a person works, which a plain request can't.
+  "durable_objects": {
+    "bindings": [{ "name": "PORTAL_AGENT", "class_name": "PortalAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PortalAgent"] }],
+
+  // Streaming the screen and encrypting each frame uses CPU while a person works: raise the limit to the 5-minute
+  // maximum. Above the default this needs the Workers Paid plan; on the Free plan, delete this block.
+  "limits": { "cpu_ms": 300000 },
+
+  "vars": {
+    "TARGET_URL": "https://example.com",
+    "UNSTUCK_ALERTS": "on"
+  }
+  // Secrets (never in this file): CONTROL_TOKEN, and UNSTUCK_API_KEY or UNSTUCK_RELAY_URL + UNSTUCK_AGENT_KEY.
+  // Set them with `npx wrangler secret put <NAME>`, or in .dev.vars for `wrangler dev`.
+}

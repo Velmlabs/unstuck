@@ -1,0 +1,3 @@
+# Copy to .dev.vars for `wrangler dev`. Deployed Workers use `npx wrangler secret put <NAME>` instead.
+UNSTUCK_API_KEY=uk_live_your_key # from https://unstuck.sh/dashboard/keys
+CONTROL_TOKEN=change-me # openssl rand -hex 32

@@ -1,6 +1,6 @@
 # Roadmap: official Cloudflare Workers support
 
-**Status:** Phase 1 shipped in 0.2.0; Phases 2–3 open · **Owner:** Velm Labs
+**Status:** Phase 1 shipped in 0.2.0; Phase 2's docs and examples done (optional service binding open); Phase 3 open · **Owner:** Velm Labs
 
 Unstuck runs *around* Cloudflare Workers (the relay and the hosted viewer are Workers) and, since 0.2.0, *inside* one.
 An agent written as a Worker (with the Agents SDK or Browser Rendering) can call `takeover()`. This document was the
@@ -18,6 +18,7 @@ plan; it is kept for the design reasoning and for the phases that are still open
 | Cloudflare Browser Rendering with Unstuck | ✅ Proven in [`docs/spikes/cloudflare-browser-rendering.md`](../spikes/cloudflare-browser-rendering.md): screencast, input, paste, cross-origin CAPTCHA iframes and popups all work |
 | TypeScript SDK inside a Worker | ✅ Shipped in 0.2.0: in-process mode, picked by the package's export conditions. See [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) |
 | Cloud phone alerts from a Worker | ✅ Shipped in 0.2.0: the alert code moved into `core/`, with `alerts: 'required'` |
+| Deployable examples (Durable Object, Agents SDK) | ✅ [`examples/cloudflare-worker`](../../examples/cloudflare-worker), [`examples/cloudflare-agent`](../../examples/cloudflare-agent), with Deploy to Cloudflare buttons |
 | Workflows | ✅ Works, per a user report: set an explicit `step.do` timeout and `retries: { limit: 0 }`. No automated test yet |
 
 The MVP design already planned this as the SDK's **in-process mode** (design spec §4.3: "binary mode under Node,
@@ -114,9 +115,13 @@ the public internet. Nice-to-have for Phase 2, not needed to ship.
 
 ### Phase 2: docs and examples
 
-- Docs page `unstuck.sh/docs/cloudflare-workers/` (shipped with 0.2.0) and `examples/cloudflare-worker/` (deployable,
-  with `wrangler.toml`; not yet).
-- An Agents SDK example: an agent that hands a step to a person mid-task and carries on.
+- Docs page `unstuck.sh/docs/cloudflare-workers/` (shipped with 0.2.0) and
+  [`examples/cloudflare-worker/`](../../examples/cloudflare-worker) (done: a Durable Object with `/start` and `/status`,
+  `wrangler.jsonc`, a Deploy to Cloudflare button).
+- An Agents SDK example: [`examples/cloudflare-agent/`](../../examples/cloudflare-agent) (done: an `Agent` that hands a
+  step to a person mid-task and carries on, started with `this.schedule`).
+- Both install the published `@velmlabs/unstuck` (they are outside the pnpm workspace); `scripts/cloudflare-examples.test.mjs`
+  checks their config.
 - A "Cloudflare Workers" section in the agent skill (`plugins/unstuck/skills/unstuck/SKILL.md`): shipped with 0.2.0.
 - Optional: service-binding transport for a same-account relay.
 

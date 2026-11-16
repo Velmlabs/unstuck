@@ -125,7 +125,7 @@ Set `UNSTUCK_API_KEY` (from [your dashboard](https://unstuck.sh/dashboard/keys))
 | Puppeteer | [unstuck.sh/docs/puppeteer](https://unstuck.sh/docs/puppeteer) | [`examples/puppeteer`](examples/puppeteer) |
 | browser-use, Stagehand | [unstuck.sh/docs/ai-agents](https://unstuck.sh/docs/ai-agents) | [`examples/browser-use`](examples/browser-use), [`examples/stagehand`](examples/stagehand) |
 | Any Chromium over CDP, Selenium, hosted browsers | [unstuck.sh/docs/any-browser](https://unstuck.sh/docs/any-browser) | [`examples/cdp`](examples/cdp), [`examples/selenium`](examples/selenium) |
-| Cloudflare Workers: Durable Objects, Agents SDK, Browser Rendering | [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) | the example below |
+| Cloudflare Workers: Durable Objects, Agents SDK, Browser Rendering | [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) | [`examples/cloudflare-worker`](examples/cloudflare-worker), [`examples/cloudflare-agent`](examples/cloudflare-agent) |
 | Deno and Bun (binary mode, or opt in with `mode: 'in-process'`) | [unstuck.sh/docs/requirements](https://unstuck.sh/docs/requirements/) | |
 
 ### Cloudflare Workers
@@ -187,6 +187,8 @@ export class PortalAgent extends DurableObject<Env> {
 A Durable Object stays alive while the takeover holds its sockets open; `ctx.waitUntil` is there for clarity, and an alarm is a sturdier trigger if you need retries.
 
 Without an `onLink`, the link goes to your paired phones and the Worker logs one line naming them (no link). The link itself is logged with `console.log` only when no phone got it, or when there is no phone alert (a relay you host, or `alerts: false`).
+
+Two deployable examples, each with a **Deploy to Cloudflare** button: [`examples/cloudflare-worker`](examples/cloudflare-worker) (this Durable Object, with `/start` and `/status`) and [`examples/cloudflare-agent`](examples/cloudflare-agent) (the same flow with the Agents SDK).
 
 The full guide (status endpoint, Workflows, timeouts, CPU limits, a self-hosted relay): [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/).
 
