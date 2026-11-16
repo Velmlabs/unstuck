@@ -2,11 +2,11 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
+import type { ChildProcess } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePort, RELAY_KEY, startRelay, stopGroup, tapStart, waitHealthy } from './relay-harness';
+import { launchWithCdpPort, RELAY_KEY, spawnGroup, startOnFreePort, startRelay, stopGroup, tapStart } from './relay-harness';
 import { waitFramed } from './framed';
 
 // An agent in a Durable Object under `wrangler dev` drives a real Chromium over CDP and hands it to a person through relay-cloudflare.
@@ -29,26 +29,19 @@ beforeAll(async () => {
   server = http.createServer((req, res) => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(CAPTCHA));
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   site = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  cdpPort = await freePort();
-  agentBrowser = await chromium.launch({ args: [`--remote-debugging-port=${cdpPort}`] });
+  ({ browser: agentBrowser, port: cdpPort } = await launchWithCdpPort(chromium));
   humanBrowser = await chromium.launch();
   relay = await startRelay('cloudflare');
-  const port = await freePort();
   const log = process.env.RELAY_LOG ? 'inherit' : 'ignore';
-  worker = spawn(WRANGLER, ['dev', '--config', path.join(here, 'workers/wrangler.toml'), '--port', String(port), '--ip', '127.0.0.1', '--persist-to', path.join(here, 'workers/.wrangler/e2e')], {
-    cwd: path.join(here, 'workers'),
-    stdio: ['ignore', log, log],
-    detached: true,
-    env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false' },
-  });
-  agent = `http://127.0.0.1:${port}`;
-  // A spawn error (e.g. no wrangler binary) or an early exit fails beforeAll at once instead of after the health deadline.
-  const died = new Promise<never>((_, reject) => {
-    worker!.once('error', reject);
-    worker!.once('exit', (code, signal) => reject(new Error(`agent wrangler dev exited (${code ?? signal})`)));
-  });
-  died.catch(() => {});
-  await Promise.race([waitHealthy(agent, 90_000, 'agent Worker'), died]);
+  const started = await startOnFreePort('agent wrangler dev', (port) =>
+    spawnGroup(WRANGLER, ['dev', '--config', path.join(here, 'workers/wrangler.toml'), '--port', String(port), '--ip', '127.0.0.1', '--persist-to', path.join(here, 'workers/.wrangler/e2e')], {
+      cwd: path.join(here, 'workers'),
+      stdio: ['ignore', log, log],
+      env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false' },
+    }),
+  );
+  worker = started.child;
+  agent = started.url;
 }, 180_000);
 afterAll(async () => {
   // Every step runs even if an earlier one fails, so no wrangler or browser outlives the suite.

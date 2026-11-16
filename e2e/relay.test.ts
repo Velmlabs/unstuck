@@ -9,7 +9,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
-import { cdpFor, freePort, RELAY_KEY, startRelay, tapStart } from './relay-harness';
+import { cdpFor, launchWithCdpPort, RELAY_KEY, startRelay, tapStart } from './relay-harness';
 import { waitFramed } from './framed';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -210,8 +210,7 @@ describe('takeover through a relay, end to end', () => {
   }, 90_000);
 
   it('MCP server × Node relay', async () => {
-    const port = await freePort();
-    const browser = await chromium.launch({ args: [`--remote-debugging-port=${port}`] });
+    const { browser, port } = await launchWithCdpPort(chromium);
     const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
     await page.goto(site);
     const { targetInfo } = await (await page.context().newCDPSession(page)).send('Target.getTargetInfo');

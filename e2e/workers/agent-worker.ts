@@ -21,17 +21,20 @@ export class AgentDO {
   private link: TakeoverLink | null = null;
   private result: TakeoverResult | { status: 'error'; detail: string } | null = null;
 
+  constructor(private readonly ctx: DurableObjectState) {}
+
   async fetch(req: Request): Promise<Response> {
     const { pathname } = new URL(req.url);
     if (req.method === 'POST' && pathname === '/run') {
       const run = (await req.json()) as RunRequest;
       this.link = null;
       this.result = null;
-      // Returns at once: the takeover keeps running in this object while the test polls /link and /result.
-      void this.takeover(run).then(
+      // Returns at once: the takeover keeps running in this object (waitUntil, as the docs recommend) while the test
+      // polls /link and /result.
+      this.ctx.waitUntil(this.takeover(run).then(
         (r) => (this.result = r),
         (e) => (this.result = { status: 'error', detail: String((e as Error)?.message ?? e) }),
-      );
+      ));
       return new Response(null, { status: 202 });
     }
     if (pathname === '/link') return this.link ? Response.json(this.link) : new Response(null, { status: 204 });

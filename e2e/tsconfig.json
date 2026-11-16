@@ -1,1 +1,1 @@
-{ "extends": "../tsconfig.base.json", "compilerOptions": { "noEmit": true, "types": ["node"] }, "include": ["*.ts"] }
+{ "extends": "../tsconfig.base.json", "compilerOptions": { "noEmit": true, "lib": ["ES2022", "DOM", "DOM.Iterable"], "types": ["node"] }, "include": ["*.ts"] }
