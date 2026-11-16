@@ -37,9 +37,9 @@ export async function edgeSmoke(appDir) {
   } finally {
     fs.rmSync(entry, { force: true });
   }
+  // No input can be a Node built-in here: on the neutral platform with nothing external, esbuild can't resolve one, so
+  // it fails the build above (reported with its importer).
   const inputs = Object.keys(result.metafile.inputs);
-  const nodeInputs = inputs.filter((i) => i.startsWith('node:'));
-  if (nodeInputs.length) throw new Error(`edge entry pulls in Node built-ins: ${nodeInputs.join(', ')}`);
   const bytes = result.outputFiles.reduce((n, f) => n + f.contents.length, 0);
   if (bytes > MAX_BYTES) throw new Error(`edge bundle is ${(bytes / 1024).toFixed(0)} KiB (limit 1024 KiB)`);
   return { bytes, inputs: inputs.length };
