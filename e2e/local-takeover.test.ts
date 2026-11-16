@@ -234,6 +234,15 @@ describe('local takeover end to end', () => {
       const box = (await el.boundingBox())!;
       expect(box.x + box.width).toBeLessThanOrEqual(width);
     }
+    // Help's tooltip (a long-press) stays on screen, clear of the right edge.
+    const hb = (await human.getByRole('button', { name: 'Help' }).boundingBox())!;
+    const cdp = await human.context().newCDPSession(human);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: hb.x + hb.width / 2, y: hb.y + hb.height / 2, id: 1 }] });
+    await human.getByRole('tooltip').waitFor({ timeout: 5_000 });
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    const tb = (await human.getByRole('tooltip').boundingBox())!;
+    expect(tb.x).toBeGreaterThanOrEqual(0);
+    expect(tb.x + tb.width).toBeLessThanOrEqual(width - 4);
     await human.getByRole('button', { name: 'Done' }).click();
     await expect(result).resolves.toMatchObject({ status: 'resolved' });
     await ctx.close();
@@ -407,13 +416,19 @@ describe('drag CAPTCHAs (sliders, jigsaw slider, drag-the-piece, drag and drop)'
       await fingerDrag(human, a, b, { steps: o.flick ? 10 : 24, ...o });
     };
 
-    // Press and hold, then drag (the default: a plain swipe would move, not drag).
-    await drag('#knob', 250, 0, { holdMs: 400 });
+    // A plain swipe over the slider moves (nothing to scroll here) and leaves the slider alone.
+    await drag('#knob', 250, 0);
+    await new Promise((r) => setTimeout(r, 300));
+    expect(await page.evaluate('window.slider')).toBe('idle');
+    expect(await page.evaluate("document.getElementById('knob').style.left")).toBe('');
+
+    // Press and hold, then drag (the hold engages at 350 ms).
+    await drag('#knob', 250, 0, { holdMs: 500 });
     await expect.poll(() => page.evaluate('window.slider'), { timeout: 10_000 }).toBe('ok');
 
     const piece = await centerOf(page, '#piece');
     const hole = await centerOf(page, '#hole');
-    await drag('#piece', hole.x - piece.x, hole.y - piece.y, { holdMs: 400 });
+    await drag('#piece', hole.x - piece.x, hole.y - piece.y, { holdMs: 500 });
     await expect.poll(() => page.evaluate('window.puzzle'), { timeout: 10_000 }).toBe('ok');
 
     // Drag mode: a swipe drags at once.
@@ -457,7 +472,26 @@ describe('swipe to move', () => {
     // Swipes up from low on the mirror (over the tiles) until the page is at its bottom.
     const maxY = (await page.evaluate('document.documentElement.scrollHeight - innerHeight')) as number;
     expect(maxY).toBeGreaterThan(500);
-    let before = 0;
+    // The page scrolls by the finger's distance in page px (screen px × page width / the page image's width on
+    // screen): the content stays under the finger.
+    const shown = Math.min(box.width / size.width, box.height / size.height);
+    const from = box.y + box.height * 0.8;
+    const to = box.y + box.height * 0.2;
+    await fingerDrag(human, { x, y: from }, { x, y: to }, { steps: 16 });
+    const lifted = from - (to + Math.sin(16) * 1.5); // fingerDrag's last point carries its wobble
+    // Every wheel has arrived once the page stops moving (the last one goes at the lift).
+    await expect.poll(() => page.evaluate('scrollY'), { timeout: 5_000 }).toBeGreaterThan(0);
+    let first = -1;
+    await expect
+      .poll(async () => {
+        const was = first;
+        await new Promise((r) => setTimeout(r, 150));
+        first = (await page.evaluate('scrollY')) as number;
+        return first === was;
+      }, { timeout: 5_000 })
+      .toBe(true);
+    expect(Math.abs(first - lifted / shown)).toBeLessThanOrEqual(3);
+    let before = first;
     for (let i = 0; i < 8 && before < maxY; i++) {
       await fingerDrag(human, { x, y: box.y + box.height * 0.8 }, { x, y: box.y + box.height * 0.2 }, { steps: 16 });
       await expect.poll(() => page.evaluate('scrollY'), { timeout: 5_000 }).toBeGreaterThan(before);

@@ -75,6 +75,8 @@ const FINAL_SCREENS: Partial<Record<SessionStatus, Screen>> = {
   failed: { kind: 'message', title: 'The page closed or something went wrong', body: 'The agent will be told. You can close this tab.', tone: 'error' },
 };
 
+/** The viewer's own controls: keys pressed on them are not sent to the agent's page. */
+const CHROME = 'button, .topbar, .bottombar, .stage-controls, .sheet';
 const BUTTONS: Record<number, 'left' | 'middle' | 'right'> = { 0: 'left', 1: 'middle', 2: 'right' };
 const SCROLL_FRACTION = 0.6;
 
@@ -120,12 +122,16 @@ const TAP_SLOP_PX = 10;
  *     finger was really down (TAP_MIN_MS..TAP_MAX_MS), at the press point, so the page sees a real tap's duration;
  *   - a swipe (moved past the slop before HOLD_MS): a move, like a map. Nothing reaches the page as mouse input, so a
  *     swipe never clicks. Zoomed in, the finger first pans the view (clamped like a pinch's pan); whatever the view
- *     can't take (at fit, or at its edge) scrolls the agent's page: a wheel at the finger's page point, in page px
- *     through the current scale, the content following the finger (finger up, page down). At most one wheel per
- *     MOVE_MS: the movement in between adds up and goes with the next one, and what is left goes at the lift;
- *   - a hold (still for HOLD_MS): the press is sent then (press-and-hold challenges), and if the finger then moves it
- *     is a mouse drag: moves as they come (one per MOVE_MS, the newest held back sent when the tick ends), the release
- *     where it lifts. So press and hold briefly, then drag: a slider or a puzzle piece;
+ *     can't take (at fit, or at its edge) scrolls the agent's page: a wheel at the page point where the finger landed
+ *     (kept for the whole swipe, as a touch scroll latches onto what it started on), in page px through the current
+ *     scale, the content following the finger (finger up, page down). A swipe that starts mostly vertical (or
+ *     horizontal) scrolls only that axis, so a wobble never hands the scroll to a sideways scroller (a carousel); a
+ *     diagonal one scrolls both. At most one wheel per MOVE_MS: the movement in between adds up and goes with the next
+ *     one, and what is left goes at the lift (a cancel drops it);
+ *   - a hold (still for HOLD_MS): the press is sent then (press-and-hold challenges), with a short buzz and a ring
+ *     under the finger, and if the finger then moves it is a mouse drag: moves as they come (one per MOVE_MS, the
+ *     newest held back sent when the tick ends), the release where it lifts. So press and hold, then drag: a slider
+ *     or a puzzle piece;
  *   - in Drag mode (the rail's toggle, for long drag puzzles) a swipe is a mouse drag at once instead: the press where
  *     the finger landed, then a move where it crossed the slop one throttle tick later, then moves as they come.
  * - Two fingers pinch to zoom around their midpoint and pan as the midpoint moves. A second finger after a press was
@@ -135,7 +141,9 @@ const TAP_SLOP_PX = 10;
  * - A new first finger (isPrimary: no other finger is down) starts from a clean state, in case a lift was never
  *   reported; so do a lost pointer capture, the page being hidden and the session leaving live.
  */
-const HOLD_MS = 250;
+const HOLD_MS = 350;
+/** How long the ring under a finger shows when a hold engages. */
+const HOLD_RING_MS = 300;
 const TAP_MIN_MS = 40;
 const TAP_MAX_MS = 250;
 const MOVE_MS = 16;
@@ -190,6 +198,17 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   /** The help sheet is open: the mirror takes no input until it closes (the session carries on). */
   const [helping, setHelping] = useState(false);
   const helpButton = useRef<HTMLButtonElement | null>(null);
+  const helpingRef = useRef(false);
+  helpingRef.current = helping;
+  /** Keys pressed while Help was open (the Esc or Enter that closed it): their keyups never reach the page either. */
+  const helpKeys = useRef(new Set<string>());
+  /** Focus goes back to Help once the sheet is gone and the viewer is no longer inert. */
+  const refocusHelp = useRef(false);
+  /** What a screen reader announces when Drag mode changes. */
+  const [announce, setAnnounce] = useState('');
+  /** The ring under the finger when a hold engages (stage px), and its timer. */
+  const [holdRing, setHoldRing] = useState<{ x: number; y: number; n: number } | null>(null);
+  const holdRingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Drag mode: a one-finger swipe drags on the page at once. Off for every new takeover (never stored). */
   const [dragMode, setDragMode] = useState(false);
   const dragModeRef = useRef(false);
@@ -235,7 +254,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
    * A swipe: the finger, where it was last seen (client px) and its page point; the scroll not sent yet (page px) and
    * the wheel throttle's tick.
    */
-  const swipe = useRef<{ id: number; x: number; y: number; p: Point | null } | null>(null);
+  const swipe = useRef<{ id: number; x: number; y: number; p: Point | null; axis: 'x' | 'y' | 'free' } | null>(null);
   const wheelDue = useRef({ dx: 0, dy: 0 });
   const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const moveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -372,7 +391,16 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const code = e.code || e.key;
+      // The keyup of a key pressed while Help was open (the Esc or Enter that closed it) stays with the viewer.
+      if (e.type === 'keyup' && helpKeys.current.delete(code)) return;
+      if (helpingRef.current) {
+        if (e.type === 'keydown') helpKeys.current.add(code);
+        return;
+      }
       if (!liveRef.current || e.target === bridgeRef.current) return;
+      // A key on the viewer's own controls (Enter or Space on a button, Tab between them) is theirs, not the page's.
+      if (e.target instanceof Element && e.target.closest(CHROME)) return;
       const m = keyEventToMessage(e);
       if (!m) return;
       e.preventDefault();
@@ -519,8 +547,31 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     setHelping(true);
   };
   const closeHelp = () => {
+    refocusHelp.current = true;
     setHelping(false);
-    helpButton.current?.focus({ preventScroll: true });
+  };
+  const toggleDragMode = () => {
+    const on = !dragModeRef.current;
+    dragModeRef.current = on;
+    setDragMode(on);
+    setAnnounce(on ? 'Drag mode on' : 'Drag mode off');
+  };
+  /** A hold engaged: a short buzz where the phone can, and a ring under the finger. */
+  const holdFeedback = (at: Point) => {
+    try {
+      navigator.vibrate?.(10);
+    } catch {
+      // vibration blocked (no user activation yet, or a policy): the ring still shows
+    }
+    const st = stageRef.current;
+    if (!st) return;
+    const r = st.getBoundingClientRect();
+    if (holdRingTimer.current) clearTimeout(holdRingTimer.current);
+    setHoldRing((prev) => ({ x: at.x - r.left, y: at.y - r.top, n: (prev?.n ?? 0) + 1 }));
+    holdRingTimer.current = setTimeout(() => {
+      holdRingTimer.current = null;
+      setHoldRing(null);
+    }, HOLD_RING_MS);
   };
 
   /** Sends a tap's delayed release now (a new press, or its timer). */
@@ -575,12 +626,12 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     if (held.current) clearTimeout(held.current.timer);
     held.current = null;
   };
-  /** Sends the scroll a swipe has built up (page px), at the finger's page point; nothing when it rounds to zero. */
+  /** Sends the scroll a swipe has built up (page px), where the swipe landed; nothing when it rounds to zero. */
   const sendWheel = () => {
     const due = wheelDue.current;
     const p = swipe.current?.p ?? null;
-    const dx = Math.round(due.dx * 10) / 10;
-    const dy = Math.round(due.dy * 10) / 10;
+    const dx = Math.round(due.dx * 10) / 10 || 0; // never -0
+    const dy = Math.round(due.dy * 10) / 10 || 0;
     if (!p || (dx === 0 && dy === 0)) return false;
     due.dx -= dx;
     due.dy -= dy;
@@ -597,12 +648,15 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     };
     wheelTimer.current = setTimeout(tickEnd, MOVE_MS);
   };
-  /** A swipe ends (the lift, a cancel, a second finger, a reset): what is left of its scroll goes now, if live. */
-  const endSwipe = () => {
+  /**
+   * A swipe ends (the lift, a second finger, a reset): what is left of its scroll goes now, if live. A cancel
+   * (`flush` false: the browser took the touch away) drops it.
+   */
+  const endSwipe = (flush = true) => {
     if (!swipe.current) return;
     if (wheelTimer.current) clearTimeout(wheelTimer.current);
     wheelTimer.current = null;
-    if (liveRef.current) sendWheel();
+    if (flush && liveRef.current) sendWheel();
     swipe.current = null;
     wheelDue.current = { dx: 0, dy: 0 };
   };
@@ -621,12 +675,17 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const box = mirrorBox();
     const v = viewRef.current;
     if (!isFit(v)) {
-      const panned = clampView({ scale: v.scale, x: v.x + dx, y: v.y + dy }, box, page, controlsInset());
+      // Pan from the view as it should be (in range of the mirror now): a correction to a stale view is not a scroll.
+      const inset = controlsInset();
+      const base = clampView(v, box, page, inset);
+      const panned = clampView({ scale: base.scale, x: base.x + dx, y: base.y + dy }, box, page, inset);
       if (panned.x !== v.x || panned.y !== v.y) setView(panned);
-      dx -= panned.x - v.x;
-      dy -= panned.y - v.y;
+      dx -= panned.x - base.x;
+      dy -= panned.y - base.y;
     }
-    sw.p = clampToPage(at, box, page, viewRef.current);
+    // The page scrolls along the swipe's axis only (the view above pans freely).
+    if (sw.axis === 'y') dx = 0;
+    if (sw.axis === 'x') dy = 0;
     const k = page.width / imageRect(box, page, viewRef.current).width;
     if (!Number.isFinite(k)) return;
     wheelDue.current.dx -= dx * k;
@@ -640,6 +699,12 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     if (!h || !h.p || !liveRef.current) return;
     press(h, h.p, 'left', 0);
     pressTouch.current = { id: h.id, x: h.x, y: h.y };
+  };
+  /** The finger stayed still for HOLD_MS: pressed there, and the person feels and sees it. */
+  const holdEngaged = () => {
+    const h = held.current;
+    commitHeld();
+    if (h && pressed.current) holdFeedback(h);
   };
   /**
    * Forgets every finger: a lift that was never reported (a lost capture, the page hidden, the session no longer live,
@@ -672,7 +737,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     const at = { x: e.clientX, y: e.clientY };
     touches.current.set(e.pointerId, at);
     if (touches.current.size === 1) {
-      held.current = { id: e.pointerId, ...at, p: point(e), downAt: performance.now(), timer: setTimeout(commitHeld, HOLD_MS) };
+      held.current = { id: e.pointerId, ...at, p: point(e), downAt: performance.now(), timer: setTimeout(holdEngaged, HOLD_MS) };
       return;
     }
     if (touches.current.size !== 2 || pinch.current) return; // a third finger: ignored
@@ -721,7 +786,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     if (e.pointerType === 'touch') {
       touches.current.delete(e.pointerId);
       if (held.current?.id === e.pointerId) dropHeld();
-      if (swipe.current?.id === e.pointerId) endSwipe();
+      if (swipe.current?.id === e.pointerId) endSwipe(false);
       if (pinch.current && touches.current.size === 0) pinch.current = null;
       if (pressTouch.current?.id !== e.pointerId) return;
     }
@@ -787,9 +852,21 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       if (h && h.id === e.pointerId) {
         if (Math.hypot(at.x - h.x, at.y - h.y) < TAP_SLOP_PX) return;
         if (!dragModeRef.current) {
-          // A swipe: a move from where the finger landed, so the content follows the finger all the way.
+          // A swipe: a move from where the finger landed, so the content follows the finger all the way. Its axis is
+          // set by how it started: mostly up/down or mostly sideways scrolls that axis only.
           dropHeld();
-          swipe.current = { id: h.id, x: h.x, y: h.y, p: h.p };
+          const ax = Math.abs(at.x - h.x);
+          const ay = Math.abs(at.y - h.y);
+          const page = pageSize.current;
+          const landed = clampToPage(h, mirrorBox(), page, viewRef.current);
+          swipe.current = {
+            id: h.id,
+            x: h.x,
+            y: h.y,
+            p: landed && { x: Math.min(landed.x, page.width - 1), y: Math.min(landed.y, page.height - 1) },
+            axis: ay > 2 * ax ? 'y' : ax > 2 * ay ? 'x' : 'free',
+          };
+          wheelDue.current = { dx: 0, dy: 0 };
           return swipeTo(at);
         }
         // Drag mode: the press now, the move to where it crossed the slop one tick later (never in the same tick).
@@ -873,6 +950,9 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       if (wheelTimer.current) clearTimeout(wheelTimer.current);
       wheelTimer.current = null;
       swipe.current = null;
+      wheelDue.current = { dx: 0, dy: 0 };
+      if (holdRingTimer.current) clearTimeout(holdRingTimer.current);
+      holdRingTimer.current = null;
       lastMove.current = null;
       moveQueued.current = false; // a mirror mounted again must not start with its moves throttled away
       stopZoomAnimation();
@@ -883,6 +963,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   useEffect(() => {
     if (!live) resetTouches();
   }, [live]);
+
+  // Help closed: focus goes back to its button, once the viewer behind the sheet is no longer inert.
+  useEffect(() => {
+    if (helping || !refocusHelp.current) return;
+    refocusHelp.current = false;
+    helpButton.current?.focus({ preventScroll: true });
+  }, [helping]);
 
   // The keyboard bridge: every key the person presses goes straight to the agent's page.
   useEffect(() => {
@@ -971,7 +1058,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
 
   return (
     <div class="app">
-      <header class="topbar">
+      {/* While Help is open everything behind it is inert: no taps, no focus, nothing for a screen reader. */}
+      <header class="topbar" inert={helping}>
         <div class="topbar-text">
           <p class="reason">{info?.reason ?? alert?.reason ?? 'Connecting to the agent…'}</p>
           {site ? <p class="site">{site}</p> : null}
@@ -992,7 +1080,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         </TipButton>
       </header>
 
-      <div class="stage" ref={stageRef}>
+      <div class="stage" ref={stageRef} inert={helping}>
         <div class="viewport" ref={viewportRef}>
           <canvas
             ref={canvasRef}
@@ -1034,12 +1122,16 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
               label="Drag mode"
               pressed={dragMode}
               tip={dragMode ? DRAG_TIP_ON : DRAG_TIP_OFF}
-              onClick={() => setDragMode((on) => !on)}
+              onClick={toggleDragMode}
             >
               <DragIcon />
             </TipButton>
           </div>
         </div>
+        {holdRing ? <span key={holdRing.n} data-testid="hold-ring" class="hold-ring" aria-hidden="true" style={{ left: `${holdRing.x}px`, top: `${holdRing.y}px` }} /> : null}
+        <p class="sr-only" aria-live="polite" data-testid="announce">
+          {announce}
+        </p>
         {hint ? (
           <p class="first-hint" role="note">
             {hint}
@@ -1074,7 +1166,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         ) : null}
       </div>
 
-      <footer class="bottombar">
+      <footer class="bottombar" inert={helping}>
         <TipButton tips={tips} id="keyboard" side="top" align="start" class="btn bar-btn bar-neutral" active={typing} tip="Open your keyboard to type into the field you tapped." onClick={() => openBridge('text', null)}>
           <KeyboardIcon />
           <span class="bar-label">Keyboard</span>

@@ -1093,12 +1093,12 @@ describe('zoom', () => {
     const canvas = goLive();
     zoom2x();
     finger(canvas, 'pointerdown', 1, 0, 0);
-    tick(250);
+    tick(350);
     finger(canvas, 'pointermove', 1, 40, 0);
     tick(16);
     finger(canvas, 'pointerup', 1, 40, 0);
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(250);
+    tick(350);
     finger(canvas, 'pointerup', 1, 100, 100);
     expect(steps()).toEqual([
       ['down', 320, 180],
@@ -1113,46 +1113,66 @@ describe('zoom', () => {
     setup();
     const canvas = goLive();
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(250);
+    tick(350);
     expect(mice().map((m) => m.action)).toEqual(['down']);
     finger(canvas, 'pointerup', 1, 100, 100);
     expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
     setBox(canvas, 0, 0, 640, 720); // letterboxed: the page sits between y 180 and 540
     fingerTap(canvas, 100, 20);
     finger(canvas, 'pointerdown', 1, 100, 20);
-    tick(300);
+    tick(400);
     finger(canvas, 'pointermove', 1, 100, 80);
     finger(canvas, 'pointerup', 1, 100, 80);
     expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
   });
 
   describe('swipe to move, hold to drag', () => {
-    const wheels = () => sent.filter((m) => (m as { t: string }).t === 'wheel');
+    const wheels = () => sent.filter((m) => (m as { t: string }).t === 'wheel') as { x: number; y: number; dx: number; dy: number }[];
+    const dys = () => wheels().map((m) => m.dy);
 
-    it('a swipe at fit scrolls the page at the finger, in page px, the content following the finger; no mouse input', () => {
+    it('a swipe at fit scrolls the page where it landed, in page px, the content following the finger; no mouse input', () => {
       setup();
       const canvas = goLive(); // 640×360 showing 1280×720: 1 screen px = 2 page px
       finger(canvas, 'pointerdown', 1, 320, 180);
       finger(canvas, 'pointermove', 1, 320, 172); // within the slop: nothing yet
       expect(sent).toEqual([]);
-      finger(canvas, 'pointermove', 1, 320, 150); // finger up 30 px from where it landed: the page scrolls down 60
-      expect(sent).toEqual([{ t: 'wheel', x: 640, y: 300, dx: 0, dy: 60 }]);
+      finger(canvas, 'pointermove', 1, 323, 150); // finger up 30 px from where it landed: the page scrolls down 60
+      expect(sent).toEqual([{ t: 'wheel', x: 640, y: 360, dx: 0, dy: 60 }]);
       finger(canvas, 'pointermove', 1, 325, 145); // inside the tick: held back, added up
       finger(canvas, 'pointermove', 1, 330, 140);
       expect(wheels()).toHaveLength(1);
       tick(16);
-      expect(wheels().at(-1)).toEqual({ t: 'wheel', x: 660, y: 280, dx: -20, dy: 20 });
+      // Mostly vertical: the sideways wobble never scrolls (a carousel under the finger would take the wheel).
+      expect(wheels().at(-1)).toEqual({ t: 'wheel', x: 640, y: 360, dx: 0, dy: 20 });
       finger(canvas, 'pointermove', 1, 330, 120);
       finger(canvas, 'pointermove', 1, 330, 100); // the tick is still running: both wait
       expect(wheels()).toHaveLength(2);
-      finger(canvas, 'pointerup', 1, 330, 100); // the rest goes at the lift
-      expect(wheels().at(-1)).toEqual({ t: 'wheel', x: 660, y: 200, dx: 0, dy: 80 });
+      finger(canvas, 'pointerup', 1, 330, 100); // the rest goes at the lift, still where the swipe landed
+      expect(wheels().at(-1)).toEqual({ t: 'wheel', x: 640, y: 360, dx: 0, dy: 80 });
       tick(300);
       expect(wheels()).toHaveLength(3);
       expect(mice()).toEqual([]);
-      // No movement lost: 80 screen px up and 10 right, 160 and 20 page px.
-      const sum = wheels().reduce<[number, number]>((a, m) => [a[0] + (m as { dx: number }).dx, a[1] + (m as { dy: number }).dy], [0, 0]);
-      expect(sum).toEqual([-20, 160]);
+      // No movement lost: 80 screen px up, 160 page px.
+      expect(dys().reduce((a, b) => a + b, 0)).toBe(160);
+    });
+
+    it('a mostly sideways swipe scrolls sideways only; a diagonal one scrolls both ways', () => {
+      setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 1, 300, 200);
+      finger(canvas, 'pointermove', 1, 340, 205);
+      tick(16);
+      finger(canvas, 'pointermove', 1, 360, 230); // later vertical movement still doesn't scroll down
+      finger(canvas, 'pointerup', 1, 360, 230);
+      expect(wheels().map((m) => [m.dx, m.dy])).toEqual([
+        [-80, 0],
+        [-40, 0],
+      ]);
+      sent = [];
+      finger(canvas, 'pointerdown', 1, 300, 200);
+      finger(canvas, 'pointermove', 1, 320, 215);
+      finger(canvas, 'pointerup', 1, 320, 215);
+      expect(wheels().map((m) => [m.dx, m.dy])).toEqual([[-40, -30]]);
     });
 
     it('the throttle sends at most one wheel per tick, and stops once the finger rests', () => {
@@ -1164,7 +1184,7 @@ describe('zoom', () => {
       tick(16);
       tick(16); // nothing came during this tick: the throttle goes quiet
       finger(canvas, 'pointermove', 1, 320, 265); // a free tick: sent at once
-      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([40, 20, 10]);
+      expect(dys()).toEqual([40, 20, 10]);
       finger(canvas, 'pointerup', 1, 320, 265);
       expect(wheels()).toHaveLength(3); // nothing left to send
     });
@@ -1179,45 +1199,147 @@ describe('zoom', () => {
       finger(canvas, 'pointerup', 1, 100, 100);
       tick(300);
       expect(mice()).toEqual([]);
-      expect(wheels().map((m) => (m as { dx: number }).dx)).toEqual([-30, 30]);
+      expect(wheels().map((m) => m.dx)).toEqual([-30, 30]);
     });
 
-    it('zoomed in, a swipe pans the view first and scrolls the page with what is left at its edge', () => {
+    it('letterboxed, a swipe that lands beside the page scrolls at the nearest page edge (inside the page)', () => {
+      setup();
+      const canvas = goLive();
+      setBox(canvas, 0, 0, 640, 720); // the page sits between y 180 and 540, 1 screen px = 2 page px
+      finger(canvas, 'pointerdown', 1, 320, 100);
+      finger(canvas, 'pointermove', 1, 320, 60);
+      finger(canvas, 'pointerup', 1, 320, 60);
+      finger(canvas, 'pointerdown', 1, 320, 650);
+      finger(canvas, 'pointermove', 1, 320, 700);
+      finger(canvas, 'pointerup', 1, 320, 700);
+      expect(wheels()).toEqual([
+        { t: 'wheel', x: 640, y: 0, dx: 0, dy: 80 },
+        { t: 'wheel', x: 640, y: 719, dx: 0, dy: -100 },
+      ]);
+      expect(mice()).toEqual([]);
+    });
+
+    it('zoomed in, a swipe pans the view first, scrolls the page with what is left at its edge, and pans back when it reverses', () => {
       setup();
       const canvas = goLive();
       zoom2x(); // translate(-320px, -180px): 180 px of room to pan down the page, 1 screen px = 1 page px
-      finger(canvas, 'pointerdown', 1, 300, 300);
+      finger(canvas, 'pointerdown', 1, 300, 300); // page point (620, 480)
       finger(canvas, 'pointermove', 1, 300, 200); // finger up 100: the view pans 100, nothing to the page
       expect(canvas.style.transform).toBe('translate(-320px, -280px) scale(2)');
       expect(sent).toEqual([]);
       tick(16);
       finger(canvas, 'pointermove', 1, 300, 100); // 80 more fit in the view, 20 scroll the page
       expect(canvas.style.transform).toBe('translate(-320px, -360px) scale(2)');
-      expect(sent).toEqual([{ t: 'wheel', x: 620, y: 460, dx: 0, dy: 20 }]);
-      finger(canvas, 'pointerup', 1, 300, 100);
-      expect(mice()).toEqual([]);
+      expect(sent).toEqual([{ t: 'wheel', x: 620, y: 480, dx: 0, dy: 20 }]);
+      tick(16);
+      finger(canvas, 'pointermove', 1, 300, 150); // back down 50: the view pans back, the page stays
+      expect(canvas.style.transform).toBe('translate(-320px, -310px) scale(2)');
+      finger(canvas, 'pointerup', 1, 300, 150);
+      tick(50);
       expect(wheels()).toHaveLength(1);
+      expect(mice()).toEqual([]);
     });
 
-    it('a hold then a drag is a mouse drag: the press at the hold, moves as they come, the release where it lifts', () => {
+    it('zoomed, a view left out of range by a resize is corrected, never sent to the page as a scroll', () => {
+      setup();
+      const canvas = goLive();
+      zoom2x();
+      finger(canvas, 'pointerdown', 1, 600, 340);
+      finger(canvas, 'pointermove', 1, 0, 0); // pans to the far corner: translate(-640px, -360px)
+      finger(canvas, 'pointerup', 1, 0, 0);
+      expect(canvas.style.transform).toBe('translate(-640px, -360px) scale(2)');
+      tick(50);
+      sent = [];
+      setBox(canvas, 0, 0, 320, 180); // smaller, no resize event yet: the view is out of range
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      finger(canvas, 'pointermove', 1, 100, 130);
+      finger(canvas, 'pointerup', 1, 100, 130);
+      expect(canvas.style.transform).toBe('translate(-320px, -150px) scale(2)');
+      expect(sent).toEqual([]);
+    });
+
+    it('a hold engages at 350 ms, with a buzz and a ring under the finger; then a drag is a mouse drag', () => {
+      const vibrate = vi.fn(() => true);
+      Object.defineProperty(navigator, 'vibrate', { value: vibrate, configurable: true });
+      try {
+        setup();
+        const canvas = goLive();
+        finger(canvas, 'pointerdown', 1, 100, 100);
+        finger(canvas, 'pointermove', 1, 104, 100); // within the slop
+        tick(349);
+        expect(mice()).toEqual([]);
+        expect(screen.queryByTestId('hold-ring')).toBeNull();
+        tick(1);
+        expect(steps()).toEqual([['down', 200, 200]]);
+        expect(vibrate).toHaveBeenCalledWith(10);
+        const ring = screen.getByTestId('hold-ring') as HTMLElement;
+        expect([ring.style.left, ring.style.top]).toEqual(['100px', '100px']);
+        finger(canvas, 'pointermove', 1, 130, 100);
+        finger(canvas, 'pointermove', 1, 140, 100); // throttled: sent when the tick ends
+        tick(16);
+        finger(canvas, 'pointerup', 1, 160, 100);
+        expect(steps()).toEqual([
+          ['down', 200, 200],
+          ['move', 260, 200],
+          ['move', 280, 200],
+          ['move', 320, 200],
+          ['up', 320, 200],
+        ]);
+        expect(wheels()).toEqual([]);
+        tick(300);
+        expect(screen.queryByTestId('hold-ring')).toBeNull();
+      } finally {
+        delete (navigator as { vibrate?: unknown }).vibrate;
+      }
+    });
+
+    it('crossing the slop at 349 ms is a swipe, at 351 ms a drag; moving on past 350 ms never fires the hold', () => {
       setup();
       const canvas = goLive();
       finger(canvas, 'pointerdown', 1, 100, 100);
-      finger(canvas, 'pointermove', 1, 104, 100); // within the slop
-      tick(250);
-      expect(steps()).toEqual([['down', 200, 200]]);
-      finger(canvas, 'pointermove', 1, 130, 100);
-      finger(canvas, 'pointermove', 1, 140, 100); // throttled: sent when the tick ends
-      tick(16);
-      finger(canvas, 'pointerup', 1, 160, 100);
+      tick(349);
+      finger(canvas, 'pointermove', 1, 100, 130);
+      for (let t = 0; t < 10; t++) {
+        tick(50); // well past 350 ms, still moving
+        finger(canvas, 'pointermove', 1, 100, 140 + t * 10);
+      }
+      finger(canvas, 'pointerup', 1, 100, 240);
+      tick(500);
+      expect(mice()).toEqual([]);
+      expect(wheels().length).toBeGreaterThan(1);
+      expect(screen.queryByTestId('hold-ring')).toBeNull();
+      sent = [];
+      finger(canvas, 'pointerdown', 1, 100, 100);
+      tick(351);
+      finger(canvas, 'pointermove', 1, 100, 130);
+      finger(canvas, 'pointerup', 1, 100, 130);
       expect(steps()).toEqual([
         ['down', 200, 200],
-        ['move', 260, 200],
-        ['move', 280, 200],
-        ['move', 320, 200],
-        ['up', 320, 200],
+        ['move', 200, 260],
+        ['up', 200, 260],
       ]);
       expect(wheels()).toEqual([]);
+    });
+
+    it('where vibration is blocked, the ring still shows', () => {
+      Object.defineProperty(navigator, 'vibrate', {
+        value: () => {
+          throw new Error('blocked');
+        },
+        configurable: true,
+      });
+      try {
+        setup();
+        const canvas = goLive();
+        finger(canvas, 'pointerdown', 1, 100, 100);
+        tick(350);
+        expect(screen.getByTestId('hold-ring')).toBeTruthy();
+        finger(canvas, 'pointerdown', 1, 200, 100); // a second hold restarts the ring
+        tick(350);
+        expect((screen.getByTestId('hold-ring') as HTMLElement).style.left).toBe('200px');
+      } finally {
+        delete (navigator as { vibrate?: unknown }).vibrate;
+      }
     });
 
     it('a second finger during a swipe ends it cleanly (its scroll so far goes) and pinches; nothing else reaches the page', () => {
@@ -1227,7 +1349,7 @@ describe('zoom', () => {
       finger(canvas, 'pointermove', 1, 220, 150);
       finger(canvas, 'pointermove', 1, 220, 140); // held back by the tick
       finger(canvas, 'pointerdown', 2, 420, 140);
-      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([60, 20]);
+      expect(dys()).toEqual([60, 20]);
       finger(canvas, 'pointermove', 1, 120, 140);
       finger(canvas, 'pointermove', 2, 520, 140);
       expect(scaleOf(canvas)).toBe(2);
@@ -1239,21 +1361,22 @@ describe('zoom', () => {
       expect(mice()).toEqual([]);
     });
 
-    it('a cancel, a lost lift or the session leaving live ends a swipe; a wheel due after it is dropped when not live', () => {
+    it('a cancel drops what was not sent; a lost lift sends it; the session leaving live drops a wheel due', () => {
       setup();
       const canvas = goLive();
       finger(canvas, 'pointerdown', 1, 320, 180);
       finger(canvas, 'pointermove', 1, 320, 150);
-      finger(canvas, 'pointermove', 1, 320, 140);
-      finger(canvas, 'pointercancel', 1, 320, 140); // the rest goes
+      finger(canvas, 'pointermove', 1, 320, 140); // held back by the tick
+      finger(canvas, 'pointercancel', 1, 320, 140); // the browser took the touch: the rest is dropped
+      tick(50);
       finger(canvas, 'pointermove', 1, 320, 100); // no longer swiping
-      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([60, 20]);
-      // A swipe whose lift was never reported: the next first finger flushes it and starts clean.
+      expect(dys()).toEqual([60]);
+      // A swipe whose lift was never reported: the next first finger sends its rest and starts clean.
       finger(canvas, 'pointerdown', 2, 320, 180, true);
       finger(canvas, 'pointermove', 2, 320, 150);
       finger(canvas, 'pointermove', 2, 320, 145);
       fingerTap(canvas, 100, 100, 80, 3, true);
-      expect(wheels().map((m) => (m as { dy: number }).dy)).toEqual([60, 20, 60, 10]);
+      expect(dys()).toEqual([60, 60, 10]);
       expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
       // Not live with a wheel held back by the tick: it is dropped.
       finger(canvas, 'pointerdown', 4, 320, 180, true);
@@ -1261,22 +1384,50 @@ describe('zoom', () => {
       finger(canvas, 'pointermove', 4, 320, 140);
       act(() => handlers.onPhase('reconnecting'));
       tick(50);
-      expect(wheels()).toHaveLength(5);
+      expect(wheels()).toHaveLength(4);
     });
 
-    it('leaves no wheel running after unmount', () => {
-      const r = setup();
+    it('a lost pointer capture or the page being hidden mid-swipe ends it, sending its rest', () => {
+      setup();
       const canvas = goLive();
       finger(canvas, 'pointerdown', 1, 320, 180);
       finger(canvas, 'pointermove', 1, 320, 150);
       finger(canvas, 'pointermove', 1, 320, 140);
+      finger(canvas, 'lostpointercapture', 1, 320, 140);
+      finger(canvas, 'pointermove', 1, 320, 100); // forgotten
+      tick(50);
+      expect(dys()).toEqual([60, 20]);
+      finger(canvas, 'pointerdown', 1, 320, 180);
+      finger(canvas, 'pointermove', 1, 320, 150);
+      finger(canvas, 'pointermove', 1, 320, 145);
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+      try {
+        act(() => void document.dispatchEvent(new Event('visibilitychange')));
+      } finally {
+        Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+      }
+      finger(canvas, 'pointermove', 1, 320, 100);
+      tick(50);
+      expect(dys()).toEqual([60, 20, 60, 10]);
+      expect(mice()).toEqual([]);
+    });
+
+    it('leaves no wheel or ring running after unmount', () => {
+      const r = setup();
+      const canvas = goLive();
+      finger(canvas, 'pointerdown', 2, 500, 100, true);
+      tick(350); // a hold: its ring is showing
+      finger(canvas, 'pointerup', 2, 500, 100);
+      finger(canvas, 'pointerdown', 1, 320, 180, true);
+      finger(canvas, 'pointermove', 1, 320, 150);
+      finger(canvas, 'pointermove', 1, 320, 140);
       const before = sent.length;
       r.unmount();
-      act(() => void vi.advanceTimersByTime(100));
+      act(() => void vi.advanceTimersByTime(1000));
       expect(sent.length).toBe(before);
     });
 
-    it('a swipe before the first frame or off the page image scrolls nothing it cannot place', () => {
+    it('a swipe before the first frame scrolls nothing', () => {
       setup();
       act(() => handlers.onPhase('live'));
       const canvas = screen.getByTestId('screen');
@@ -1310,14 +1461,28 @@ describe('zoom', () => {
     it('is off again for a new session, and never stored', () => {
       setup();
       goLive();
+      const storage = () => JSON.stringify({ ...localStorage, ...sessionStorage });
+      const before = storage();
       fireEvent.click(btn('Drag mode'));
       expect(btn('Drag mode').getAttribute('aria-pressed')).toBe('true');
+      expect(storage()).toBe(before); // nothing written for it, in either storage
+      expect(storage()).not.toMatch(/drag/i);
       cleanup();
-      localStorage.clear();
-      setup();
+      setup(); // the same device: storage left as it was (the resume key brings it straight back in)
       goLive();
       expect(btn('Drag mode').getAttribute('aria-pressed')).toBe('false');
-      for (let i = 0; i < localStorage.length; i++) expect(localStorage.key(i)).not.toMatch(/drag/i);
+    });
+
+    it('a change is announced to screen readers', () => {
+      setup();
+      goLive();
+      const live = screen.getByTestId('announce');
+      expect(live.getAttribute('aria-live')).toBe('polite');
+      expect(live.textContent).toBe('');
+      fireEvent.click(btn('Drag mode'));
+      expect(live.textContent).toBe('Drag mode on');
+      fireEvent.click(btn('Drag mode'));
+      expect(live.textContent).toBe('Drag mode off');
     });
   });
 
@@ -1345,6 +1510,61 @@ describe('zoom', () => {
       expect(document.activeElement).toBe(btn('Help'));
     });
 
+    const key = (target: EventTarget, type: 'keydown' | 'keyup', k: string, code = k) =>
+      act(() => void target.dispatchEvent(new KeyboardEvent(type, { key: k, code, bubbles: true, cancelable: true })));
+
+    it('the viewer behind the sheet is inert while it is open, and not after', () => {
+      setup();
+      goLive();
+      const regions = () => [document.querySelector('.topbar')!, document.querySelector('.stage')!, document.querySelector('.bottombar')!];
+      for (const r of regions()) expect(r.hasAttribute('inert')).toBe(false);
+      fireEvent.click(btn('Help'));
+      for (const r of regions()) expect(r.hasAttribute('inert')).toBe(true);
+      expect(dialog()!.closest('[inert]')).toBeNull();
+      fireEvent.click(btn('Close'));
+      for (const r of regions()) expect(r.hasAttribute('inert')).toBe(false);
+    });
+
+    it('opens from the keyboard; Enter, Space and Tab on a viewer button never reach the page', () => {
+      setup();
+      goLive();
+      const help = btn('Help');
+      act(() => help.focus());
+      key(help, 'keydown', 'Enter');
+      key(help, 'keyup', 'Enter');
+      key(help, 'keydown', ' ', 'Space');
+      key(help, 'keydown', 'Tab');
+      key(btn('Zoom in'), 'keydown', 'Enter');
+      key(btn('Done'), 'keyup', 'Enter');
+      expect(sent).toEqual([]);
+      // The browser turns Enter on a focused button into a click: Help opens.
+      fireEvent.click(help);
+      expect(dialog()).toBeTruthy();
+      // Keys elsewhere still go to the page once it is closed.
+      fireEvent.click(btn('Close'));
+      key(document.body, 'keydown', 'a', 'KeyA');
+      expect(sent).toEqual([expect.objectContaining({ t: 'key', action: 'down' })]);
+    });
+
+    it('the key that closes Help (Esc, or Enter on Close) never reaches the page, down or up', () => {
+      setup();
+      goLive();
+      fireEvent.click(btn('Help'));
+      key(btn('Close'), 'keydown', 'Escape');
+      expect(dialog()).toBeNull();
+      key(document.body, 'keyup', 'Escape'); // the release lands outside the viewer's controls: still swallowed
+      expect(sent).toEqual([]);
+      fireEvent.click(btn('Help'));
+      key(btn('Close'), 'keydown', 'Enter');
+      fireEvent.click(btn('Close')); // Enter on a button clicks it
+      key(document.body, 'keyup', 'Enter');
+      expect(sent).toEqual([]);
+      // Only that one release is swallowed: the next Enter goes to the page.
+      key(document.body, 'keydown', 'Enter');
+      key(document.body, 'keyup', 'Enter');
+      expect(sent.map((m) => (m as { action: string }).action)).toEqual(['down', 'up']);
+    });
+
     it('closes with Esc (not sent to the page) and with a tap outside the card, not inside it', () => {
       setup();
       goLive();
@@ -1364,7 +1584,7 @@ describe('zoom', () => {
       setup();
       const canvas = goLive();
       finger(canvas, 'pointerdown', 1, 100, 100);
-      tick(250); // a hold: pressed
+      tick(350); // a hold: pressed
       fireEvent.click(btn('Help'));
       expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
       fingerTap(canvas, 100, 100);
@@ -1426,7 +1646,7 @@ describe('zoom', () => {
     setup();
     const canvas = goLive();
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(300);
+    tick(400);
     finger(canvas, 'pointerdown', 2, 300, 100);
     expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
     finger(canvas, 'pointermove', 2, 400, 100);
@@ -1440,7 +1660,7 @@ describe('zoom', () => {
     expect(mice()).toHaveLength(2);
     fireEvent.click(btn('Fit page to screen'));
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(250);
+    tick(350);
     finger(canvas, 'pointercancel', 1, 110, 100);
     expect(steps().slice(-3)).toEqual([
       ['down', 200, 200],
@@ -1463,7 +1683,7 @@ describe('zoom', () => {
     expect(mice().map((m) => m.action)).toEqual(['down', 'up', 'down', 'up']);
     // A press whose lift was lost is released before the new finger's tap.
     finger(canvas, 'pointerdown', 6, 100, 100, true);
-    tick(250);
+    tick(350);
     finger(canvas, 'pointermove', 6, 104, 100);
     fingerTap(canvas, 300, 100, 80, 7, true);
     expect(steps().slice(-3)).toEqual([
@@ -1479,7 +1699,7 @@ describe('zoom', () => {
     finger(canvas, 'pointerup', 9, 100, 100);
     expect(sent).toEqual([]);
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(250);
+    tick(350);
     finger(canvas, 'pointerup', 9, 300, 300);
     expect(mice().map((m) => m.action)).toEqual(['down']);
     finger(canvas, 'pointerup', 1, 100, 100);
@@ -1490,14 +1710,14 @@ describe('zoom', () => {
     setup();
     const canvas = goLive();
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(250);
+    tick(350);
     finger(canvas, 'lostpointercapture', 1, 100, 100);
     expect(mice().map((m) => m.action)).toEqual(['down', 'up']);
     finger(canvas, 'lostpointercapture', 1, 100, 100); // already forgotten: nothing
     expect(mice()).toHaveLength(2);
 
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(250);
+    tick(350);
     Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
     try {
       act(() => void document.dispatchEvent(new Event('visibilitychange')));
@@ -1509,7 +1729,7 @@ describe('zoom', () => {
     expect(mice()).toHaveLength(4);
 
     finger(canvas, 'pointerdown', 1, 100, 100);
-    tick(250);
+    tick(350);
     act(() => handlers.onPhase('reconnecting'));
     expect(mice().map((m) => m.action)).toEqual(['down', 'up', 'down', 'up', 'down', 'up']);
   });
@@ -1590,7 +1810,7 @@ describe('zoom', () => {
     finger(canvas, 'pointerdown', 2, 300, 100, true); // held back
     finger(canvas, 'pointerup', 2, 300, 100); // a tap: the first release goes first, then this press; release due in 40 ms
     expect(mice().map((m) => m.action)).toEqual(['down', 'up', 'down']);
-    finger(canvas, 'pointerdown', 3, 100, 100, true); // held: a hold due in 250 ms
+    finger(canvas, 'pointerdown', 3, 100, 100, true); // held: a hold due in 350 ms
     const before = sent.length;
     r.unmount();
     act(() => void vi.advanceTimersByTime(1000));

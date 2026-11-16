@@ -230,6 +230,42 @@ body {
   background: rgb(255 255 255 / 0.14);
 }
 
+/* A hold engaged: a ring grows out from under the finger and fades (its press went to the page). */
+.hold-ring {
+  position: absolute;
+  z-index: 5;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  border: 3px solid var(--color-accent);
+  background: rgb(34 197 94 / 0.18);
+  pointer-events: none;
+  animation: hold-ring 300ms ease-out forwards;
+}
+@keyframes hold-ring {
+  from {
+    transform: scale(0.4);
+    opacity: 1;
+  }
+  to {
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Drag mode while on: lit with the accent, like a switch that is on. */
 .rail-btn[aria-pressed='true'] {
   background: rgb(34 197 94 / 0.18);
@@ -774,6 +810,11 @@ input:focus-visible {
   .tip-anchor[data-open]::after,
   .first-hint {
     animation: none;
+  }
+  /* No growing ring: shown still for its moment, then gone. */
+  .hold-ring {
+    animation: none;
+    opacity: 0.8;
   }
 }
 
