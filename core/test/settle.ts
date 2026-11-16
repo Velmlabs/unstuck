@@ -1,3 +1,5 @@
+// Test-only, never published: the workspace `exports` of core map `@velmlabs/unstuck-core/testing/settle` here, but its
+// publishConfig does not (and the file is outside src, so it is not built into dist). It patches crypto.subtle on import.
 // Waits for the engine's asynchronous work to finish, instead of for a fixed time (which fails on a loaded machine).
 // WebCrypto runs on a thread pool, so its calls are counted while in flight; settle() returns once none has been
 // pending for several event-loop turns in a row (a chain starts its next step in the microtasks after the last one).

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { buildRelayTransport, createEngine, CLOUD_RELAY_URL, type TakeoverCallOptions } from '@velmlabs/unstuck-core';
 import { FakeCdp, FakeTransport } from '@velmlabs/unstuck-core/testing';
 import { exportDevicePublicKey, newDeviceKeyPair, type TakeoverResult } from '@velmlabs/unstuck-protocol';
-import { settle } from '../../core/test/settle';
+import { settle } from '@velmlabs/unstuck-core/testing/settle';
 import { InProcessUnstuck } from '../src/in-process';
 import { Unstuck, UnstuckConfigError } from '../src/index';
 import type { TakeoverLink } from '../src/options';

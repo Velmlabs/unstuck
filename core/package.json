@@ -29,7 +29,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing/index.ts"
+    "./testing": "./src/testing/index.ts",
+    "./testing/settle": "./test/settle.ts"
   },
   "files": [
     "dist"

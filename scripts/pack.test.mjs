@@ -54,6 +54,8 @@ describe('packed packages', () => {
       const expected = dir === 'sdk-ts' ? { workerd: edge, worker: edge, browser: edge, ...node } : node;
       expect(pkg.exports['.'], dir).toEqual(expected);
       if (dir === 'sdk-ts') expect(Object.keys(pkg.exports['.']).slice(0, 3), dir).toEqual(['workerd', 'worker', 'browser']);
+      // Core publishes its test fakes (./testing) but not the workspace-only ./testing/settle helper (it patches crypto.subtle).
+      if (dir === 'core') expect(Object.keys(pkg.exports), dir).toEqual(['.', './testing']);
       expect(pkg.engines, dir).toEqual({ node: '>=20' });
       expect(JSON.stringify(pkg.dependencies ?? {}), dir).not.toContain('workspace:');
       expect(pkg.repository?.url, dir).toBe('git+https://github.com/velmlabs/unstuck.git');
