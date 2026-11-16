@@ -1,5 +1,6 @@
 import type { Frame } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
+import { CAPTURE_TIMEOUT_MS, within } from './within';
 
 /** Fallback frame source for browsers without Page.startScreencast: periodic JPEG screenshots. */
 export async function startScreenshotPolling(
@@ -15,8 +16,13 @@ export async function startScreenshotPolling(
   const tick = async () => {
     const started = Date.now();
     try {
-      const metrics = await cdp.send<{ cssVisualViewport: { clientWidth: number; clientHeight: number } }>('Page.getLayoutMetrics');
-      const shot = await cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'jpeg', quality });
+      // Bounded: a call the tab never answers (a hidden tab's screenshot) would otherwise stop the polling for good.
+      const metrics = await within(
+        cdp.send<{ cssVisualViewport: { clientWidth: number; clientHeight: number } }>('Page.getLayoutMetrics'),
+        CAPTURE_TIMEOUT_MS,
+        'Page.getLayoutMetrics',
+      );
+      const shot = await within(cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'jpeg', quality }), CAPTURE_TIMEOUT_MS, 'Page.captureScreenshot');
       if (!stopped) {
         const bin = atob(shot.data);
         onFrame({

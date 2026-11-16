@@ -131,6 +131,42 @@ describe('startScreencast', () => {
       }
     });
 
+    it('a screenshot the tab never answers is given up after 5 s: no late frame, no timer left behind', async () => {
+      vi.useFakeTimers();
+      try {
+        const cdp = shooting();
+        let answer!: (v: unknown) => void;
+        cdp.respond('Page.captureScreenshot', () => new Promise((r) => (answer = r)));
+        const onFrame = vi.fn();
+        await startScreencast(cdp, onFrame);
+        await vi.advanceTimersByTimeAsync(4_999);
+        expect(vi.getTimerCount()).toBe(1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(vi.getTimerCount()).toBe(0);
+        answer({ data: 'BAUG' }); // the hidden tab answers much later: too late to be the first frame
+        await vi.advanceTimersByTimeAsync(10);
+        expect(onFrame).not.toHaveBeenCalled();
+        cdp.emit('Page.screencastFrame', frameEvent); // the screencast itself is unaffected
+        expect(onFrame).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('a screenshot that answers in time clears its timeout', async () => {
+      vi.useFakeTimers();
+      try {
+        const cdp = shooting();
+        const onFrame = vi.fn();
+        await startScreencast(cdp, onFrame);
+        await vi.advanceTimersByTimeAsync(0);
+        expect(onFrame).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('without the deprecated device-pixel metrics, CSS pixels are used', async () => {
       const cdp = shooting();
       cdp.respond('Page.getLayoutMetrics', () => ({ cssVisualViewport: { pageX: 0, pageY: 0, clientWidth: 3200, clientHeight: 800 } }));

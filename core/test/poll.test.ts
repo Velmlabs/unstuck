@@ -53,6 +53,24 @@ describe('startScreenshotPolling', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('a capture the tab never answers is given up after 5 s and polling continues (it never stalls)', async () => {
+    for (const method of ['Page.captureScreenshot', 'Page.getLayoutMetrics']) {
+      const cdp = fake();
+      let n = 0;
+      const original = method === 'Page.captureScreenshot' ? () => ({ data: 'AQID' }) : () => ({ cssVisualViewport: { clientWidth: 1280, clientHeight: 720 } });
+      cdp.respond(method, () => (n++ === 0 ? new Promise(() => {}) : original()));
+      const onFrame = vi.fn();
+      const stop = await startScreenshotPolling(cdp, onFrame);
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(onFrame, method).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(600);
+      expect(onFrame, method).toHaveBeenCalled();
+      expect(cdp.methods().filter((m) => m === method).length, method).toBeGreaterThan(1);
+      await stop();
+      expect(vi.getTimerCount(), method).toBe(0);
+    }
+  });
+
   it('a failing capture is skipped and polling continues', async () => {
     const cdp = fake();
     let n = 0;

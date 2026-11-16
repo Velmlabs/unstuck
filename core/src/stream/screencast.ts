@@ -1,5 +1,6 @@
 import type { Frame } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
+import { CAPTURE_TIMEOUT_MS, within } from './within';
 
 export interface ScreencastOptions {
   quality?: number;
@@ -68,7 +69,8 @@ export async function startScreencast(
   const maxWidth = opts.maxWidth ?? 1600;
   const maxHeight = opts.maxHeight ?? 1600;
   await cdp.send('Page.startScreencast', { format: 'jpeg', quality, maxWidth, maxHeight });
-  void captureFrame(cdp, quality, maxWidth, maxHeight).then(
+  // Bounded: a hidden tab may never answer the screenshot, and a frame that arrives that late is no head start anyway.
+  void within(captureFrame(cdp, quality, maxWidth, maxHeight), CAPTURE_TIMEOUT_MS, 'Page.captureScreenshot').then(
     (f) => {
       if (f && !framed && !stopped) onFrame(f);
     },
