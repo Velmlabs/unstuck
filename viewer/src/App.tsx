@@ -9,6 +9,8 @@ import { keyEventToMessage, modifiersOf } from './keys';
 import { FIT_VIEW, MAX_ZOOM, NO_INSET, clampToPage, clampView, isFit, pinchView, sizeChangedALot, toPagePoint, viewTransform, visiblePageRect, zoomAt, type Inset, type Pinch, type Point, type Rect, type View } from './mapping';
 import { forgetFragment, parseFragment, relayFor, sessionIdFromPath } from './url';
 import { cleanLabel, type Sender } from './alert-link';
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, FitIcon, FlagIcon, KeyboardIcon, ZoomInIcon, ZoomOutIcon } from './icons';
+import { TipButton, useFirstTimeHint, useTips } from './tips';
 
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string; search?: string };
@@ -188,6 +190,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   /** Taps sent whose focus report hasn't arrived yet: only the newest tap's report may open or close anything. */
   const awaitingFocus = useRef(0);
   const [chip, setChip] = useState<FieldKind | null>(null);
+  /** The phone keyboard is open (the bridge has focus): the Keyboard button shows as pressed in. */
+  const [typing, setTyping] = useState(false);
   /** The green outline around the field being typed into (Unstuck's own layer, never the page). */
   const [ring, setRing] = useState<Box | null>(null);
   /** The field the outline and typing box sit over, so they can be placed again when the mirror's area resizes. */
@@ -220,6 +224,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const live = screen.kind === 'session' && phase === 'live';
   const liveRef = useRef(live);
   liveRef.current = live && !asking;
+  const tips = useTips();
+  const hint = useFirstTimeHint(live);
 
   const send = useCallback((m: ViewerToEngine) => {
     // A tap's release still on its way goes before anything else (a key, typed text, Done): the page sees the tap end
@@ -747,11 +753,15 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
       if (stageRef.current) stageRef.current.style.transform = '';
       ringField.current = null;
       setRing(null);
+      setTyping(false);
     };
+    const typingOn = () => setTyping(true);
     el.addEventListener('blur', unlift);
+    el.addEventListener('focus', typingOn);
     return () => {
       detach();
       el.removeEventListener('blur', unlift);
+      el.removeEventListener('focus', typingOn);
     };
   }, [screen.kind, started]);
 
@@ -848,35 +858,26 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           />
         </div>
         {/* mousedown is not allowed to move focus: zooming and scrolling keep the phone keyboard open over its field. */}
-        <div class="stage-controls" ref={controlsRef} onMouseDown={(e) => e.preventDefault()}>
+        <div class="stage-controls tool-rail" ref={controlsRef} onMouseDown={(e) => e.preventDefault()}>
           <div class="control-group" role="group" aria-label="Zoom">
-            <button type="button" class="btn btn-icon" aria-label="Zoom in" disabled={zoomed === 'max'} onClick={() => zoomButton(1)}>
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-              </svg>
-            </button>
-            <button type="button" class="btn btn-icon" aria-label="Zoom out" disabled={zoomed === 'fit'} onClick={() => zoomButton(-1)}>
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path d="M5 12h14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
-              </svg>
-            </button>
-            <button type="button" class="btn btn-icon" aria-label="Fit page to screen" disabled={zoomed === 'fit'} onClick={() => liveRef.current && animateTo(FIT_VIEW)}>
-              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-                <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </button>
+            <TipButton tips={tips} id="zoom-in" side="left" class="btn rail-btn" label="Zoom in" tip="Zoom in (or pinch)." disabled={zoomed === 'max'} onClick={() => zoomButton(1)}>
+              <ZoomInIcon />
+            </TipButton>
+            <TipButton tips={tips} id="zoom-out" side="left" class="btn rail-btn" label="Zoom out" tip="Zoom out." disabled={zoomed === 'fit'} onClick={() => zoomButton(-1)}>
+              <ZoomOutIcon />
+            </TipButton>
+            <TipButton tips={tips} id="fit" side="left" class="btn rail-btn" label="Fit page to screen" tip="Fit the page to the screen." disabled={zoomed === 'fit'} onClick={() => liveRef.current && animateTo(FIT_VIEW)}>
+              <FitIcon />
+            </TipButton>
           </div>
+          <div class="rail-divider" aria-hidden="true" />
           <div class="control-group" role="group" aria-label="Scroll">
-          <button type="button" class="btn btn-icon" aria-label="Scroll up" onClick={() => scroll(-1)}>
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path d="M6 15l6-6 6 6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
-          <button type="button" class="btn btn-icon" aria-label="Scroll down" onClick={() => scroll(1)}>
-            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
-              <path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </button>
+            <TipButton tips={tips} id="scroll-up" side="left" class="btn rail-btn" label="Scroll up" tip="Scroll the page up." onClick={() => scroll(-1)}>
+              <ChevronUpIcon />
+            </TipButton>
+            <TipButton tips={tips} id="scroll-down" side="left" class="btn rail-btn" label="Scroll down" tip="Scroll the page down." onClick={() => scroll(1)}>
+              <ChevronDownIcon />
+            </TipButton>
           </div>
         </div>
         {ring ? (
@@ -908,24 +909,45 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         ) : null}
       </div>
 
-
-
       <footer class="bottombar">
-        <button type="button" class="btn btn-ghost" onClick={() => openBridge('text', null)}>
-          Keyboard
-        </button>
-        <button type="button" class="btn btn-secondary" onClick={() => {
+        {hint ? (
+          <p class="first-hint" role="note">
+            Tip: press and hold any button to see what it does.
+          </p>
+        ) : null}
+        <TipButton tips={tips} id="keyboard" side="top" align="start" class="btn bar-btn bar-neutral" pressed={typing} tip="Open your keyboard to type into the field you tapped." onClick={() => openBridge('text', null)}>
+          <KeyboardIcon />
+          <span class="bar-label">Keyboard</span>
+        </TipButton>
+        <TipButton
+          tips={tips}
+          id="cant-solve"
+          side="top"
+          class="btn bar-btn bar-neutral"
+          tip="Hand the page back to the agent and say why you couldn't finish."
+          onClick={() => {
             flushUp(); // the sheet takes the session off the mirror: end a tap first
             setAsking(true);
-          }}>
-          Can't solve
-        </button>
-        <button type="button" class="btn btn-primary" onClick={() => {
+          }}
+        >
+          <FlagIcon />
+          <span class="bar-label">Can't solve</span>
+        </TipButton>
+        <TipButton
+          tips={tips}
+          id="done"
+          side="top"
+          align="end"
+          class="btn bar-btn bar-primary"
+          tip="Finished. The agent takes the page back."
+          onClick={() => {
             flushUp();
             send({ t: 'done' });
-          }}>
-          Done
-        </button>
+          }}
+        >
+          <CheckIcon />
+          <span class="bar-label">Done</span>
+        </TipButton>
       </footer>
 
       {codeAsk ? (

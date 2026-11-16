@@ -11,7 +11,17 @@
   --color-destructive: #ef4444;
   --color-on-destructive: #000000;
   --color-ring: #ffffff;
+  /* Controls: a raised surface for the bottom bar, a glass one for the tool rail, hairline edges, one radius scale. */
+  --color-surface-raised: #182033;
+  --color-control: #252e44;
+  --color-control-pressed: #1c2437;
+  --color-accent-pressed: #15803d;
+  --color-hairline: rgb(255 255 255 / 0.09);
+  --color-tooltip: #f8fafc;
+  --color-on-tooltip: #0f172a;
   --radius: 10px;
+  --radius-sm: 6px;
+  --press-ms: 100ms;
   --gap: 8px;
   --pad: 12px;
   --touch: 44px;
@@ -45,7 +55,8 @@ body {
      push Done and the countdown off a phone screen. */
   grid-template-columns: minmax(0, 1fr);
   height: 100dvh;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  /* No bottom inset here: the bottom bar pads itself, so its surface reaches the screen's edge. */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
 }
 
 .topbar {
@@ -134,46 +145,91 @@ body {
   -webkit-user-select: none;
 }
 
-/* Zoom (+, −, fit) above scroll (↑, ↓), bottom right of the mirror, inside the stage so never over the bottom bar. */
+/* The tool rail: zoom (+, −, fit) above scroll (↑, ↓) in one floating panel, bottom right of the mirror, inside the
+   stage so never over the bottom bar. */
 .stage-controls {
   position: absolute;
+  z-index: 2;
   right: var(--pad);
   bottom: var(--pad);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--color-hairline);
+  background: rgb(24 32 51 / 0.86);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.4);
   /* A quick second tap on + is two zoom steps, never the browser's double-tap zoom. */
   touch-action: manipulation;
 }
 
 .control-group {
   display: grid;
-  gap: var(--gap);
+  gap: 2px;
 }
 
-/* A stage too short for one column (a phone on its side): the two groups side by side. 5 × 44 px buttons, gaps and
-   padding need about 290 px. */
+.rail-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--color-hairline);
+}
+
+/* A stage too short for one column (a phone on its side): the two groups side by side. The column needs about
+   5 × 44 px buttons + padding and divider ≈ 250 px, plus the margin. */
 @container (max-height: 300px) {
   .stage-controls {
     flex-direction: row;
-    align-items: flex-end;
-    gap: var(--gap);
+    align-items: center;
+  }
+  .stage-controls .control-group {
+    grid-auto-flow: column;
+  }
+  .rail-divider {
+    width: 1px;
+    height: auto;
+    align-self: stretch;
+    margin: 6px 4px;
   }
 }
 
-.btn-icon:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.btn-icon {
+.rail-btn {
   display: grid;
   place-items: center;
-  padding: 0;
   width: var(--touch);
-  background: rgb(27 35 54 / 0.85);
+  height: var(--touch);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
   color: var(--color-foreground);
-  border-color: var(--color-border);
+}
+
+
+/* Hover only where there is a real hover (a touch screen keeps :hover stuck on the last button tapped). */
+@media (hover: hover) {
+  .rail-btn:hover:not(:disabled) {
+    background: rgb(255 255 255 / 0.07);
+  }
+  .bar-neutral:hover:not([aria-pressed='true']) {
+    background: #2c3650;
+  }
+  .bar-primary:hover {
+    background: #16a34a;
+  }
+}
+
+.rail-btn:active:not(:disabled) {
+  background: rgb(255 255 255 / 0.14);
+}
+
+.rail-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+  /* Its tooltip still shows: the pointer reaches the wrapper (see tips.tsx). */
+  pointer-events: none;
 }
 
 .first-frame {
@@ -268,11 +324,17 @@ body {
 }
 
 .bottombar {
-  display: flex;
+  position: relative;
+  /* Above the stage, so a tooltip opening upward is drawn over the mirror. */
+  z-index: 3;
+  display: grid;
+  /* Each button as wide as its content at least; Done gets the most of what is left. */
+  grid-template-columns: minmax(max-content, 1fr) minmax(max-content, 1fr) minmax(max-content, 1.35fr);
   gap: var(--gap);
-  padding: var(--pad) 12px;
-  background: var(--color-card);
-  border-top: 1px solid var(--color-muted);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  background: var(--color-surface-raised);
+  border-top: 1px solid var(--color-hairline);
+  /* Raised by its surface and hairline only: a shadow would darken the bottom of the mirrored page. */
 }
 
 .btn {
@@ -285,11 +347,12 @@ body {
   font: 600 16px/1 var(--font);
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 150ms ease-out, transform 100ms ease-out;
+  transition: background-color var(--press-ms) ease-out, transform var(--press-ms) ease-out, box-shadow var(--press-ms) ease-out;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.btn:active {
-  transform: scale(0.98);
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn:focus-visible,
@@ -298,9 +361,179 @@ input:focus-visible {
   outline-offset: 2px;
 }
 
+/* Bottom bar: icon beside a short label; on a narrow phone (< 360 px) the icon sits above a smaller label. */
+.bar-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
+  height: 48px;
+  padding: 0 6px;
+  font: 600 12px/1 var(--font);
+  letter-spacing: 0.01em;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@media (min-width: 360px) {
+  .bar-btn {
+    flex-direction: row;
+    gap: 6px;
+    padding: 0 10px;
+    font-size: 14px;
+  }
+}
+
+@media (min-width: 420px) {
+  .bar-btn {
+    gap: 8px;
+    padding: 0 14px;
+    font-size: 15px;
+  }
+}
+
+.bar-neutral {
+  background: var(--color-control);
+  color: var(--color-foreground);
+  border-color: var(--color-hairline);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+}
+
+
+.bar-neutral:active:not(:disabled) {
+  background: var(--color-control-pressed);
+}
+
+/* Keyboard while the phone keyboard is open: pressed in, with the accent. */
+.bar-neutral[aria-pressed='true'] {
+  background: rgb(34 197 94 / 0.14);
+  border-color: rgb(34 197 94 / 0.55);
+  color: #86efac;
+  box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.35);
+}
+
+.bar-primary {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.25) inset, 0 4px 14px rgb(34 197 94 / 0.25);
+}
+
+
+.bar-primary:active:not(:disabled) {
+  background: var(--color-accent-pressed);
+}
+
+/* Tooltips (tips.tsx): a light bubble with an arrow, above a bar button or left of a rail button. */
+.tip-anchor {
+  position: relative;
+  display: block;
+}
+
+.tip {
+  position: absolute;
+  z-index: 10;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 24px));
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-tooltip);
+  color: var(--color-on-tooltip);
+  font: 500 14px/1.35 var(--font);
+  text-align: left;
+  white-space: normal;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  pointer-events: none;
+  animation: tip-in 120ms ease-out;
+}
+
+.tip[hidden] {
+  display: none;
+}
+
+.tip-anchor[data-open]::after {
+  content: '';
+  position: absolute;
+  z-index: 10;
+  border: 6px solid transparent;
+  pointer-events: none;
+  animation: tip-in 120ms ease-out;
+}
+
+.tip-top .tip {
+  bottom: calc(100% + 10px);
+}
+.tip-top.tip-align-start .tip {
+  left: 0;
+}
+.tip-top.tip-align-center .tip {
+  left: 50%;
+  transform: translateX(-50%);
+}
+.tip-top.tip-align-end .tip {
+  right: 0;
+}
+.tip-top[data-open]::after {
+  bottom: calc(100% - 2px);
+  left: calc(50% - 6px);
+  border-top-color: var(--color-tooltip);
+}
+
+.tip-left .tip {
+  right: calc(100% + 14px);
+  top: 50%;
+  transform: translateY(-50%);
+  max-width: min(220px, calc(100vw - 100px));
+}
+.tip-left[data-open]::after {
+  right: calc(100% + 2px);
+  top: calc(50% - 6px);
+  border-left-color: var(--color-tooltip);
+}
+
+/* The rail as a row (a phone on its side): its tooltips open above, lined up with the right edge. */
+@container (max-height: 300px) {
+  .tip-left .tip {
+    right: 0;
+    top: auto;
+    bottom: calc(100% + 14px);
+    transform: none;
+  }
+  .tip-left[data-open]::after {
+    right: calc(50% - 6px);
+    top: auto;
+    bottom: calc(100% + 2px);
+    border-left-color: transparent;
+    border-top-color: var(--color-tooltip);
+  }
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The first time on this device: one line above the bar, gone at the first touch or after a few seconds. */
+.first-hint {
+  position: absolute;
+  left: 12px;
+  bottom: calc(100% + 10px);
+  max-width: min(340px, calc(100% - 24px - var(--touch) - 16px));
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-hairline);
+  background: rgb(24 32 51 / 0.94);
+  color: var(--color-foreground);
+  font: 500 13px/1.35 var(--font);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.4);
+  animation: tip-in 200ms ease-out;
+}
+
 .btn-primary {
-  margin-left: auto;
-  flex: 0 1 160px;
   background: var(--color-accent);
   color: var(--color-on-accent);
 }
@@ -328,6 +561,8 @@ input:focus-visible {
 
 .sheet {
   position: fixed;
+  /* Over everything, the bottom bar and its tooltips included. */
+  z-index: 20;
   inset: 0;
   display: grid;
   align-items: end;
@@ -423,8 +658,13 @@ input:focus-visible {
   .btn {
     transition: none;
   }
-  .btn:active {
+  .btn:active:not(:disabled) {
     transform: none;
+  }
+  .tip,
+  .tip-anchor[data-open]::after,
+  .first-hint {
+    animation: none;
   }
 }
 
