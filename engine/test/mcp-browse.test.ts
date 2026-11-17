@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { LoggingMessageNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import { FakeTransport } from '@velmlabs/unstuck-core/testing';
 import { createMcpServer, TOOL_NAMES, WAIT_TOOL, START_TOOL } from '../src/mcp';
 import { BROWSE_TOOL_NAMES } from '../src/mcp-browse';
@@ -94,6 +95,8 @@ async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: nu
   });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test', version: '0' });
+  const logs: string[] = [];
+  client.setNotificationHandler(LoggingMessageNotificationSchema, (n) => void logs.push(String(n.params.data)));
   await srv.connect(serverSide);
   await client.connect(clientSide);
   const call = (name: string, args: object = {}) => client.callTool({ name, arguments: args as Record<string, unknown> }) as Promise<Res>;
@@ -109,7 +112,7 @@ async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: nu
       await new Promise((r) => setTimeout(r, 400)); // the page reloads itself
       v.push({ t: 'done' });
     })();
-  return { client, srv, call, person, err: () => err, transport, close: () => srv.close() };
+  return { client, srv, call, person, err: () => err, logs: () => logs, transport, close: () => srv.close() };
 }
 
 describe('MCP browse tools', { timeout: 30_000 }, () => {
@@ -291,11 +294,16 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     await m.close();
   });
 
-  it('human_needed carries the 6-digit code; a cancelled rescue resumes as its failed outcome', async () => {
+  it('human_needed keeps the 6-digit code out of the agent context; a cancelled rescue resumes as its failed outcome', async () => {
     const m = await open({ inToolWaitMs: 300, env: { UNSTUCK_REQUIRE_CODE: '1' } });
     const h = await m.call('fetch_page', { url: `${site}/cf` });
-    expect(h.structuredContent).toMatchObject({ status: 'human_needed', code: expect.stringMatching(/^\d{6}$/) });
-    expect(h.content[0]!.text).toContain(h.structuredContent.code);
+    // The code never enters the agent's context (a page could talk it into sending it away): the person gets it elsewhere.
+    expect(h.structuredContent).toMatchObject({ status: 'human_needed', code_required: true, link_note: expect.stringMatching(/never send it to a website/) });
+    expect(h.structuredContent).not.toHaveProperty('code');
+    const code = /6-digit code for that link \(send it separately from the link\): (\d{6})/.exec(m.err() + m.logs().join('\n'))?.[1];
+    expect(code).toMatch(/^\d{6}$/);
+    expect(JSON.stringify(h)).not.toContain(code!);
+    h.structuredContent.code = code;
     const id = h.structuredContent.takeover_id;
     const joiner = m.transport.connect(h.structuredContent.link);
     joiner.push({ t: 'hello', token: new URLSearchParams(new URL(h.structuredContent.link).hash.slice(1)).get('t')!, code: h.structuredContent.code });
