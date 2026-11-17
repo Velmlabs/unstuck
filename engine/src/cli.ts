@@ -139,7 +139,11 @@ export interface CliIO {
   stderr: { write(s: string): unknown };
   env: Record<string, string | undefined>;
   assets: AssetMap;
+  /** Where SIGINT, SIGTERM and SIGHUP arrive (default: this process). */
+  signals?: { once(sig: string, cb: () => void): unknown; off(sig: string, cb: () => void): unknown };
 }
+
+const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 
 /** Returns the process exit code. */
 export async function main(argv: string[], io: CliIO): Promise<number> {
@@ -209,7 +213,17 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
   const alerter = cloud ? createCloudAlerter({ ...cloud, log: (l) => void io.stderr.write(l + '\n') }) : undefined;
   if (values.mcp) {
     const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open, alerter, ...(browsing.browse ? { browse: browsing.browse } : {}) });
-    const closed = new Promise<void>((r) => io.stdin.once('end', () => r()));
+    // stdin closing, or a signal (Ctrl-C, a client killing its server): both close the server, which stops a browser it
+    // started (in its own process group, so it doesn't get the signal) and removes that browser's profile.
+    const signals = io.signals ?? process;
+    let onSignal!: () => void;
+    const closed = new Promise<void>((r) => {
+      onSignal = () => r();
+      io.stdin.once('end', onSignal);
+      for (const sig of STOP_SIGNALS) signals.once(sig, onSignal);
+    }).finally(() => {
+      for (const sig of STOP_SIGNALS) signals.off(sig, onSignal);
+    });
     await server.connect(new StdioServerTransport(io.stdin as Readable, io.stdout as Writable));
     const tools = [...TOOL_NAMES, ...(browsing.browse ? BROWSE_TOOL_NAMES : [])];
     io.stderr.write(`[unstuck] MCP server ready (tools: ${tools.join(', ')})\n`);

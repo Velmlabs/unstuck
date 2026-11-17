@@ -89,12 +89,34 @@ export function formatAxNodes(nodes: AXNode[], meta: { url: string; title: strin
   return { text: [`Page: ${meta.title}`, `URL: ${meta.url}`, ...lines].join('\n'), refs, passwords, url: meta.url, title: meta.title };
 }
 
+interface DomNode {
+  nodeName?: string;
+  backendNodeId?: number;
+  attributes?: string[];
+  children?: DomNode[];
+  shadowRoots?: DomNode[];
+  contentDocument?: DomNode;
+}
+
+/** A DOM node's attribute (CDP gives them as a flat name, value, name, value… list). */
+export function attr(n: { attributes?: string[] }, name: string): string | undefined {
+  const a = n.attributes ?? [];
+  for (let i = 0; i + 1 < a.length; i += 2) if (a[i]!.toLowerCase() === name) return a[i + 1];
+  return undefined;
+}
+
+export const isPasswordInput = (n: DomNode): boolean => n.nodeName === 'INPUT' && attr(n, 'type')?.toLowerCase() === 'password';
+
+/** Every password input, shadow roots (closed ones too) and frames included. */
 async function passwordFields(cdp: CdpClient): Promise<Set<number>> {
   const out = new Set<number>();
   try {
-    const { root } = await cdp.send<{ root: { nodeId: number } }>('DOM.getDocument', { depth: 0 });
-    const { nodeIds } = await cdp.send<{ nodeIds: number[] }>('DOM.querySelectorAll', { nodeId: root.nodeId, selector: 'input[type=password]' });
-    for (const nodeId of nodeIds) out.add((await cdp.send<{ node: { backendNodeId: number } }>('DOM.describeNode', { nodeId })).node.backendNodeId);
+    const { root } = await cdp.send<{ root: DomNode }>('DOM.getDocument', { depth: -1, pierce: true });
+    const walk = (n: DomNode) => {
+      if (isPasswordInput(n) && n.backendNodeId !== undefined) out.add(n.backendNodeId);
+      for (const c of [...(n.children ?? []), ...(n.shadowRoots ?? []), ...(n.contentDocument ? [n.contentDocument] : [])]) walk(c);
+    };
+    walk(root);
   } catch {
     // no DOM domain: no refs either (the AX tree is the only source of them)
   }

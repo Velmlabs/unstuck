@@ -10,6 +10,8 @@
   <button type="button" id="count" onclick="this.textContent = 'Clicked ' + (++window.clicks)">Count</button>
 </form>
 <script>window.clicks = 0; document.getElementById('size').addEventListener('change', (e) => (document.title = 'size ' + e.target.value));</script>
+<div id="host"></div>
+<script>document.getElementById('host').attachShadow({ mode: 'closed' }).innerHTML = '<label>PIN <input type="password" id="pin"></label>';</script>
 <p id="late"></p>
 <script>setTimeout(() => (document.getElementById('late').textContent = 'Ready now'), 600);</script>
 <div style="height: 3000px">tall</div>

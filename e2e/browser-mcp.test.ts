@@ -82,4 +82,17 @@ describe('Unstuck Browser over MCP', () => {
     expect((await m.client.listTools()).tools.map((t: { name: string }) => t.name).sort()).toEqual(['cancel_human_takeover', 'request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover']);
     await m.close();
   });
+
+  it.each(['SIGTERM', 'SIGINT'] as const)('%s to the MCP server stops the Chrome it started and removes its profile dir', async (sig) => {
+    const before = profiles();
+    const m = await mcp(['--mcp', '--browser']);
+    await m.call('fetch_page', { url: `${site.url}/article` });
+    const started = [...profiles()].filter((d) => !before.has(d));
+    expect(started).toHaveLength(1);
+    const pid = (m.client as any)._transport._process.pid as number;
+    process.kill(pid, sig);
+    await expect.poll(() => fs.existsSync(path.join(os.tmpdir(), started[0]!)), { timeout: 10_000 }).toBe(false);
+    await m.close().catch(() => {});
+  });
 });
+

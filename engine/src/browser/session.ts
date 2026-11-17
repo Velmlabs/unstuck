@@ -51,8 +51,11 @@ interface Live {
 }
 
 export class BrowserSession {
-  /** The sessionId of the rescue a person is working on, if any. */
+  /** The sessionId of the takeover a person is working on in our tab, if any (a rescue or a takeover tool's). */
   holder: string | null = null;
+  /** The browsing call that has the tab now; others wait for it (or for a person to take the tab). */
+  private current: Promise<void> | null = null;
+  private readonly waiters = new Set<() => void>();
   /** The last snapshot the agent got; its refs are what click/type/select act on. A main-frame navigation clears it. */
   snapshot: Snapshot | null = null;
   readonly store: SessionStore;
@@ -86,6 +89,44 @@ export class BrowserSession {
   async endpoint(): Promise<{ url: string; targetId: string }> {
     await this.tab();
     return { url: this.live!.url, targetId: this.live!.cdp.targetId };
+  }
+
+  /** Our tab's target id, once the browser is up. */
+  get targetId(): string | null {
+    return this.live?.cdp.targetId ?? null;
+  }
+
+  /** A person has the tab (`id`), or it's free again (`null`); waiting calls then answer human_takeover_active. */
+  setHolder(id: string | null): void {
+    this.holder = id;
+    if (id) for (const w of [...this.waiters]) w();
+  }
+
+  /**
+   * Takes the tab for one browsing call: resolves with release() once no other call has it, or with 'held' as soon as
+   * a person has it. One call at a time, so two calls never navigate the same tab under each other.
+   */
+  async acquire(): Promise<(() => void) | 'held'> {
+    for (;;) {
+      if (this.holder) return 'held';
+      if (!this.current) {
+        let release!: () => void;
+        this.current = new Promise<void>((r) => (release = r));
+        return () => {
+          this.current = null;
+          release();
+        };
+      }
+      const busy = this.current;
+      await new Promise<void>((r) => {
+        const wake = () => {
+          this.waiters.delete(wake);
+          r();
+        };
+        this.waiters.add(wake);
+        void busy.then(wake);
+      });
+    }
   }
 
   onTakeoverStart(cb: ReadyHandler): () => void {
@@ -128,19 +169,30 @@ export class BrowserSession {
         takeover: ({ reason }) =>
           this.d
             .runTakeover(cdp, reason, (info, control) => {
-              this.holder = info.sessionId;
+              this.setHolder(info.sessionId);
               for (const cb of [...this.listeners]) cb(info, control);
             })
-            .finally(() => {
-              this.holder = null;
-            }),
+            .finally(() => this.setHolder(null)),
       });
-      this.live = { url, cdp, guard, launched, pair: { cdp, guard } };
-      return this.live;
+      const live: Live = { url, cdp, guard, launched, pair: { cdp, guard } };
+      this.live = live;
+      // Our tab closed, or the browser went away: forget it, so the next call starts again.
+      cdp.onClose(() => void this.drop(live));
+      return live;
     } catch (e) {
       await launched?.stop();
       throw e;
     }
+  }
+
+  private async drop(live: Live): Promise<void> {
+    if (this.live !== live) return;
+    this.live = null;
+    this.starting = null;
+    this.snapshot = null;
+    await live.guard.close().catch(() => {});
+    await live.cdp.close().catch(() => {});
+    await live.launched?.stop();
   }
 
   /** Closes the guard and our tab, then stops a browser we launched (a cdp browser keeps running). */

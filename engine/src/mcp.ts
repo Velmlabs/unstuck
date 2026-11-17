@@ -241,6 +241,10 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
       .send<{ result: { value?: string } }>('Runtime.evaluate', { expression: 'location.hostname', returnByValue: true })
       .then((r) => r.result.value || undefined)
       .catch(() => undefined);
+    const held = (r: TakeoverResult) => {
+      if (session && session.holder === r.sessionId && cdp.targetId === session.targetId) session.setHolder(null);
+      return r;
+    };
     return engine.takeover(cdp, {
       reason: a.reason,
       timeoutS: a.timeout_s,
@@ -248,6 +252,8 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
       allowedSites: hostnames(a.allowed_sites),
       popups: cdp.popups,
       onLink: (info, takeover) => {
+        // A takeover on the browsing tab holds it: the browsing tools answer human_takeover_active until it ends.
+        if (session && cdp.targetId === session.targetId) session.setHolder(info.sessionId);
         // The alert starts first: if writing or opening the link throws, the paired phones still get it.
         const alert = sendTakeoverAlert(opts.alerter, a.alerts, info, site, takeover);
         onReady?.(info, takeover, alert);
@@ -259,7 +265,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           void server.sendLoggingMessage({ level: 'notice', logger: 'unstuck', data }).catch(ignore);
         if (opts.open) openUrl(link);
       },
-    });
+    }).then(held);
   }
 
   const reach = opts.open

@@ -1,6 +1,6 @@
 // What the agent does on a page, by snapshot ref: real mouse and keyboard input through CDP.
 import type { CdpClient } from '@velmlabs/unstuck-core';
-import type { Snapshot } from './snapshot';
+import { isPasswordInput, type Snapshot } from './snapshot';
 
 export class RefError extends Error {
   constructor(ref: string) {
@@ -53,6 +53,9 @@ const key = (cdp: CdpClient, o: object) =>
 export async function typeRef(cdp: CdpClient, snap: Snapshot, ref: string, text: string, submit = false): Promise<void> {
   const backendNodeId = node(snap, ref);
   if (snap.passwords.has(backendNodeId)) throw new PasswordFieldError(ref);
+  // The field as it is now: a show/hide toggle can make it a password field after the snapshot.
+  const { node: live } = await onNode<{ node: { nodeName?: string; attributes?: string[] } }>(cdp, ref, 'DOM.describeNode', { backendNodeId });
+  if (isPasswordInput(live)) throw new PasswordFieldError(ref);
   await onNode(cdp, ref, 'DOM.focus', { backendNodeId });
   await key(cdp, { key: 'a', code: 'KeyA', commands: ['selectAll'] });
   await cdp.send('Input.insertText', { text });

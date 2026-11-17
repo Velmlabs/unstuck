@@ -343,5 +343,35 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     expect((await m.call('click', { ref: stale })).content[0]!.text).toBe(`ref ${stale} is not on the page any more: take a new snapshot`);
     await m.close();
   });
+
+  it('two browsing calls at once run one after the other on the tab: each gets its own page', async () => {
+    const m = await open();
+    const [a, b] = await Promise.all([m.call('fetch_page', { url: `${site}/article` }), m.call('fetch_page', { url: `${site}/data.json`, format: 'text' })]);
+    expect(a.structuredContent).toMatchObject({ title: 'Shipping times', final_url: `${site}/article` });
+    expect(b.structuredContent).toMatchObject({ content: '{"ok":true}', final_url: `${site}/data.json` });
+    await m.close();
+  });
+
+  it('a second call while a rescue is starting (no link yet) waits for it, then reports the takeover', async () => {
+    const m = await open({ inToolWaitMs: 300 });
+    const [h, other] = await Promise.all([m.call('fetch_page', { url: `${site}/cf` }), new Promise((r) => setTimeout(r, 30)).then(() => m.call('fetch_page', { url: `${site}/article` }))]);
+    expect(h.structuredContent).toMatchObject({ status: 'human_needed' });
+    expect(other.structuredContent).toEqual({ error: 'human_takeover_active', takeover_id: h.structuredContent.takeover_id });
+    expect(hits.get('/article') ?? 0).toBe(0);
+    await m.call('cancel_human_takeover', { takeover_id: h.structuredContent.takeover_id });
+    await m.close();
+  });
+
+  it('a start_human_takeover on the browsing tab blocks the browsing tools until it ends', async () => {
+    const m = await open();
+    await m.call('open', { url: `${site}/links` });
+    const s = await m.call(START_TOOL, { reason: 'Log in please' });
+    const id = s.structuredContent.takeover_id;
+    expect((await m.call('open', { url: `${site}/article` })).structuredContent).toEqual({ error: 'human_takeover_active', takeover_id: id });
+    expect((await m.call('click', { ref: 'e1' })).structuredContent).toEqual({ error: 'human_takeover_active', takeover_id: id });
+    await m.call('cancel_human_takeover', { takeover_id: id });
+    await vi.waitFor(async () => expect((await m.call('snapshot')).structuredContent.title).toBe('Links'));
+    await m.close();
+  });
 });
 

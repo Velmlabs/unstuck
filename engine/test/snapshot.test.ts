@@ -68,10 +68,18 @@ describe('takeSnapshot', () => {
         if (method === 'Accessibility.getFullAXTree') return o.ax ? o.ax() : { nodes: LOGIN_AX };
         if (method === 'DOM.getDocument') {
           if (o.noDom) throw new Error("'DOM.getDocument' wasn't found");
-          return { root: { nodeId: 1 } };
+          // The password input sits in a shadow root; a text input and an attribute-less node are not passwords.
+          return {
+            root: {
+              nodeName: '#document',
+              children: [
+                { nodeName: 'INPUT', backendNodeId: 41, attributes: ['type', 'email'] },
+                { nodeName: 'DIV', shadowRoots: [{ nodeName: '#document-fragment', children: [{ nodeName: 'INPUT', backendNodeId: 42, attributes: ['id', 'pw', 'TYPE', 'Password'] }] }] },
+                { nodeName: 'IFRAME', contentDocument: { nodeName: '#document', children: [{ nodeName: 'INPUT' }] } },
+              ],
+            },
+          };
         }
-        if (method === 'DOM.querySelectorAll') return { nodeIds: [5] };
-        if (method === 'DOM.describeNode') return { node: { backendNodeId: 42 } };
         return {};
       },
       on: () => () => {},

@@ -119,4 +119,17 @@ describe('BrowserSession', { timeout: 30_000 }, () => {
     off();
     await s.close();
   });
+
+  it('a tab that closed under it (or a browser that went away) is replaced on the next call', async () => {
+    const s = new BrowserSession({ source: { kind: 'cdp', url: chrome.wsUrl }, profile: 'mcp', remember: false, maxRescuesPerHour: 10, home: home() }, deps());
+    const first = await s.tab();
+    const id = first.cdp.targetId;
+    await fetch(`http://127.0.0.1:${chrome.port}/json/close/${id}`);
+    await vi.waitFor(() => expect(s.targetId).toBeNull(), { timeout: 5000 });
+    const second = await s.tab();
+    expect(second.cdp.targetId).not.toBe(id);
+    await expect(second.guard.check()).resolves.toBeNull();
+    await s.close();
+  });
 });
+

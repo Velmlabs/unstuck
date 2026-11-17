@@ -87,6 +87,17 @@ describe('actions', { timeout: 20_000 }, () => {
     expect(await evaluate("document.getElementById('pw').value")).toBe('');
   });
 
+  it('a password field in a closed shadow root, or one that became a password field after the snapshot, is refused too', async () => {
+    await load('/form');
+    const snap = await takeSnapshot(tab);
+    expect(snap.text).toMatch(/textbox "PIN" value=<hidden>/);
+    await expect(typeRef(tab, snap, ref(snap, /textbox "PIN"/), '1234')).rejects.toBeInstanceOf(PasswordFieldError);
+    const name = ref(snap, /textbox "Name"/);
+    await evaluate("document.getElementById('name').type = 'password'");
+    await expect(typeRef(tab, snap, name, 'hunter2')).rejects.toBeInstanceOf(PasswordFieldError);
+    expect(await evaluate("document.getElementById('name').value")).toBe('');
+  });
+
   it('a stale ref after navigation is a RefError, and so is an unknown one', async () => {
     await load('/form');
     const snap = await takeSnapshot(tab);

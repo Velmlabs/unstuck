@@ -97,11 +97,13 @@ export function registerBrowseTools(
 
   /** Runs one browsing action with the guard; a person who needs longer than inToolWaitMs gets the link instead. */
   async function guarded(action: (tab: { cdp: DirectCdp; guard: Guard }) => Promise<RescueOutcome | null>, finish: () => Promise<Out>): Promise<CallToolResult> {
-    if (session.holder) return structured({ error: 'human_takeover_active', takeover_id: session.holder }, true);
+    const release = await session.acquire();
+    if (release === 'held') return structured({ error: 'human_takeover_active', takeover_id: session.holder }, true);
     let tab: { cdp: DirectCdp; guard: Guard };
     try {
       tab = await session.tab();
     } catch (e) {
+      release();
       return text((e as Error).message, true);
     }
     let onLink!: (v: { info: LinkInfo; control: TakeoverControl }) => void;
@@ -109,6 +111,11 @@ export function registerBrowseTools(
     const off = session.onTakeoverStart((info, control) => onLink({ info, control }));
     const outcome = action(tab);
     outcome.catch(() => {}).finally(off);
+    // The tab stays this call's until its result is read from the page, even after it returned human_needed.
+    let released = false;
+    const free = () => {
+      if (!released) (released = true), release();
+    };
     let quick: { o: RescueOutcome | null } | undefined;
     try {
       quick = await within(
@@ -117,22 +124,31 @@ export function registerBrowseTools(
       );
       // Past the in-call wait: whichever comes first, the end of the rescue or its link.
       const next = quick ?? (await Promise.race([outcome.then((o) => ({ o })), linked.then((l) => ({ l }))]));
-      if ('o' in next) return done(next.o, finish);
+      if ('o' in next) {
+        try {
+          return await done(next.o, finish);
+        } finally {
+          free();
+        }
+      }
       const { info, control } = next.l;
       const result = outcome.then(
         (o): TakeoverResult => o?.takeover ?? { status: 'failed', sessionId: info.sessionId, url: info.url, durationS: o?.waitedS ?? 0, detail: o?.status ?? 'no_rescue' },
         (e): TakeoverResult => ({ status: 'failed', sessionId: info.sessionId, url: info.url, durationS: 0, detail: (e as Error).message }),
       );
-      let memo: Promise<CallToolResult> | null = null;
+      // Read the page as soon as the rescue ends (before the tab is free again), for resume_after_human to return.
+      const memo = outcome.then((o) => done(o, finish));
+      void memo.catch(() => {}).finally(free);
       const browse: BrowseRescue = { outcome: outcome.then((o) => o!), finish };
       const t: TwoStep & { answer?: () => Promise<CallToolResult> } = { id: info.sessionId, info, control, result, final: null, returned: false, byAgent: false, browse };
-      t.answer = () => (memo ??= outcome.then((o) => done(o, finish)));
+      t.answer = () => memo;
       d.twoSteps.add(t);
       const expiresInS = Math.max(0, Math.round((info.expiresAt - Date.now()) / 1000));
       const out: Out = { status: 'human_needed', takeover_id: t.id, link: info.url, ...(info.code ? { code: info.code } : {}), expires_in_s: expiresInS, reason: info.reason };
       const lead = linkLead(info, { expiresInS, next: `Then call ${RESUME_TOOL} with takeover_id "${t.id}"; while it answers "waiting", call it again.` });
       return structured(out, false, lead);
     } catch (e) {
+      free();
       return text((e as Error).message, true);
     }
   }
@@ -191,11 +207,14 @@ export function registerBrowseTools(
   const domainInput = { domain: z.string().min(1).describe('The site, e.g. "example.com" (its subdomains are included).') };
   /** A session tool: refused while a person holds the tab, otherwise runs on the guard. */
   async function onGuard(fn: (tab: { cdp: DirectCdp; guard: Guard }) => Promise<Out>): Promise<CallToolResult> {
-    if (session.holder) return structured({ error: 'human_takeover_active', takeover_id: session.holder }, true);
+    const release = await session.acquire();
+    if (release === 'held') return structured({ error: 'human_takeover_active', takeover_id: session.holder }, true);
     try {
       return structured(await fn(await session.tab()), false);
     } catch (e) {
       return text((e as Error).message, true);
+    } finally {
+      release();
     }
   }
 

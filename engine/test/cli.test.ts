@@ -197,6 +197,19 @@ describe('browse flags', () => {
       expect(browseConfig(argv, env), argv.join(' ')).toHaveProperty('error');
   });
 
+  it('main: --mcp ends cleanly on SIGTERM, SIGINT or SIGHUP (closing the server, and the browser it started)', async () => {
+    const { EventEmitter } = await import('node:events');
+    for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+      const x = io();
+      const signals = new EventEmitter();
+      const run = main(['--mcp', '--browser'], { ...x, signals });
+      await vi.waitFor(() => expect(x.err()).toContain('MCP server ready'));
+      signals.emit(sig);
+      await expect(run).resolves.toBe(0);
+      expect(signals.listenerCount('SIGTERM')).toBe(0);
+    }
+  });
+
   it('main: a browse usage error exits 2 with its line', async () => {
     const x = io('');
     await expect(main(['--mcp', '--tools', 'browser'], x)).resolves.toBe(2);
