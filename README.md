@@ -85,7 +85,15 @@ Nothing else in your code changes. The whole quickstart, with every option: [uns
 
 ### Using Claude Code, Codex or another AI agent?
 
-Give it a `request_human_takeover` tool (or the two-step `start_human_takeover`, below). Every setup has two parts: a Chrome started with a debugging port, which the agent drives through a browser MCP server such as [Playwright MCP](https://github.com/microsoft/playwright-mcp), and the Unstuck MCP server pointed at the same Chrome.
+**The simplest setup: one server with its own browser.** [Unstuck Browser](#unstuck-browser-rescue-built-into-your-agents-browser) starts a headless Chrome when the agent first browses, and brings you in by itself when a page shows a CAPTCHA:
+
+```bash
+claude mcp add unstuck -- npx -y @velmlabs/unstuck-engine --mcp --browser
+```
+
+Then ask: *"Use fetch_page to read https://www.google.com/recaptcha/api2/demo"*. You get a link, solve the CAPTCHA, tap **Done**, and the agent gets the page. Configs for Claude Desktop and Codex: [`examples/mcp-browser`](examples/mcp-browser).
+
+**Or drive a Chrome you already use.** Give the agent a `request_human_takeover` tool (or the two-step `start_human_takeover`, below). This setup has two parts: a Chrome started with a debugging port, which the agent drives through a browser MCP server such as [Playwright MCP](https://github.com/microsoft/playwright-mcp), and the Unstuck MCP server pointed at the same Chrome.
 
 ```bash
 google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.unstuck-chrome"   # macOS and Windows: see examples/mcp
@@ -201,7 +209,13 @@ your own dev server).
 - **Obscura** has limited support: it doesn't draw CAPTCHA widgets, so a challenge there ends at once with
   `browser_cannot_render_captcha`. Logins and 2FA work.
 
-A person solves every check; the site's terms still apply. Full guide: [unstuck.sh/docs/browser](https://unstuck.sh/docs/browser/).
+**What it can't get past.** Unstuck gets your agent past anything a person can clear on the live page. It can't get past:
+
+- **A block on the browser itself:** a site that refuses automated browsers outright, like Google's "This browser or app may not be secure" sign-in page. For those, use the site's official API, or your own signed-in Chrome with `--tools browser`.
+- **A passkey or hardware security key:** it's on the person's device, not on the agent's computer.
+- **A plain 403, an IP ban or a rate limit:** there's nothing on the page for a person to do.
+
+A person solves every check; the site's terms still apply. Full guide, with a first walkthrough: [unstuck.sh/docs/browser](https://unstuck.sh/docs/browser/).
 
 ## Works with
 
