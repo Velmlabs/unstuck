@@ -17,3 +17,6 @@ __pycache__/
 .dev.vars
 .dev.vars.*
 dist-hosted/
+
+# Local design notes (specs and plans): kept on disk, never committed. Files already tracked stay tracked.
+docs/superpowers/
