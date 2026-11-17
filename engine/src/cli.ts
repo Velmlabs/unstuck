@@ -39,6 +39,7 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
       keeps nothing); at most --max-rescues-per-hour person-checks (default 10).
       A browsing tool waits UNSTUCK_IN_TOOL_WAIT_S (default 40) for a person
       before it returns the link; keep it under your client's tool timeout.
+      With no --open and no Cloud alerts it returns the link at once.
 doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
       in a tab of its own and prints whether Unstuck works fully with it.
 

@@ -477,7 +477,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
         });
       },
     });
-    registerBrowseTools(server, { session, twoSteps: registry, inToolWaitMs: opts.browse.inToolWaitMs ?? IN_TOOL_WAIT_MS, lookup });
+    registerBrowseTools(server, { session, twoSteps: registry, inToolWaitMs: opts.browse.inToolWaitMs ?? IN_TOOL_WAIT_MS, lookup, linkReachesPerson: !!opts.open || !!opts.alerter });
   }
 
   /** The client went away: no one can wait for these any more, so end them (their links stop working). */

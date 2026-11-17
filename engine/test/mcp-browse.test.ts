@@ -62,7 +62,7 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
-async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: number; env?: Record<string, string>; noChrome?: boolean; maxRescuesPerHour?: number } = {}) {
+async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: number; env?: Record<string, string>; noChrome?: boolean; maxRescuesPerHour?: number; deliver?: boolean } = {}) {
   const transport = new FakeTransport();
   let err = '';
   const srv = createMcpServer({
@@ -78,6 +78,8 @@ async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: nu
         }
       : {}),
     stderr: { write: (s: string) => (err += s) },
+    // Most tests stand for a person who gets the link without the agent (--open); `deliver: false` is a server with no way to.
+    ...(o.deliver === false ? {} : { open: true, openUrl: () => {} }),
     ...(o.browse === false
       ? {}
       : { browse: { source: o.noChrome ? { kind: 'chrome' } : { kind: 'cdp', url: chrome.wsUrl }, profile: 'mcp', remember: o.remember ?? false, maxRescuesPerHour: o.maxRescuesPerHour ?? 10, home, inToolWaitMs: o.inToolWaitMs ?? 1500 } }),
@@ -371,6 +373,18 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     expect((await m.call('click', { ref: 'e1' })).structuredContent).toEqual({ error: 'human_takeover_active', takeover_id: id });
     await m.call('cancel_human_takeover', { takeover_id: id });
     await vi.waitFor(async () => expect((await m.call('snapshot')).structuredContent.title).toBe('Links'));
+    await m.close();
+  });
+
+  it('with no way to reach the person (no --open, no Cloud alerts) the link comes back at once, not after the in-call wait', async () => {
+    const m = await open({ deliver: false, inToolWaitMs: 30_000 });
+    const t0 = Date.now();
+    const h = await m.call('fetch_page', { url: `${site}/cf` });
+    expect(h.structuredContent).toMatchObject({ status: 'human_needed', link: expect.any(String) });
+    expect(Date.now() - t0).toBeLessThan(10_000);
+    // A page with no check still answers in the call.
+    await m.call('cancel_human_takeover', { takeover_id: h.structuredContent.takeover_id });
+    expect((await m.call('fetch_page', { url: `${site}/article` })).structuredContent).toMatchObject({ title: 'Shipping times' });
     await m.close();
   });
 });

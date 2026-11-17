@@ -91,7 +91,14 @@ const httpOnly = (url: string): boolean => {
 
 export function registerBrowseTools(
   server: McpServer,
-  d: { session: BrowserSession; twoSteps: TwoStepRegistry; inToolWaitMs: number; lookup: (id: string) => TwoStep | CallToolResult },
+  d: {
+    session: BrowserSession;
+    twoSteps: TwoStepRegistry;
+    inToolWaitMs: number;
+    lookup: (id: string) => TwoStep | CallToolResult;
+    /** The link reaches the person without the agent (--open, Unstuck Cloud alerts). Otherwise only the agent can show it. */
+    linkReachesPerson: boolean;
+  },
 ): void {
   const { session } = d;
 
@@ -120,7 +127,8 @@ export function registerBrowseTools(
     try {
       quick = await within(
         outcome.then((o) => ({ o })),
-        d.inToolWaitMs,
+        // Nobody else will show the person the link: hand it to the agent as soon as it exists.
+        d.linkReachesPerson ? d.inToolWaitMs : 0,
       );
       // Past the in-call wait: whichever comes first, the end of the rescue or its link.
       const next = quick ?? (await Promise.race([outcome.then((o) => ({ o })), linked.then((l) => ({ l }))]));

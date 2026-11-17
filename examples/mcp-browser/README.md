@@ -26,7 +26,8 @@ at `UNSTUCK_CDP_URL` instead of starting one.
   (`e1`, `e2`…) in its snapshot. Password fields are never shown and never typed: the person does that.
 - `ask_human`: bring a person in for something only they can do (a login, a 2FA code).
 - `resume_after_human`: when a check takes the person longer than about 40 s, a browsing tool returns
-  `status: "human_needed"` with the link to show them. Call `resume_after_human` with its `takeover_id` until it
+  `status: "human_needed"` with the link to show them. With no other way to reach the person (no `--open`, no
+  Unstuck Cloud alerts) it returns the link at once, since only the agent can show it. Call `resume_after_human` with its `takeover_id` until it
   returns the original call's result. Other browsing calls meanwhile return `human_takeover_active`.
 - `get_session`, `remember_site`, `forget_site`: a site's cookies, saved to or removed from the profile.
 
