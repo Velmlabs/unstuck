@@ -30,4 +30,4 @@ def test_errors_and_versions():
     assert str(PageClosedError()) == "page closed"
     assert issubclass(UnstuckConfigError, ValueError) and str(UnstuckConfigError("bad")) == "bad"
     assert "UnstuckConfigError" in unstuck.__all__
-    assert PROTOCOL_VERSION == 1 and __version__ == "0.2.7"
+    assert PROTOCOL_VERSION == 1 and __version__ == "0.2.8"
