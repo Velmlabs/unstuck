@@ -80,10 +80,20 @@ export async function createGuard(o: GuardOptions): Promise<Guard> {
     return outcome;
   };
 
-  const look = async (requestedUrl?: string): Promise<RescueOutcome | null> => {
+  // One look (detection and its rescue) at a time per page: calls that overlap (waitForNavigation and click together)
+  // share it, so one check brings in one person, once.
+  let looking: Promise<RescueOutcome | null> | null = null;
+  const look = (requestedUrl?: string): Promise<RescueOutcome | null> => {
+    if (looking) return looking;
     dirty = false;
-    const check = await detectHumanCheck(cdp, { scope, requestedUrl, document: tracker.last(), widgetGraceMs: o.widgetGraceMs });
-    return check ? run(check) : null;
+    const p = (async () => {
+      const check = await detectHumanCheck(cdp, { scope, requestedUrl, document: tracker.last(), widgetGraceMs: o.widgetGraceMs });
+      return check ? run(check) : null;
+    })().finally(() => {
+      if (looking === p) looking = null;
+    });
+    looking = p;
+    return p;
   };
 
   return {

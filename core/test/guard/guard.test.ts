@@ -32,6 +32,22 @@ describe('createGuard', () => {
     expect(onRescue).toHaveBeenCalledWith(o);
   });
 
+  it('two checks at once (waitForNavigation and click together) share one rescue: one takeover, one outcome', async () => {
+    const state = { facts: blocked() };
+    const run = runner();
+    run.mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 50));
+      state.facts = page();
+      return { status: 'resolved', sessionId: 's1', url: '', durationS: 1 };
+    });
+    const g = await createGuard({ cdp: fakePage(state), takeover: run, store: createMemorySessionStore(), widgetGraceMs: 5 });
+    const [a, b, c] = await Promise.all([g.after(), g.after({ mayNavigate: false }), g.check()]);
+    expect(run).toHaveBeenCalledOnce();
+    expect(a).toMatchObject({ status: 'resolved' });
+    expect(b).toBe(a);
+    expect(c).toBe(a);
+  });
+
   it('remember: loads stored cookies once per site before navigating, only missing ones', async () => {
     const store = createMemorySessionStore();
     await store.save('shop.example', [cookie('sid', 'stale', 'shop.example'), cookie('cf_clearance', 'x', 'shop.example')], 'UA/1');

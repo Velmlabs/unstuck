@@ -35,7 +35,7 @@ describe('rescue', () => {
 
   it('the check still there after Done is still_blocked, with no second takeover', async () => {
     const run = runner();
-    const o = await rescue(fakePage({ facts: blocked() }), cfCheck, { takeover: run, limiter: limiter(), quietMs: 10 });
+    const o = await rescue(fakePage({ facts: blocked() }), cfCheck, { takeover: run, limiter: limiter(), quietMs: 10, clearWaitMs: 50 });
     expect(o).toMatchObject({ status: 'still_blocked', detail: 'generic.heading' });
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -85,6 +85,29 @@ describe('rescue', () => {
       return { status: 'resolved', sessionId: 's1', url: 'https://shop.example/', durationS: 3 };
     });
     expect((await rescue(cdp, cfCheck, { takeover: run, limiter: limiter(), quietMs: 500 })).status).toBe('resolved');
+  });
+
+  it("Review Focus 3: Done tapped well before the page's own reload (more than the quiet time) is still resolved", async () => {
+    const state = { facts: blocked() };
+    const cdp = fakePage(state);
+    const run = runner();
+    run.mockImplementation(async () => {
+      // Cloudflare reloads about a second after the solve, which can be 1.5 s after the person taps Done.
+      setTimeout(() => cdp.emit('Page.frameStartedLoading', { frameId: 'MAIN' }), 1500);
+      setTimeout(() => {
+        state.facts = page();
+        cdp.emit('Page.loadEventFired', {});
+      }, 1900);
+      return { status: 'resolved', sessionId: 's1', url: 'https://shop.example/', durationS: 3 };
+    });
+    expect((await rescue(cdp, cfCheck, { takeover: run, limiter: limiter(), quietMs: 500 })).status).toBe('resolved');
+  });
+
+  it('a check that never clears is still_blocked once the clear wait is over', async () => {
+    const t0 = Date.now();
+    const o = await rescue(fakePage({ facts: blocked() }), cfCheck, { takeover: runner(), limiter: limiter(), quietMs: 10, clearWaitMs: 300 });
+    expect(o.status).toBe('still_blocked');
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(280);
   });
 });
 

@@ -5,6 +5,9 @@ import type { RateLimiter } from './rate-limit';
 import { BROWSER_CANNOT_RENDER_HINT, type RenderCheck } from './render-check';
 import { waitForQuiet } from './settle';
 
+export const CLEAR_WAIT_MS = 6_000;
+const CLEAR_POLL_MS = 250;
+
 /** Runs one takeover for a check (the SDKs and the engine each bind their own). */
 export type TakeoverRunner = (o: { reason: string; site: string }) => Promise<TakeoverResult>;
 
@@ -27,6 +30,8 @@ export interface RescueOptions {
   reason?: string;
   quietMs?: number;
   maxSettleMs?: number;
+  /** After Done, how long a check that's still there may take to clear by itself before it's still_blocked (default 6 s). */
+  clearWaitMs?: number;
   now?: () => number;
   /** A challenge on a browser that can't draw CAPTCHA widgets fails at once instead of opening a takeover no one can finish. */
   canRenderCaptcha?: RenderCheck;
@@ -52,8 +57,16 @@ export async function rescue(cdp: CdpClient, check: HumanCheck, o: RescueOptions
     if (takeover.status === 'failed') return out(takeover.detail === 'alert_failed' ? 'alert_failed' : 'failed', { takeover, ...(takeover.detail ? { detail: takeover.detail } : {}) });
     // Done: the page may still be redirecting (Cloudflare reloads about a second after it's solved).
     await waitForQuiet(cdp, o.quietMs, o.maxSettleMs);
-    const still = await detectHumanCheck(cdp, { scope: o.scope ?? ['challenge'] });
-    return still ? out('still_blocked', { takeover, detail: still.ruleId }) : out('resolved', { takeover });
+    // The check may still be showing for a moment ("Verification successful", then the page's own reload), so it gets
+    // a few seconds to clear, settling again after any navigation, before the answer is still_blocked.
+    const until = Date.now() + (o.clearWaitMs ?? CLEAR_WAIT_MS);
+    for (;;) {
+      const still = await detectHumanCheck(cdp, { scope: o.scope ?? ['challenge'] });
+      if (!still) return out('resolved', { takeover });
+      if (Date.now() >= until) return out('still_blocked', { takeover, detail: still.ruleId });
+      await new Promise((r) => setTimeout(r, CLEAR_POLL_MS));
+      await waitForQuiet(cdp, o.quietMs, o.maxSettleMs);
+    }
   } catch (e) {
     return out('failed', { detail: e instanceof Error ? e.message : String(e) });
   }
