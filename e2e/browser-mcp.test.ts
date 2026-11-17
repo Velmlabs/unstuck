@@ -1,5 +1,6 @@
 // Unstuck Browser's MCP server end to end: the engine binary with --mcp --browser starts its own headless Chromium on the
-// first browsing call, reads pages, and hands a human check to a person and back.
+// first browsing call, reads pages, and hands a human check to a person and back. The test site is on 127.0.0.1, so
+// these servers run with --allow-private-network; one test checks the default blocks it.
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -39,7 +40,7 @@ async function mcp(args: string[], env: Record<string, string> = {}) {
 describe('Unstuck Browser over MCP', () => {
   it('tools/list starts no browser; the first fetch_page does; closing stdin stops it and removes its profile dir', async () => {
     const before = profiles();
-    const m = await mcp(['--mcp', '--browser']);
+    const m = await mcp(['--mcp', '--browser', '--allow-private-network']);
     const names = (await m.client.listTools()).tools.map((t: { name: string }) => t.name);
     expect(names).toEqual(expect.arrayContaining(['fetch_page', 'open', 'ask_human', 'resume_after_human', 'request_human_takeover']));
     expect([...profiles()].filter((d) => !before.has(d))).toEqual([]);
@@ -52,7 +53,7 @@ describe('Unstuck Browser over MCP', () => {
   });
 
   it('fetch_page round trip on /article returns markdown', async () => {
-    const m = await mcp(['--mcp', '--browser']);
+    const m = await mcp(['--mcp', '--browser', '--allow-private-network']);
     const r = await m.call('fetch_page', { url: `${site.url}/article` });
     expect(r.structuredContent).toMatchObject({ status: 200, final_url: `${site.url}/article` });
     expect(r.structuredContent.content).toMatch(/^# /);
@@ -62,7 +63,7 @@ describe('Unstuck Browser over MCP', () => {
 
   it('fetch_page on /cf → human_needed → Done → resume_after_human returns the content', async () => {
     site.reset();
-    const m = await mcp(['--mcp', '--browser'], { UNSTUCK_IN_TOOL_WAIT_S: '3' });
+    const m = await mcp(['--mcp', '--browser', '--allow-private-network'], { UNSTUCK_IN_TOOL_WAIT_S: '3' });
     const h = await m.call('fetch_page', { url: `${site.url}/cf` });
     expect(h.structuredContent).toMatchObject({ status: 'human_needed', takeover_id: expect.any(String), link: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/s\//) });
     site.solve();
@@ -85,7 +86,7 @@ describe('Unstuck Browser over MCP', () => {
 
   it.each(['SIGTERM', 'SIGINT'] as const)('%s to the MCP server stops the Chrome it started and removes its profile dir', async (sig) => {
     const before = profiles();
-    const m = await mcp(['--mcp', '--browser']);
+    const m = await mcp(['--mcp', '--browser', '--allow-private-network']);
     await m.call('fetch_page', { url: `${site.url}/article` });
     const started = [...profiles()].filter((d) => !before.has(d));
     expect(started).toHaveLength(1);
@@ -93,6 +94,15 @@ describe('Unstuck Browser over MCP', () => {
     process.kill(pid, sig);
     await expect.poll(() => fs.existsSync(path.join(os.tmpdir(), started[0]!)), { timeout: 10_000 }).toBe(false);
     await m.close().catch(() => {});
+  });
+
+  it('by default the browser refuses this machine: a 127.0.0.1 site is a tool error naming the flag', async () => {
+    const m = await mcp(['--mcp', '--browser']);
+    const r = await m.call('fetch_page', { url: `${site.url}/article` });
+    expect(r.isError).toBe(true);
+    expect(r.content[0].text).toContain('127.0.0.1 is a private or local address');
+    expect(r.content[0].text).toContain('--allow-private-network');
+    await m.close();
   });
 });
 

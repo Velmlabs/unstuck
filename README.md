@@ -185,7 +185,9 @@ The agent gets `fetch_page` (a page's readable content, as markdown), `open`, `s
 other page tools, and `ask_human`. A quick check is solved inside the call. A longer one returns the link for the agent
 to show you, and `resume_after_human` finishes the call. It all runs on your computer, with no account: without
 Unstuck Cloud the link opens on this machine, and it comes back to the agent at once (or opens by itself with `--open`). Configs for Claude Desktop and Codex:
-[`examples/mcp-browser`](examples/mcp-browser).
+[`examples/mcp-browser`](examples/mcp-browser). The browser never opens localhost, your intranet or cloud-metadata
+addresses, redirects included, so a page can't use it to read them (`--allow-private-network` allows them, e.g. for
+your own dev server).
 
 - **Session memory.** With `remember: true` (on by default in the MCP server), the cookies a person's rescue earned are
   kept in `~/.unstuck/profiles/<profile>/sites.json` (readable only by you), so the next visit goes straight through.

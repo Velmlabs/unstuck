@@ -175,6 +175,12 @@ describe('browse flags', () => {
     expect(browseConfig(['--mcp', '--tools', 'browser', '--browser'], env)).toMatchObject({ browse: { source: { kind: 'chrome' } } });
   });
 
+  it('--allow-private-network lets the browser open local and intranet addresses (blocked by default)', () => {
+    expect(browseConfig(['--mcp', '--browser'], env).browse).not.toHaveProperty('allowPrivateNetwork');
+    expect(browseConfig(['--mcp', '--browser', '--allow-private-network'], env)).toMatchObject({ browse: { allowPrivateNetwork: true } });
+    expect(browseConfig(['--mcp', '--allow-private-network'], env)).toHaveProperty('error');
+  });
+
   it('UNSTUCK_IN_TOOL_WAIT_S sets how long a browsing tool waits for a person (1–110 s)', () => {
     expect(browseConfig(['--mcp', '--browser'], { ...env, UNSTUCK_IN_TOOL_WAIT_S: '5' })).toMatchObject({ browse: { inToolWaitMs: 5000 } });
     expect(browseConfig(['--mcp', '--browser'], env).browse).not.toHaveProperty('inToolWaitMs');

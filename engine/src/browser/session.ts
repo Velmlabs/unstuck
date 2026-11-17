@@ -17,6 +17,7 @@ import {
 import { connectCdp, type DirectCdp } from '../direct-cdp';
 import { findChrome, launchChrome, launchObscura, type LaunchedBrowser } from './launcher';
 import { probeCaptchaPaint } from './paint-check';
+import { guardNetwork } from './network-guard';
 import type { Snapshot } from './snapshot';
 
 export interface BrowseConfig {
@@ -28,6 +29,8 @@ export interface BrowseConfig {
   home: string;
   /** How long a browsing tool waits for a person before it returns human_needed (default 40 s). */
   inToolWaitMs?: number;
+  /** Let the browser open localhost, intranet and cloud-metadata addresses (off by default). */
+  allowPrivateNetwork?: boolean;
 }
 
 export const IN_TOOL_WAIT_MS = 40_000;
@@ -40,6 +43,8 @@ export interface BrowserSessionDeps {
   runTakeover: (cdp: DirectCdp, reason: string, onReady: ReadyHandler) => Promise<TakeoverResult>;
   launch?: { chrome?: typeof launchChrome; obscura?: typeof launchObscura; findChrome?: typeof findChrome };
   connect?: typeof connectCdp;
+  /** Which URLs count as private (tests); default: the host is or resolves to a private address. */
+  blockHost?: (u: URL) => Promise<boolean>;
 }
 
 interface Live {
@@ -59,6 +64,8 @@ export class BrowserSession {
   private readonly waiters = new Set<() => void>();
   /** Sites a person got past (or logged in on) through this session: the only ones whose cookies may be handed out. */
   readonly solved = new Set<string>();
+  /** The last host the network guard refused, so a failed navigation can say why. */
+  lastBlocked: string | null = null;
   /** The last snapshot the agent got; its refs are what click/type/select act on. A main-frame navigation clears it. */
   snapshot: Snapshot | null = null;
   readonly store: SessionStore;
@@ -153,6 +160,14 @@ export class BrowserSession {
     }
     try {
       const cdp = await connect(url, { createUrl: 'about:blank' });
+      if (!this.c.allowPrivateNetwork) {
+        try {
+          await guardNetwork(cdp, { ...(this.d.blockHost ? { isBlocked: this.d.blockHost } : {}), onBlock: (h) => (this.lastBlocked = h) });
+        } catch {
+          await cdp.close().catch(() => {});
+          throw new Error("this browser can't block private addresses for Unstuck Browser; start the server with --allow-private-network to use it anyway");
+        }
+      }
       cdp.on('Page.frameNavigated', (p: { frame?: { parentId?: string } }) => {
         if (!p.frame?.parentId) this.snapshot = null;
       });

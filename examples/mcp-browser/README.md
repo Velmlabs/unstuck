@@ -38,6 +38,8 @@ The takeover tools (`request_human_takeover`, `start_human_takeover`, `wait_for_
 
 ## Options
 
+- `--allow-private-network`: let the browser open localhost, intranet and cloud-metadata addresses. They're blocked
+  by default, redirects included, so a page can't steer the agent into reading them. Use it for your own dev server.
 - `--profile <name>` (default `mcp`): remembered sites live in `~/.unstuck/profiles/<name>/sites.json`, readable only
   by you. `--no-remember` keeps nothing.
 - `--max-rescues-per-hour <n>` (default 10): at most this many person-checks an hour on the profile; past it a check

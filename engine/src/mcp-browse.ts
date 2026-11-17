@@ -65,7 +65,7 @@ async function done(o: RescueOutcome | null, finish: () => Promise<Out>): Promis
  * returned stop() is called: the caller keeps listening through the guard's check, so the status of the page a person
  * leaves behind (a challenge's own reload) is the one reported.
  */
-async function navigate(cdp: DirectCdp, url: string, onStatus: (s: number) => void): Promise<() => void> {
+async function navigate(cdp: DirectCdp, url: string, onStatus: (s: number) => void, session?: { lastBlocked: string | null }): Promise<() => void> {
   let frameId = '';
   const offResponse = cdp.on('Network.responseReceived', (p: { type?: string; frameId?: string; response?: { status?: number } }) => {
     if (p.type === 'Document' && (!frameId || p.frameId === frameId) && p.response?.status) onStatus(p.response.status);
@@ -74,9 +74,17 @@ async function navigate(cdp: DirectCdp, url: string, onStatus: (s: number) => vo
   const load = new Promise<void>((r) => (loaded = r));
   const offLoad = cdp.on('Page.loadEventFired', () => loaded());
   try {
+    if (session) session.lastBlocked = null;
     const nav = await cdp.send<{ frameId: string; errorText?: string }>('Page.navigate', { url });
     frameId = nav.frameId;
-    if (nav.errorText) throw new Error(`could not open ${url}: ${nav.errorText}`);
+    if (nav.errorText) {
+      const host = /BLOCKED_BY_CLIENT/.test(nav.errorText) ? session?.lastBlocked : null;
+      throw new Error(
+        host
+          ? `could not open ${url}: ${host} is a private or local address, which Unstuck Browser doesn't open (start it with --allow-private-network to allow them)`
+          : `could not open ${url}: ${nav.errorText}`,
+      );
+    }
     await within(load, LOAD_TIMEOUT_MS);
     return offResponse;
   } catch (e) {
@@ -233,7 +241,7 @@ export function registerBrowseTools(
           guardRef = guard;
           const pre = await guard.before({ url });
           if (pre && pre.status !== 'resolved') return pre;
-          const stop = await navigate(cdp, url, (s) => (status = s));
+          const stop = await navigate(cdp, url, (s) => (status = s), session);
           try {
             return await guard.after({ requestedUrl: url });
           } finally {
@@ -385,7 +393,7 @@ export function registerBrowseTools(
         async ({ cdp, guard }) => {
           const pre = await guard.before({ url });
           if (pre && pre.status !== 'resolved') return pre;
-          (await navigate(cdp, url, () => {}))();
+          (await navigate(cdp, url, () => {}, session))();
           return guard.after({ requestedUrl: url });
         },
         snapshotOut,

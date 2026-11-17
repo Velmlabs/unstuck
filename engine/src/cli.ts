@@ -20,7 +20,7 @@ import type { Readable, Writable } from 'node:stream';
 export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <port>] [--relay <wss://…> [--agent-key <key>]]
        unstuck-engine --mcp [--open] [--host <host>] [--port <port>] [--relay <wss://…> [--agent-key <key>]]
                      [--browser[=chrome|obscura] [--obscura-path <path>] | --tools takeover|browser]
-                     [--profile <name>] [--no-remember] [--max-rescues-per-hour <n>]
+                     [--profile <name>] [--no-remember] [--max-rescues-per-hour <n>] [--allow-private-network]
        unstuck-engine doctor --cdp <url>
        unstuck-engine --version | --help
 
@@ -40,6 +40,8 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
       A browsing tool waits UNSTUCK_IN_TOOL_WAIT_S (default 40) for a person
       before it returns the link; keep it under your client's tool timeout.
       With no --open and no Cloud alerts it returns the link at once.
+      The browser never opens localhost, intranet or cloud-metadata addresses
+      (redirects included) unless --allow-private-network.
 doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
       in a tab of its own and prints whether Unstuck works fully with it.
 
@@ -69,6 +71,7 @@ const OPTIONS = {
   profile: { type: 'string' },
   'no-remember': { type: 'boolean' },
   'max-rescues-per-hour': { type: 'string' },
+  'allow-private-network': { type: 'boolean' },
 } as const;
 
 /** parseArgs, with a bare `--browser` read as `--browser=chrome`. */
@@ -76,7 +79,7 @@ function parse(argv: string[]) {
   return parseArgs({ args: argv.map((a) => (a === '--browser' ? '--browser=chrome' : a)), allowPositionals: true, options: OPTIONS, strict: true });
 }
 
-const BROWSE_FLAGS = ['browser', 'obscura-path', 'tools', 'profile', 'no-remember', 'max-rescues-per-hour'] as const;
+const BROWSE_FLAGS = ['browser', 'obscura-path', 'tools', 'profile', 'no-remember', 'max-rescues-per-hour', 'allow-private-network'] as const;
 
 /** `obscura` on PATH, if there is one. */
 function onPath(name: string, env: Record<string, string | undefined>): string | undefined {
@@ -131,7 +134,7 @@ export function browseConfig(argv: string[], env: Record<string, string | undefi
     if (!Number.isInteger(w) || w < 1 || w > 110) return { error: 'UNSTUCK_IN_TOOL_WAIT_S is a whole number of seconds from 1 to 110' };
     inToolWaitMs = w * 1000;
   }
-  return { browse: { source, profile, remember: !values['no-remember'], maxRescuesPerHour: max, home: unstuckHome(env), ...(inToolWaitMs ? { inToolWaitMs } : {}) } };
+  return { browse: { source, profile, remember: !values['no-remember'], maxRescuesPerHour: max, home: unstuckHome(env), ...(inToolWaitMs ? { inToolWaitMs } : {}), ...(values['allow-private-network'] ? { allowPrivateNetwork: true } : {}) } };
 }
 
 export interface CliIO {

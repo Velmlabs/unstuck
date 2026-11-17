@@ -57,6 +57,7 @@ export interface McpServerOptions {
   browse?: BrowseConfig;
   storeFs?: StoreFs;
   launch?: BrowserSessionDeps['launch'];
+  blockHost?: BrowserSessionDeps['blockHost'];
 }
 
 /** The desktop opener for a link: the URL is always one argument, never parsed by a shell. */
@@ -467,6 +468,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
       storeFs: opts.storeFs ?? nodeStoreFs(),
       connect,
       ...(opts.launch ? { launch: opts.launch } : {}),
+      ...(opts.blockHost ? { blockHost: opts.blockHost } : {}),
       runTakeover: (cdp, reason, onReady) => {
         // The browsing tab is claimed while a person works on it: a takeover tool on it is refused meanwhile.
         return run(cdp, { reason }, (info, control) => {
