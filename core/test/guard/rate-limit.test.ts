@@ -8,6 +8,7 @@ describe('createRateLimiter', () => {
     const l = createRateLimiter(createMemorySessionStore({ now: () => now }), { now: () => now });
     expect(DEFAULT_MAX_RESCUES_PER_HOUR).toBe(10);
     expect(RATE_WINDOW_MS).toBe(3_600_000);
+    expect(l.maxPerHour).toBe(10);
     for (let i = 0; i < 10; i++) expect(await l.tryStart()).toEqual({ ok: true });
     expect(await l.tryStart()).toEqual({ ok: false, retryInS: 3600 });
     now += 3_600_001;

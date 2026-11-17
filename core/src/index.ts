@@ -21,3 +21,6 @@ export { matchRules, detectHumanCheck, WIDGET_GRACE_MS, type DetectOptions } fro
 export { createMemorySessionStore, createFileSessionStore, parseSitesFile, profileFile, PROFILE_NAME, SITES_FILE_VERSION, type SessionStore, type SiteRecord, type SitesFile, type StoreFs } from './guard/store';
 export { readCookies, setMissingCookies, deleteCookies, cookieHeader, sessionFor } from './guard/cookies';
 export { createRateLimiter, DEFAULT_MAX_RESCUES_PER_HOUR, RATE_WINDOW_MS, type RateLimiter } from './guard/rate-limit';
+export { waitForNavigation, waitForQuiet, NAV_GRACE_MS, LOAD_WAIT_MS, SETTLE_QUIET_MS, SETTLE_MAX_MS } from './guard/settle';
+export { rescue, reasonFor, type RescueOptions, type TakeoverRunner } from './guard/rescue';
+export { createGuard, type Guard, type GuardOptions } from './guard/guard';
