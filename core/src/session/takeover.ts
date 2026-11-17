@@ -4,16 +4,15 @@ import {
   importE2eKey,
   newE2eKey,
   encodeFrame,
-  parseViewerMessage,
   type EngineToViewer,
   type SessionStatus,
   type TakeoverResult,
   type TakeoverStatus,
-  type ViewerErrorCode,
   type ViewerInput,
+  type ViewerToEngine,
 } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
-import type { EventLog } from '../events';
+import type { EventLog, UnstuckEventType } from '../events';
 import type { Transport, ViewerConnection } from '../transport';
 import { startScreencast } from '../stream/screencast';
 import { startScreenshotPolling } from '../stream/poll';
@@ -25,13 +24,12 @@ import { createFieldFeed } from './field-feed';
 import { lockPage, safeInput, type PageLock } from './page-lock';
 import { createLatestSender, type LatestSender } from '../stream/latest';
 import { nextStatus, isTerminal, type SessionEvent } from './status';
-import { newSessionId, signToken, verifyToken } from './tokens';
+import { newSessionId, signToken } from './tokens';
 import { sealConnection } from './sealed';
+import { createViewerGate } from './gate';
 
-export const HELLO_TIMEOUT_MS = 10_000;
+export { HELLO_TIMEOUT_MS, MAX_CODE_ATTEMPTS } from './gate';
 export { RESUME_WINDOW_MS };
-/** Wrong 6-digit codes before the link stops admitting anyone new (relay spec §5.8). */
-export const MAX_CODE_ATTEMPTS = 5;
 export const DRAIN_INTERVAL_MS = 50;
 /** Upper bound on waiting for CDP during cleanup, so a dead browser can never stall the result. */
 export const STOP_TIMEOUT_MS = 2_000;
@@ -107,16 +105,6 @@ const FINAL_EVENT: Record<TakeoverStatus, SessionEvent> = {
   failed: 'error',
 };
 
-const errorText: Record<ViewerErrorCode, string> = {
-  token_invalid: 'This link is not valid.',
-  token_used: 'This link is already in use on another device.',
-  expired: 'This link has expired.',
-  session_closed: 'This takeover has ended.',
-  bad_message: 'Unexpected message.',
-  code_required: 'Enter the 6-digit code from your notification.',
-  code_invalid: 'That code is not right.',
-};
-
 /** Runs one takeover session. The returned promise never rejects. */
 export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOptions): RunningTakeover {
   const { transport, key, log, now } = deps;
@@ -126,10 +114,6 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let status: SessionStatus = 'created';
   let url = '';
   let published = false;
-  let redeemed = false;
-  let holder: ViewerConnection | null = null;
-  let resumeKey: string | null = null;
-  let leftAt: number | null = null;
   let inputCount = 0;
   let stopScreencast: (() => Promise<void>) | null = null;
   /** Bumped by every start and stop: a start that resolves with a stale generation shuts itself down. */
@@ -143,7 +127,6 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   /** The path to humans (e.g. the relay) is down: the viewer-left timer is paused meanwhile. */
   let transportDown = false;
   const code = opts.requireCode ? newCode() : undefined;
-  let wrongCodes = 0;
   let lastFrame: Uint8Array | null = null;
   let caps: Capabilities = { screencast: true, insertText: true, input: true };
   /** The page's site and the agent-listed sites; popups may visit these too. */
@@ -170,22 +153,33 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let inputDropped = 0;
   /** A mouse button the human pressed and has not released yet (where the pointer last was): released when ending. */
   let pressed: { target: Target; x: number; y: number; button: string; clickCount: number } | null = null;
-  const helloTimers = new Set<ReturnType<typeof setTimeout>>();
   let resolveResult!: (r: TakeoverResult) => void;
   const result = new Promise<TakeoverResult>((r) => (resolveResult = r));
 
   const emit = (type: Parameters<EventLog['append']>[0]['type'], data?: Record<string, string | number | boolean>) =>
     log?.append({ ts: now(), sessionId, type, ...(data ? { data } : {}) });
   const sendJson = (c: ViewerConnection, m: EngineToViewer) => c.send(JSON.stringify(m));
-  const reject = (c: ViewerConnection, code: ViewerErrorCode, close = true) => {
-    sendJson(c, { t: 'error', code, message: errorText[code] });
-    if (close) c.close(1008, code);
-  };
+  /** Admission (hello, code, one device, resume key) and who holds the session; see gate.ts. */
+  const gate = createViewerGate({
+    key,
+    sessionId,
+    now,
+    ...(code !== undefined ? { code } : {}),
+    isEnded: () => isTerminal(status),
+    emit: (type, data) => emit(type as UnstuckEventType, data),
+    onAttach: attachViewer,
+    onDetach: detachViewer,
+    onMessage: handleInput,
+  });
+  const holder = gate.holder;
   /** Native typing: where the fields are on the shown page, and what took focus (never their values). */
   const fieldFeed = createFieldFeed({
     scan: () => scanFields(active().cdp),
     focus: () => focusedField(active().cdp),
-    send: (m) => void (holder && sendJson(holder, m)),
+    send: (m) => {
+      const h = holder();
+      if (h) sendJson(h, m);
+    },
   });
   const go = (ev: SessionEvent) => {
     status = nextStatus(status, ev);
@@ -215,19 +209,12 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     status = nextStatus(status, FINAL_EVENT[final]);
     clearTimeout(expiryTimer);
     if (leftTimer) clearTimeout(leftTimer);
-    for (const t of helloTimers) clearTimeout(t);
-    helloTimers.clear();
     offClose();
     offPopups();
     fieldFeed.stop();
     for (const t of targets) t.off();
     const locks = targets.map((t) => t.lock);
-    const viewer = holder;
-    holder = null;
-    if (viewer) {
-      sendJson(viewer, { t: 'state', status });
-      viewer.close(1000, status);
-    }
+    gate.end(status);
     // No input from this takeover may reach the page once it has ended: what is still queued is discarded, the
     // dispatch in progress is waited for, and a button left pressed is released, all before the lock comes off.
     inputDropped += pendingInput.splice(0).length;
@@ -271,7 +258,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
    * pending non-release (a dropped release could leave a button held down).
    */
   function enqueueInput(conn: ViewerConnection, input: ViewerInput): void {
-    if (isTerminal(status) || conn !== holder) return void inputDropped++;
+    if (isTerminal(status) || conn !== holder()) return void inputDropped++;
     if (pendingInput.length >= MAX_PENDING_INPUT) {
       let i = pendingInput.findIndex((p) => p.input.t === 'wheel' || (p.input.t === 'mouse' && p.input.action === 'move'));
       if (i < 0 && isRelease(input)) i = pendingInput.findIndex((p) => !isRelease(p.input));
@@ -295,7 +282,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   /** Replays one input into the shown page, checking before every CDP call that `conn` may still act on it. */
   async function dispatchInput(conn: ViewerConnection, input: ViewerInput): Promise<void> {
-    const live = () => !isTerminal(status) && conn === holder;
+    const live = () => !isTerminal(status) && conn === holder();
     if (!live()) return void inputDropped++;
     const target = active();
     const guarded: Pick<CdpClient, 'send'> = {
@@ -323,18 +310,14 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     else if (pressed) pressed = { ...pressed, x: m.x, y: m.y };
   }
 
+  /** The gate has made `conn` the holder (closing any previous one) and minted its resume key. */
   async function attachViewer(conn: ViewerConnection, vn?: string): Promise<void> {
-    const previous = holder;
-    holder = conn;
-    leftAt = null;
     if (leftTimer) clearTimeout(leftTimer);
     leftTimer = null;
-    if (previous && previous !== conn) previous.close(1000, 'replaced');
-    resumeKey = newSessionId();
     if (status === 'waiting') go('viewer_joined');
     emit('viewer_joined');
     // credit: 1 — this engine paces frames by the viewer's acks once the viewer opts in ({ t: 'credit', v: 1 }).
-    sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey, ...(vn ? { vn } : {}), credit: 1 });
+    sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey: gate.resumeKey()!, ...(vn ? { vn } : {}), credit: 1 });
     sender = holderSender = createLatestSender(conn, { now });
     // Chrome only sends frames when the page repaints; a static CAPTCHA would leave a new viewer black.
     if (lastFrame) sender.push(lastFrame);
@@ -360,7 +343,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       return;
     }
     // Superseded while starting (viewer replaced, popup switch, finish): stop this one.
-    if (gen !== streamGen || holder === null || isTerminal(status)) return void stop().catch(() => {});
+    if (gen !== streamGen || holder() === null || isTerminal(status)) return void stop().catch(() => {});
     stopScreencast = stop;
     drainTimer = setInterval(() => sender?.drain(), DRAIN_INTERVAL_MS);
   }
@@ -373,10 +356,10 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   /** The active target changed: move the stream to it. */
   async function switchStream(): Promise<void> {
-    if (!holder || isTerminal(status)) return;
+    if (!holder() || isTerminal(status)) return;
     await stopStream();
     lastFrame = null;
-    if (!holder || isTerminal(status)) return;
+    if (!holder() || isTerminal(status)) return;
     holderSender?.clear();
     sender = holderSender;
     fieldFeed.onTargetChanged();
@@ -422,10 +405,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (wasActive) void switchStream();
   }
 
-  function detachViewer(conn: ViewerConnection): void {
-    if (holder !== conn || isTerminal(status)) return;
-    holder = null;
-    leftAt = now();
+  /** The gate has already cleared the holder and started the resume window. */
+  function detachViewer(): void {
     go('viewer_left');
     emit('viewer_left');
     void stopStream();
@@ -444,66 +425,22 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (transportDown) {
       if (leftTimer) clearTimeout(leftTimer);
       leftTimer = null;
-    } else if (holder === null && leftAt !== null) {
-      leftAt = now(); // the resume window restarts in full once humans can reach us again
-      startLeftTimer();
+    } else if (gate.renewResumeWindow()) {
+      startLeftTimer(); // the resume window restarts in full once humans can reach us again
     }
   }
 
-  async function onHello(conn: ViewerConnection, token: string, offeredResumeKey?: string, offeredCode?: string, vn?: string): Promise<boolean> {
-    const check = await verifyToken(key, token, now());
-    if (isTerminal(status)) {
-      reject(conn, 'session_closed');
-      return false;
-    }
-    if (!check.ok || check.sessionId !== sessionId) {
-      reject(conn, check.ok ? 'token_invalid' : check.code);
-      emit('viewer_rejected', { code: check.ok ? 'token_invalid' : check.code });
-      return false;
-    }
-    const resumeOk =
-      offeredResumeKey !== undefined &&
-      offeredResumeKey === resumeKey &&
-      (holder !== null || (leftAt !== null && now() - leftAt <= RESUME_WINDOW_MS));
-    if (code !== undefined && !resumeOk) {
-      // Resume needs no code: the resume key proves it's the device that already entered it.
-      if (wrongCodes >= MAX_CODE_ATTEMPTS) {
-        reject(conn, 'session_closed');
-        emit('viewer_rejected', { code: 'code_locked' });
-        return false;
-      }
-      if (offeredCode === undefined) {
-        reject(conn, 'code_required', false);
-        return false;
-      }
-      if (!sameCode(offeredCode, code)) {
-        wrongCodes++;
-        reject(conn, 'code_invalid', false);
-        emit('viewer_rejected', { code: 'code_invalid' });
-        return false;
-      }
-    }
-    if (redeemed && !resumeOk) {
-      reject(conn, 'token_used');
-      emit('viewer_rejected', { code: 'token_used' });
-      return false;
-    }
-    redeemed = true;
-    await attachViewer(conn, vn);
-    return true;
-  }
-
-  function handleInput(conn: ViewerConnection, raw: string | Uint8Array): void {
-    const msg = typeof raw === 'string' ? parseViewerMessage(raw) : null;
+  function handleInput(conn: ViewerConnection, msg: ViewerToEngine): void {
     // approved, switch_control and answer belong to approval and question sessions, which this session isn't.
-    if (!msg || msg.t === 'hello' || msg.t === 'approved' || msg.t === 'switch_control' || msg.t === 'answer') return reject(conn, 'bad_message', false);
+    // (The gate answers an unparsable message or a second hello itself; hello is listed here for the type.)
+    if (msg.t === 'hello' || msg.t === 'approved' || msg.t === 'switch_control' || msg.t === 'answer') return gate.reject(conn, 'bad_message', false);
     switch (msg.t) {
       case 'ping':
         return sendJson(conn, { t: 'pong' });
       case 'credit':
-        return void (conn === holder && holderSender?.enableCredit());
+        return void (conn === holder() && holderSender?.enableCredit());
       case 'ack':
-        return void (conn === holder && holderSender?.ack(msg.seq));
+        return void (conn === holder() && holderSender?.ack(msg.seq));
       case 'done':
         return finish('resolved');
       case 'cant_solve': {
@@ -516,40 +453,6 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
         if (safe) enqueueInput(conn, safe);
       }
     }
-  }
-
-  function onConnection(conn: ViewerConnection): void {
-    if (isTerminal(status)) return reject(conn, 'session_closed');
-    let greeted = false;
-    let greeting = false;
-    const helloTimer = setTimeout(() => {
-      helloTimers.delete(helloTimer);
-      if (!greeted) conn.close(1008, 'hello timeout');
-    }, HELLO_TIMEOUT_MS);
-    helloTimers.add(helloTimer);
-    conn.onClose(() => {
-      clearTimeout(helloTimer);
-      helloTimers.delete(helloTimer);
-      detachViewer(conn);
-    });
-    // Messages that arrive while a hello is being handled (e.g. Done tapped the moment the screen appears)
-    // wait their turn instead of being dropped.
-    const waiting: (string | Uint8Array)[] = [];
-    const dispatch = (raw: string | Uint8Array): void => {
-      if (greeted) return handleInput(conn, raw);
-      if (greeting) return void waiting.push(raw);
-      const msg = typeof raw === 'string' ? parseViewerMessage(raw) : null;
-      if (!msg || msg.t !== 'hello') return reject(conn, 'bad_message');
-      greeting = true;
-      clearTimeout(helloTimer);
-      helloTimers.delete(helloTimer);
-      void onHello(conn, msg.token, msg.resumeKey, msg.code, msg.vn).then((ok) => {
-        greeted = ok;
-        greeting = false;
-        for (const next of waiting.splice(0)) dispatch(next);
-      });
-    };
-    conn.onMessage(dispatch);
   }
 
   void (async () => {
@@ -577,7 +480,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       const { baseUrl } = await transport.publish(sessionId, { expiresAt });
       published = true;
       if (isTerminal(status)) return void transport.unpublish(sessionId).catch(() => {});
-      transport.onConnection(sessionId, (conn) => onConnection(sealConnection(conn, e2eKey, sessionId)));
+      transport.onConnection(sessionId, (conn) => gate.onConnection(sealConnection(conn, e2eKey, sessionId)));
       transport.onStatus?.(sessionId, onTransportStatus);
       const token = await signToken(key, sessionId, expiresAt);
       url = `${baseUrl}#t=${token}&k=${b64urlEncode(rawE2e)}`;
@@ -594,7 +497,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     go('notified');
     emit('link', { expiresAt });
     try {
-      opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, cancel, joined });
+      opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, cancel, joined: gate.joined });
     } catch {
       // A link handler that throws is the caller's bug: the takeover keeps running (an alert may already be on its way).
     }
@@ -607,11 +510,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   function cancel(detail: string): void {
     finish('cancelled', detail);
   }
-  function joined(): boolean {
-    return redeemed;
-  }
-
-  return { result, cancel, fail, joined };
+  return { result, cancel, fail, joined: gate.joined };
 }
 
 function isRelease(m: ViewerInput): boolean {
@@ -624,14 +523,6 @@ function newCode(): string {
   do crypto.getRandomValues(buf);
   while (buf[0]! >= 4_294_000_000);
   return String(buf[0]! % 1_000_000).padStart(6, '0');
-}
-
-/** Constant-time comparison of two 6-digit strings. */
-function sameCode(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
 }
 
 /** The human's "Can't solve" text as one plain line: no control, format or bidi characters, spaces collapsed. */
