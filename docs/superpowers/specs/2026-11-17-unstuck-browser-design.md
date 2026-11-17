@@ -1,6 +1,6 @@
 # Unstuck Browser: a wrapper for your agent's headless browser that asks a person when it's stuck
 
-**Date:** 2026-11-17 · **Status:** decisions complete; awaiting the owner's approval of this document · **Repo:** velmlabs/unstuck (open source), shipped in
+**Date:** 2026-11-17 · **Status:** approved by the owner 2026-11-17 ("Approved, ensure documentation are also added for readme and the site") · **Repo:** velmlabs/unstuck (open source), shipped in
 the existing packages.
 
 ## Intent
@@ -219,6 +219,9 @@ each new Obscura release.
 - **Coverage stays above 90%** in every package; core stays free of Node built-ins.
 
 ## Docs and branding
+
+Required for release (owner): the README **and** the unstuck.sh docs site both document Unstuck Browser in this
+version, not later.
 
 - **A new "Unstuck Browser" section in the docs:** what it is, `wrap(page)` for each target, MCP with its own browser,
   session memory and forgetting, the rate limit, and "a person solves; site terms still apply".
