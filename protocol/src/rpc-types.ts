@@ -17,7 +17,12 @@ export interface RpcNotification {
   params?: unknown;
 }
 
+import type { CheckKind } from './guard';
+
 export const PROTOCOL_VERSION = 1;
+/** Additions within major 1. An engine that sends no minor is minor 0 and has no capabilities. */
+export const PROTOCOL_MINOR = 1;
+export type EngineCapability = 'guard' | 'paintCheck';
 
 /** Method names on the SDK <-> engine JSON-lines channel. */
 export const Methods = {
@@ -25,9 +30,23 @@ export const Methods = {
   hello: 'engine.hello',
   takeover: 'takeover',
   shutdown: 'shutdown',
+  guardOpen: 'guard.open',
+  guardBefore: 'guard.before',
+  guardAfter: 'guard.after',
+  guardCheck: 'guard.check',
+  guardAskHuman: 'guard.askHuman',
+  guardSession: 'guard.getSession',
+  guardRemember: 'guard.rememberSite',
+  guardForget: 'guard.forgetSite',
+  guardForgetAll: 'guard.forgetAll',
+  guardClose: 'guard.close',
+  paintCheck: 'browser.paintCheck',
   // engine -> SDK requests
   cdpSend: 'cdp.send',
   cdpSubscribe: 'cdp.subscribe',
+  /** Open a new tab in the same browser as pageId (the paint probe); answers the new tab's pageId. */
+  pageCreate: 'page.create',
+  pageClose: 'page.close',
   // SDK -> engine notifications
   cdpEvent: 'cdp.event',
   cdpClosed: 'cdp.closed',
@@ -35,16 +54,21 @@ export const Methods = {
   pagePopup: 'page.popup',
   // engine -> SDK notifications
   takeoverLink: 'takeover.link',
+  /** A guard's rescue started (active: true) or ended; the SDK follows popups only while one is active. */
+  guardRescue: 'guard.rescue',
 } as const;
 
 export interface HelloParams {
   sdk: 'ts' | 'py';
   sdkVersion: string;
   protocolVersion: number;
+  protocolMinor?: number;
 }
 export interface HelloResult {
   engineVersion: string;
   protocolVersion: number;
+  protocolMinor?: number;
+  capabilities?: EngineCapability[];
 }
 export interface TakeoverParams {
   pageId: string;
@@ -92,4 +116,59 @@ export interface TakeoverLinkParams {
   expiresAt: number;
   /** The 6-digit code, when the takeover requires one. Never part of the URL. */
   code?: string;
+}
+
+export interface GuardOpenParams {
+  pageId: string;
+  /** Identifies the browser the page lives in; the paint check runs once per key. */
+  browserKey: string;
+  profile?: string;
+  rescue?: CheckKind[];
+  remember?: boolean;
+  maxRescuesPerHour?: number;
+  timeoutS?: number;
+  allowedSites?: string[];
+  requireCode?: boolean;
+  alerts?: boolean | 'required';
+}
+export interface GuardOpenResult {
+  guardId: string;
+}
+export interface GuardBeforeParams {
+  guardId: string;
+  url?: string;
+}
+export interface GuardAfterParams {
+  guardId: string;
+  requestedUrl?: string;
+  mayNavigate?: boolean;
+}
+export interface GuardAskParams {
+  guardId: string;
+  reason: string;
+}
+export interface GuardSiteParams {
+  guardId: string;
+  domain?: string;
+}
+export interface PaintCheckParams {
+  pageId: string;
+  browserKey: string;
+}
+export interface PaintCheckResult {
+  paint: boolean | 'unknown';
+}
+export interface PageCreateParams {
+  pageId: string;
+}
+export interface PageCreateResult {
+  pageId: string;
+}
+export interface PageCloseParams {
+  pageId: string;
+}
+export interface GuardRescueParams {
+  guardId: string;
+  pageId: string;
+  active: boolean;
 }

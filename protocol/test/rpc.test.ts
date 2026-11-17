@@ -80,3 +80,27 @@ describe('createRpcPeer', () => {
     expect(lines).toEqual(['{"method":"a","params":{"x":1}}']);
   });
 });
+
+describe('protocol minor 1', () => {
+  it('keeps major 1, adds minor 1 and the guard method names', async () => {
+    const t = await import('../src/rpc-types');
+    expect(t.PROTOCOL_VERSION).toBe(1);
+    expect(t.PROTOCOL_MINOR).toBe(1);
+    expect(t.Methods).toMatchObject({
+      guardOpen: 'guard.open',
+      guardBefore: 'guard.before',
+      guardAfter: 'guard.after',
+      guardCheck: 'guard.check',
+      guardAskHuman: 'guard.askHuman',
+      guardSession: 'guard.getSession',
+      guardRemember: 'guard.rememberSite',
+      guardForget: 'guard.forgetSite',
+      guardForgetAll: 'guard.forgetAll',
+      guardClose: 'guard.close',
+      paintCheck: 'browser.paintCheck',
+      pageCreate: 'page.create',
+      pageClose: 'page.close',
+      guardRescue: 'guard.rescue',
+    });
+  });
+});

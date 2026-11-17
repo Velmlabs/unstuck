@@ -49,7 +49,7 @@ describe('main', () => {
     await vi.waitFor(() => expect(lines).toHaveLength(1), { timeout: 4_000 });
     x.stdin.end();
     await expect(run).resolves.toBe(0);
-    expect(lines.map((l) => JSON.parse(l))).toEqual([{ id: 1, result: { engineVersion: VERSION, protocolVersion: 1 } }]);
+    expect(lines.map((l) => JSON.parse(l))).toEqual([{ id: 1, result: { engineVersion: VERSION, protocolVersion: 1, protocolMinor: 1, capabilities: ['guard', 'paintCheck'] } }]);
     expect(x.err()).toMatch(/viewer server listening on http:\/\/127\.0\.0\.1:\d+/);
   });
 

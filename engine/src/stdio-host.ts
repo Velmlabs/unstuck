@@ -2,18 +2,30 @@ import readline from 'node:readline';
 import {
   createRpcPeer,
   Methods,
+  PROTOCOL_MINOR,
   PROTOCOL_VERSION,
   type HelloParams,
   type PagePopupParams,
   type HelloResult,
   type TakeoverParams,
 } from '@velmlabs/unstuck-protocol';
-import { createEngine, hostnames, sendTakeoverAlert, type CdpClient, type CloudAlerter, type EventLog, type Transport } from '@velmlabs/unstuck-core';
+import {
+  createEngine,
+  hostnames,
+  sendTakeoverAlert,
+  type CdpClient,
+  type CloudAlerter,
+  type EventLog,
+  type LinkHandler,
+  type PopupSource,
+  type StoreFs,
+  type Transport,
+} from '@velmlabs/unstuck-core';
 import { createTunneledCdp } from './tunnel';
+import { registerGuardMethods, REQUIRED_WITHOUT_CLOUD } from './guard-host';
+import { nodeStoreFs } from './browser/node-store-fs';
 
-/** The engine has a Cloud alerter only with UNSTUCK_API_KEY and no relay of its own (flags or UNSTUCK_RELAY_URL). */
-export const REQUIRED_WITHOUT_CLOUD =
-  "alerts: 'required' needs Unstuck Cloud (apiKey or UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts";
+export { REQUIRED_WITHOUT_CLOUD };
 
 export interface StdioHostOptions {
   input: NodeJS.ReadableStream;
@@ -25,6 +37,9 @@ export interface StdioHostOptions {
   requireCode?: boolean;
   /** Sends the link to the user's paired phones (Cloud only); skipped per takeover by `alerts: false`. */
   alerter?: CloudAlerter;
+  /** Where remembered sites live (UNSTUCK_HOME); defaults to process.env. */
+  env?: Record<string, string | undefined>;
+  storeFs?: StoreFs;
 }
 
 /**
@@ -42,6 +57,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
   const finish = () => {
     finished ??= (async () => {
       rl.close();
+      await guards.closeAll();
       await engine.close();
       peer.close('engine shutting down');
       resolveDone();
@@ -56,7 +72,8 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
         code: 'protocol_mismatch',
       });
     }
-    return { engineVersion: opts.version, protocolVersion: PROTOCOL_VERSION };
+    // Any minor of major 1 is served: an SDK only uses what `capabilities` lists.
+    return { engineVersion: opts.version, protocolVersion: PROTOCOL_VERSION, protocolMinor: PROTOCOL_MINOR, capabilities: ['guard', 'paintCheck'] };
   });
 
   // Popups the SDK attached, routed to the takeover running on their opener page.
@@ -65,34 +82,38 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
     const p = raw as PagePopupParams;
     for (const cb of [...(popupListeners.get(p.pageId) ?? [])]) cb(createTunneledCdp(peer, p.popupPageId));
   });
+  const popupsFor = (pageId: string): PopupSource => ({
+    onPopup(cb) {
+      const set = popupListeners.get(pageId) ?? new Set();
+      popupListeners.set(pageId, set);
+      set.add(cb);
+      return () => {
+        set.delete(cb);
+        if (set.size === 0 && popupListeners.get(pageId) === set) popupListeners.delete(pageId);
+      };
+    },
+  });
+  const linkFor =
+    (pageId: string, site: string | undefined, alerts: TakeoverParams['alerts']): LinkHandler =>
+    (info, takeover) => {
+      // The alert starts first: if passing the link on to the SDK throws, the paired phones still get it.
+      sendTakeoverAlert(opts.alerter, alerts, info, site, takeover);
+      peer.notify(Methods.takeoverLink, { ...info, pageId });
+    };
+  const guards = registerGuardMethods({ peer, engine, env: opts.env ?? process.env, storeFs: opts.storeFs ?? nodeStoreFs(), alerter: opts.alerter, popupsFor, linkFor });
 
   peer.handle(Methods.takeover, (raw) => {
     const p = raw as TakeoverParams;
     if (p.alerts === 'required' && !opts.alerter) throw Object.assign(new Error(REQUIRED_WITHOUT_CLOUD), { code: 'config_error' });
-    const listeners = new Set<(popup: CdpClient) => void>();
-    popupListeners.set(p.pageId, listeners);
-    return engine
-      .takeover(createTunneledCdp(peer, p.pageId), {
-        reason: p.reason,
-        timeoutS: p.timeoutS,
-        site: p.site,
-        requireCode: p.requireCode,
-        allowedSites: hostnames(p.allowedSites),
-        onLink: (info, takeover) => {
-          // The alert starts first: if passing the link on to the SDK throws, the paired phones still get it.
-          sendTakeoverAlert(opts.alerter, p.alerts, info, p.site, takeover);
-          peer.notify(Methods.takeoverLink, { ...info, pageId: p.pageId });
-        },
-        popups: {
-          onPopup(cb) {
-            listeners.add(cb);
-            return () => void listeners.delete(cb);
-          },
-        },
-      })
-      .finally(() => {
-        if (popupListeners.get(p.pageId) === listeners) popupListeners.delete(p.pageId);
-      });
+    return engine.takeover(createTunneledCdp(peer, p.pageId), {
+      reason: p.reason,
+      timeoutS: p.timeoutS,
+      site: p.site,
+      requireCode: p.requireCode,
+      allowedSites: hostnames(p.allowedSites),
+      onLink: linkFor(p.pageId, p.site, p.alerts),
+      popups: popupsFor(p.pageId),
+    });
   });
 
   peer.handle(Methods.shutdown, () => {

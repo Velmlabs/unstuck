@@ -130,12 +130,23 @@ describe('runStdioHost alerts', () => {
 });
 
 describe('runStdioHost', () => {
+  it('serves the guard methods: an unknown guard is unknown_guard', async () => {
+    const h = start();
+    await expect(h.sdk.request('guard.check', { guardId: 'g9' })).rejects.toMatchObject({ code: 'unknown_guard' });
+    h.input.end();
+    await h.done;
+  });
+
   it('answers engine.hello with versions', async () => {
     const h = start();
     await expect(h.sdk.request(Methods.hello, { sdk: 'ts', sdkVersion: '0', protocolVersion: PROTOCOL_VERSION })).resolves.toEqual({
       engineVersion: '9.9.9',
       protocolVersion: 1,
+      protocolMinor: 1,
+      capabilities: ['guard', 'paintCheck'],
     });
+    // A newer SDK with a higher minor is still served.
+    await expect(h.sdk.request(Methods.hello, { sdk: 'py', sdkVersion: '0', protocolVersion: PROTOCOL_VERSION, protocolMinor: 7 })).resolves.toMatchObject({ protocolMinor: 1 });
     h.input.end();
     await h.done;
   });
