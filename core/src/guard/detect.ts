@@ -5,7 +5,7 @@ import { collectFacts, type PageFacts } from './facts';
 import type { DocResponse } from './main-document';
 import { RULES, WIDGET_RULES, type DetectionRule, type Signal } from './rules';
 
-export { RULES, RULES_VERSION, type DetectionRule, type Signal } from './rules';
+export { RULES, RULES_VERSION, APPROVAL_FAILED_RULES, type DetectionRule, type Signal } from './rules';
 export type { PageFacts } from './facts';
 
 /** How long a widget may take to pass by itself before a person is asked. */
@@ -41,9 +41,11 @@ function signal(s: Signal, f: PageFacts, doc: DocResponse | null, requestedUrl: 
   if ('password' in s) return f.passwordVisible ? 'password field' : null;
   if ('otp' in s) return f.otpVisible ? 'one-time code field' : null;
   if ('text' in s) {
+    if (s.maxBodyText !== undefined && f.bodyTextLength > s.maxBodyText) return null;
     const m = s.text.exec(f.bodyTextHead);
     return m ? `text "${m[0]}"` : null;
   }
+  if ('absent' in s) return (s.absent === 'password' ? f.passwordVisible : f.otpVisible) ? null : `no ${s.absent === 'password' ? 'password' : 'one-time code'} field`;
   if ('tokenEmpty' in s) return f.tokenFields[s.tokenEmpty] ? null : `${s.tokenEmpty} empty`;
   // redirectedTo: only when the agent asked for another page and landed here.
   if (!requestedUrl) return null;
@@ -81,6 +83,7 @@ export interface DetectOptions {
   requestedUrl?: string;
   document?: DocResponse | null;
   widgetGraceMs?: number;
+  rules?: readonly DetectionRule[];
 }
 
 /** Looks at the page for a human check. A widget that may pass by itself gets a grace period first. */
@@ -134,7 +137,7 @@ async function facts(cdp: CdpClient): Promise<PageFacts | null> {
 }
 
 export async function detectHumanCheck(cdp: CdpClient, o: DetectOptions = {}): Promise<HumanCheck | null> {
-  const opts = { scope: o.scope ?? (['challenge'] as const), requestedUrl: o.requestedUrl };
+  const opts = { scope: o.scope ?? (['challenge'] as const), requestedUrl: o.requestedUrl, rules: o.rules };
   const facts0 = await facts(cdp);
   if (!facts0) return null;
   const found = matchRules(facts0, o.document ?? null, opts);

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchRules, detectHumanCheck, RULES, RULES_VERSION, type PageFacts } from '../../src/guard/detect';
+import { matchRules, detectHumanCheck, RULES, RULES_VERSION, APPROVAL_FAILED_RULES, type PageFacts } from '../../src/guard/detect';
 import { FakeCdp } from '../../src/testing/fake-cdp';
 
 const facts = (o: Partial<PageFacts> = {}): PageFacts => ({
@@ -75,14 +75,58 @@ describe('matchRules', () => {
     expect(matchRules(facts({ url: 'https://www.shop.example.co.uk/x', title: 'Just a moment...', headings: ['Verify you are human'], bodyTextLength: 10 }), null, { scope: ['challenge'] })?.site).toBe('example.co.uk'));
 
   it('every rule id is unique and the table is versioned', () => {
-    expect(RULES_VERSION).toBe(1);
+    expect(RULES_VERSION).toBe(2);
     expect(new Set(RULES.map((r) => r.id)).size).toBe(RULES.length);
-    expect(RULES.map((r) => r.id)).toEqual(['cloudflare.mitigated', 'cloudflare.interstitial', 'cloudflare.turnstile', 'recaptcha.v2', 'hcaptcha', 'generic.title', 'generic.heading', 'login.redirect', '2fa.code']);
+    expect(RULES.map((r) => r.id)).toEqual(['cloudflare.mitigated', 'cloudflare.interstitial', 'cloudflare.turnstile', 'recaptcha.v2', 'hcaptcha', 'generic.title', 'generic.heading', 'login.redirect', '2fa.code', 'approval.prompt']);
   });
 
   // Review Focus 2
   it('a reCAPTCHA v3 badge (size=invisible) is not a check', () =>
     expect(matchRules(facts({ iframes: [{ src: 'https://www.google.com/recaptcha/api2/anchor?ar=1&k=x&size=invisible', width: 256, height: 60, visible: true }] }), null, { scope: ['challenge'] })).toBeNull());
+});
+
+describe('approval rules', () => {
+  const a = (text: string, o: Partial<PageFacts> = {}) => matchRules(facts({ bodyTextHead: text, ...o }), null, { scope: ['approval'] });
+  it.each([
+    'Check your phone',
+    'Check your device',
+    'Tap Yes on the notification',
+    'Approve this sign-in',
+    'Approve login',
+    'Approve request',
+    'We sent a notification to your phone',
+    'We sent a push to your phone',
+    'Open the Okta Verify app to approve',
+    'Open the Authenticator app to confirm',
+    "Confirm it's you on your device",
+    'Confirm it\u2019s you on your phone',
+  ])('"%s" is an approval prompt', (text) => expect(a(text)).toMatchObject({ kind: 'approval', ruleId: 'approval.prompt' }));
+  it.each(['Welcome to the shop', 'Enter the code we sent to your phone', 'Tap the menu', 'Please approve our terms', 'Open the app store'])('"%s" is not', (text) => expect(a(text)).toBeNull());
+  it('is out of scope by default and never wins over earlier rules', () => {
+    expect(matchRules(facts({ bodyTextHead: 'Check your phone' }), null, { scope: ['challenge', '2fa'] })).toBeNull();
+  });
+  it('needs no password or one-time code field', () => {
+    expect(a('Check your phone', { passwordVisible: true })).toBeNull();
+    expect(a('Check your phone', { otpVisible: true })).toBeNull();
+  });
+  it('is capped by the whole body length, not the head that was read', () => {
+    expect(a('Check your phone', { bodyTextLength: 3000 })).not.toBeNull();
+    expect(a('Check your phone', { bodyTextLength: 3001 })).toBeNull();
+  });
+  const failed = (text: string, o: Partial<PageFacts> = {}) => matchRules(facts({ bodyTextHead: text, ...o }), null, { scope: ['approval'], rules: APPROVAL_FAILED_RULES });
+  it('failure rules', () => {
+    expect(APPROVAL_FAILED_RULES.map((r) => r.id)).toEqual(['approval_failed.timed_out', 'approval_failed.denied', 'approval_failed.retry']);
+    expect(APPROVAL_FAILED_RULES.every((r) => r.kind === 'approval')).toBe(true);
+    for (const t of ['Request timed out', "We didn't hear from you", 'We didn\u2019t hear from you']) expect(failed(t)?.ruleId).toBe('approval_failed.timed_out');
+    for (const t of ['Push was denied', 'Push rejected', 'Sign-in denied', 'Sign-in was denied']) expect(failed(t)?.ruleId).toBe('approval_failed.denied');
+    expect(failed('Try again')?.ruleId).toBe('approval_failed.retry');
+    expect(failed('Welcome to the shop')).toBeNull();
+    expect(failed('Try again', { bodyTextLength: 3001 })).toBeNull();
+  });
+  it('failure rules do not match the approval prompt, nor the other way round', () => {
+    expect(failed('Check your phone')).toBeNull();
+    expect(a('Request timed out. Try again')).toBeNull();
+  });
 });
 
 describe('detectHumanCheck', () => {
@@ -150,6 +194,13 @@ describe('detectHumanCheck', () => {
     cdp.respond('Runtime.evaluate', () => ({ result: { value: facts({ url: 'https://shop.example/' }) } }));
     await expect(detectHumanCheck(cdp, { document: { url: 'https://shop.example/', status: 503, headers: { 'cf-mitigated': 'challenge' } } })).resolves.toMatchObject({ ruleId: 'cloudflare.mitigated' });
     await expect(detectHumanCheck(cdp, { scope: ['login'] })).resolves.toBeNull();
+  });
+
+  it('uses the given rules', async () => {
+    const cdp = new FakeCdp();
+    cdp.respond('Runtime.evaluate', () => ({ result: { value: facts({ bodyTextHead: 'Request timed out' }) } }));
+    await expect(detectHumanCheck(cdp, { scope: ['approval'], rules: APPROVAL_FAILED_RULES })).resolves.toMatchObject({ ruleId: 'approval_failed.timed_out' });
+    await expect(detectHumanCheck(cdp, { scope: ['approval'] })).resolves.toBeNull();
   });
 
   it('a page that cannot be read (mid-navigation) is not a check', async () => {

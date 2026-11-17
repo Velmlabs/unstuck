@@ -14,7 +14,7 @@ export { isPublicSuffix, siteOf } from './session/page-lock';
 export { CLOUD_RELAY_URL, CLOUD_VIEWER_URL, CLOUD_API_URL, selectTransport, viewerUrlFor, cloudAlertsFor, buildRelayTransport, type TransportChoice } from './cloud/transport';
 export { createCloudAlerter, sendTakeoverAlert, MAX_REASON, MAX_SITE, type AlertOutcome, type AlertProblem, type CloudAlerter, type CloudAlerterOptions } from './cloud/alerts';
 export { hostnames } from './cloud/sites';
-export { RULES, RULES_VERSION, WIDGET_RULES, type DetectionRule, type Signal } from './guard/rules';
+export { RULES, RULES_VERSION, APPROVAL_FAILED_RULES, WIDGET_RULES, type DetectionRule, type Signal } from './guard/rules';
 export { collectFacts, type PageFacts } from './guard/facts';
 export { trackMainDocument, type DocResponse } from './guard/main-document';
 export { matchRules, detectHumanCheck, WIDGET_GRACE_MS, type DetectOptions } from './guard/detect';

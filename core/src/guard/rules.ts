@@ -9,7 +9,8 @@ export type Signal =
   | { heading: RegExp; maxBodyText: number }
   | { password: true }
   | { otp: true }
-  | { text: RegExp }
+  | { text: RegExp; maxBodyText?: number }
+  | { absent: 'password' | 'otp' }
   | { tokenEmpty: string }
   | { redirectedTo: RegExp };
 
@@ -21,7 +22,10 @@ export interface DetectionRule {
 }
 
 /** Bumped whenever a rule is added, removed or changes meaning. */
-export const RULES_VERSION = 1;
+export const RULES_VERSION = 2;
+
+// Wording of sign-in approval prompts (push to a phone). Kept short-page only (maxBodyText) so articles don't match.
+const APPROVE = /check your (phone|device)|tap yes|approve (this )?(sign-in|login|request)|we sent a (notification|prompt|push) to|open the .* app to (confirm|approve)|confirm it['\u2019]s you on your (phone|device)/i;
 
 const HUMAN = /verify (that )?you('| a)?re (a )?human|are you a robot|human verification|press (and|&) hold|checking (if the site connection is secure|your browser)|unusual traffic from your computer/i;
 
@@ -55,6 +59,14 @@ export const RULES: readonly DetectionRule[] = [
     kind: '2fa',
     all: [{ otp: true }, { text: /verification code|two-factor|2-step|two-step|authenticator app|security code|one-time (pass)?code|enter the code/i }],
   },
+  { id: 'approval.prompt', kind: 'approval', all: [{ text: APPROVE, maxBodyText: 3000 }, { absent: 'password' }, { absent: 'otp' }] },
+];
+
+/** What a sign-in approval page says once the push timed out or was refused. Matched on its own, never part of RULES. */
+export const APPROVAL_FAILED_RULES: readonly DetectionRule[] = [
+  { id: 'approval_failed.timed_out', kind: 'approval', all: [{ text: /request timed out|we didn['\u2019]t hear from you/i, maxBodyText: 3000 }] },
+  { id: 'approval_failed.denied', kind: 'approval', all: [{ text: /push (was )?(rejected|denied)|sign-in (was )?denied/i, maxBodyText: 3000 }] },
+  { id: 'approval_failed.retry', kind: 'approval', all: [{ text: /try again/i, maxBodyText: 3000 }] },
 ];
 
 /** Widgets that may pass by themselves: reported only if still unsolved after a grace period. */

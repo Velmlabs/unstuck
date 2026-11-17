@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CdpClient } from '../../src/cdp';
-import { detectHumanCheck } from '../../src/guard/detect';
+import { detectHumanCheck, APPROVAL_FAILED_RULES, RULES_VERSION } from '../../src/guard/detect';
 import { trackMainDocument } from '../../src/guard/main-document';
 import type { CheckKind } from '@velmlabs/unstuck-protocol';
 
@@ -101,4 +101,25 @@ describe('detectHumanCheck on vendor fixtures (real Chromium)', () => {
     await open('turnstile-autopass.html');
     await expect(detectHumanCheck(cdp, { widgetGraceMs: 3000, document: tracker.last() })).resolves.toBeNull();
   }, 15_000);
+
+  describe('approval prompts', () => {
+    const detect = async (name: string, o: Parameters<typeof detectHumanCheck>[1]) => {
+      await open(name);
+      return detectHumanCheck(cdp, { widgetGraceMs: 50, document: tracker.last(), ...o });
+    };
+    it.each(['google', 'microsoft', 'okta', 'duo', 'apple', 'generic'])('approval-%s is an approval', async (name) => {
+      expect(await detect(`approval-${name}.html`, { scope: ['challenge', 'approval'] })).toMatchObject({ kind: 'approval', ruleId: 'approval.prompt' });
+    });
+    it.each(['article-about-2fa', 'login-with-tap-yes', 'otp', 'login'])('%s is not an approval', async (name) => {
+      expect((await detect(`${name}.html`, { scope: ['approval'] }))?.kind).not.toBe('approval');
+    });
+    it.each(['duo', 'okta', 'microsoft'])('approval-failed-%s matches the failure rules only', async (name) => {
+      expect(await detect(`approval-failed-${name}.html`, { scope: ['approval'], rules: APPROVAL_FAILED_RULES })).toMatchObject({ ruleId: expect.stringMatching(/^approval_failed\./) });
+      expect(await detect(`approval-failed-${name}.html`, { scope: ['approval'] })).toBeNull();
+    });
+    it('approval is out of scope unless listed', async () => {
+      expect(await detect('approval-google.html', { scope: ['challenge'] })).toBeNull();
+    });
+    it('rules version 2', () => expect(RULES_VERSION).toBe(2));
+  });
 });
