@@ -37,6 +37,8 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
       on the browser at UNSTUCK_CDP_URL instead. Remembered sites live in
       ~/.unstuck/profiles/<profile> (--profile, default mcp; --no-remember
       keeps nothing); at most --max-rescues-per-hour person-checks (default 10).
+      A browsing tool waits UNSTUCK_IN_TOOL_WAIT_S (default 40) for a person
+      before it returns the link; keep it under your client's tool timeout.
 doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
       in a tab of its own and prints whether Unstuck works fully with it.
 
@@ -121,7 +123,14 @@ export function browseConfig(argv: string[], env: Record<string, string | undefi
   if (!PROFILE_NAME.test(profile)) return { error: 'profile names are letters, digits, "-" and "_" (at most 64), e.g. "mcp"' };
   const max = values['max-rescues-per-hour'] === undefined ? 10 : Number(values['max-rescues-per-hour']);
   if (!Number.isInteger(max) || max < 1) return { error: '--max-rescues-per-hour is a whole number of at least 1' };
-  return { browse: { source, profile, remember: !values['no-remember'], maxRescuesPerHour: max, home: unstuckHome(env) } };
+  let inToolWaitMs: number | undefined;
+  if (env.UNSTUCK_IN_TOOL_WAIT_S !== undefined) {
+    const w = Number(env.UNSTUCK_IN_TOOL_WAIT_S);
+    // Under 120 s: the default MCP client tool timeout is 60 s, and some raise it to 120 s.
+    if (!Number.isInteger(w) || w < 1 || w > 110) return { error: 'UNSTUCK_IN_TOOL_WAIT_S is a whole number of seconds from 1 to 110' };
+    inToolWaitMs = w * 1000;
+  }
+  return { browse: { source, profile, remember: !values['no-remember'], maxRescuesPerHour: max, home: unstuckHome(env), ...(inToolWaitMs ? { inToolWaitMs } : {}) } };
 }
 
 export interface CliIO {

@@ -175,6 +175,12 @@ describe('browse flags', () => {
     expect(browseConfig(['--mcp', '--tools', 'browser', '--browser'], env)).toMatchObject({ browse: { source: { kind: 'chrome' } } });
   });
 
+  it('UNSTUCK_IN_TOOL_WAIT_S sets how long a browsing tool waits for a person (1–110 s)', () => {
+    expect(browseConfig(['--mcp', '--browser'], { ...env, UNSTUCK_IN_TOOL_WAIT_S: '5' })).toMatchObject({ browse: { inToolWaitMs: 5000 } });
+    expect(browseConfig(['--mcp', '--browser'], env).browse).not.toHaveProperty('inToolWaitMs');
+    for (const bad of ['0', '111', 'x']) expect(browseConfig(['--mcp', '--browser'], { ...env, UNSTUCK_IN_TOOL_WAIT_S: bad })).toEqual({ error: 'UNSTUCK_IN_TOOL_WAIT_S is a whole number of seconds from 1 to 110' });
+  });
+
   it('--tools takeover (or no flag) is the four takeover tools; usage errors for the rest', () => {
     expect(browseConfig(['--mcp', '--tools', 'takeover'], env)).toEqual({});
     expect(browseConfig(['--mcp'], env)).toEqual({});
