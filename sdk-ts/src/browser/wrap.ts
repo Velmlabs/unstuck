@@ -8,6 +8,7 @@ import type { TakeoverOptions } from '../options';
 import { guardFactory, guardLocator, guardMethod, type GuardedRun, type HookKind } from './hooks';
 import type { PageGuard, RescueEvent, WrapOptions, Wrapped } from './options';
 import { isPlaywrightPage, PLAYWRIGHT_HOOKS, playwrightBrowserKey, playwrightNewPage } from './playwright';
+import { isPuppeteerPage, PUPPETEER_HOOKS, puppeteerBrowserKey, puppeteerNewPage } from './puppeteer';
 
 /** How one automation library's pages are recognised and hooked. */
 export interface PageAdapter {
@@ -22,7 +23,10 @@ export interface PageAdapter {
   newPage(page: unknown): Promise<unknown>;
 }
 
-const ADAPTERS: PageAdapter[] = [{ is: isPlaywrightPage, hooks: PLAYWRIGHT_HOOKS, browserKey: playwrightBrowserKey, newPage: playwrightNewPage }];
+const ADAPTERS: PageAdapter[] = [
+  { is: isPlaywrightPage, hooks: PLAYWRIGHT_HOOKS, browserKey: playwrightBrowserKey, newPage: playwrightNewPage },
+  { is: isPuppeteerPage, hooks: PUPPETEER_HOOKS, browserKey: puppeteerBrowserKey, newPage: puppeteerNewPage },
+];
 
 export const UNSUPPORTED_PAGE = 'Unsupported page object: pass a Playwright or Puppeteer Page';
 

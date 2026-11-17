@@ -80,6 +80,7 @@
     "@cloudflare/vitest-plugin": "^1.8.1",
     "@cloudflare/workers-types": "^5.20261112.1",
     "@velmlabs/unstuck-relay-cloudflare": "workspace:*",
+    "puppeteer-core": "25.17.0",
     "wrangler": "^4.161.0"
   }
 }
