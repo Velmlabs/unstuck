@@ -1,6 +1,6 @@
 // fetch_page's content: readable Markdown (Readability, then htmlToMarkdownInPage), text, or the page's HTML. Everything
 // runs in the browser, in an isolated world, so the page's own scripts can't change what the agent reads.
-import type { CdpClient } from '@velmlabs/unstuck-core';
+import { inPageSource, type CdpClient } from '@velmlabs/unstuck-core';
 import { htmlToMarkdownInPage } from './markdown';
 import { READABILITY_JS } from './readability.gen';
 
@@ -61,7 +61,7 @@ export async function extractPage(cdp: CdpClient, format: ContentFormat): Promis
   const { executionContextId } = await cdp.send<{ executionContextId: number }>('Page.createIsolatedWorld', { frameId: tree.frameTree.frame.id, worldName: 'unstuck' });
   const expression = `(() => {
 ${READABILITY_JS}
-;return (${readInPage.toString()})(${JSON.stringify(format)}, ${MIN_ARTICLE_CHARS}, ${htmlToMarkdownInPage.toString()}, Readability);
+;return (${inPageSource(readInPage)})(${JSON.stringify(format)}, ${MIN_ARTICLE_CHARS}, ${inPageSource(htmlToMarkdownInPage)}, Readability);
 })()`;
   const r = await cdp.send<{ result?: { value?: InPage }; exceptionDetails?: { text?: string; exception?: { description?: string } } }>('Runtime.evaluate', {
     expression,

@@ -25,3 +25,4 @@ export { waitForNavigation, waitForQuiet, NAV_GRACE_MS, LOAD_WAIT_MS, SETTLE_QUI
 export { rescue, reasonFor, type RescueOptions, type TakeoverRunner } from './guard/rescue';
 export { createGuard, type Guard, type GuardOptions } from './guard/guard';
 export { onceRenderCheck, BROWSER_CANNOT_RENDER_HINT, type RenderCheck } from './guard/render-check';
+export { inPageSource } from './guard/in-page';

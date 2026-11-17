@@ -335,6 +335,21 @@ setInterval(() => {}, 1000);`);
 });
 
 describe('Unstuck.wrap (binary mode)', () => {
+  it('a wrapped page keeps the agent process alive through the paint check and the rescue, then lets it exit', async () => {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const child = spawn(process.execPath, ['--import', 'tsx', path.join(here, 'fixtures', 'wrap-then-exit.mts')], {
+      env: { ...process.env, UNSTUCK_ENGINE_PATH: ENGINE, UNSTUCK_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-exit-home-')) },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    const killer = setTimeout(() => child.kill('SIGKILL'), 40_000);
+    const code = await new Promise<number | null>((r) => child.on('close', r));
+    clearTimeout(killer);
+    expect(out.trim()).toBe('timed_out');
+    expect(code).toBe(0);
+  }, 60_000);
+
   const INTERSTITIAL = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../core/test/fixtures/human-checks/cloudflare-interstitial.html'), 'utf8');
   /** A fake engine: hello with `capabilities` (or none), takeovers answer resolved, browser.paintCheck runs `onPaint`. */
   const engineWith = (capabilities: string | null, onPaint = '') =>

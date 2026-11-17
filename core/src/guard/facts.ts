@@ -1,3 +1,4 @@
+import { inPageSource } from './in-page';
 import type { CdpClient } from '../cdp';
 
 /** What the detection rules look at, read from the page in one evaluation. */
@@ -65,7 +66,7 @@ function factsInPage(markers: string[]) {
 export async function collectFacts(cdp: CdpClient, markers: readonly string[]): Promise<PageFacts | null> {
   try {
     const r = await cdp.send<{ result?: { value?: PageFacts }; exceptionDetails?: unknown }>('Runtime.evaluate', {
-      expression: `(${factsInPage.toString()})(${JSON.stringify(markers)})`,
+      expression: `(${inPageSource(factsInPage)})(${JSON.stringify(markers)})`,
       returnByValue: true,
     });
     return r.exceptionDetails || !r.result?.value ? null : r.result.value;
