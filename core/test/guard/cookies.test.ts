@@ -20,6 +20,23 @@ describe('cookies over CDP', () => {
     ]);
   });
 
+  it("prefers Network.getAllCookies: on a page's session it reads that page's own browser context", async () => {
+    const cdp = new FakeCdp();
+    // Storage.getCookies on a page session answers for the browser's default context, not the page's.
+    cdp.respond('Storage.getCookies', () => ({ cookies: [] }));
+    cdp.respond('Network.getAllCookies', () => ({ cookies: live }));
+    expect((await readCookies(cdp, 'shop.example')).map((c) => c.name)).toEqual(['sid', 'cf']);
+  });
+
+  it('falls back to Storage.getCookies when Network.getAllCookies is refused', async () => {
+    const cdp = new FakeCdp();
+    cdp.respond('Network.getAllCookies', () => {
+      throw new Error("'Network.getAllCookies' wasn't found");
+    });
+    cdp.respond('Storage.getCookies', () => ({ cookies: live }));
+    expect((await readCookies(cdp, 'shop.example')).map((c) => c.name)).toEqual(['sid', 'cf']);
+  });
+
   it('falls back to Network.getAllCookies when Storage.getCookies is refused', async () => {
     const cdp = new FakeCdp();
     cdp.respond('Storage.getCookies', () => {

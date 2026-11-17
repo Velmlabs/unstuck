@@ -27,6 +27,9 @@ describe('edge entry', () => {
     expectTypeOf<typeof edge.UnstuckConfigError>().toEqualTypeOf<typeof node.UnstuckConfigError>();
     expectTypeOf<typeof edge.UnstuckEngineError>().toEqualTypeOf<typeof node.UnstuckEngineError>();
     expectTypeOf<typeof edge.PageClosedError>().toEqualTypeOf<typeof node.PageClosedError>();
+    expectTypeOf<typeof edge.UnstuckRescueError>().toEqualTypeOf<typeof node.UnstuckRescueError>();
+    expectTypeOf<edge.Unstuck['wrap']>().toEqualTypeOf<node.Unstuck['wrap']>();
+    expectTypeOf<edge.WrapOptions>().toEqualTypeOf<node.WrapOptions>();
   });
 
   it('re-exports the same type-only names as the Node entry (the list the type-level test above covers)', () => {
@@ -35,7 +38,7 @@ describe('edge entry', () => {
         .flatMap((m) => m[1]!.split(',').map((n) => n.trim()))
         .sort();
     expect(typeNames('edge.ts')).toEqual(typeNames('index.ts'));
-    expect(typeNames('edge.ts')).toEqual(['TakeoverLink', 'TakeoverOptions', 'TakeoverResult', 'TakeoverStatus', 'UnstuckOptions']);
+    expect(typeNames('edge.ts')).toEqual(['PageGuard', 'RescueEvent', 'TakeoverLink', 'TakeoverOptions', 'TakeoverResult', 'TakeoverStatus', 'UnstuckOptions', 'WrapOptions', 'Wrapped']);
   });
 
   it('validates options in the constructor', () => {
@@ -59,5 +62,17 @@ describe('edge entry', () => {
     await u.close();
     expect(close).toHaveBeenCalledOnce();
     vi.restoreAllMocks();
+  });
+
+  it('wrap exists on the edge Unstuck, is lazy, and defaults to a memory store shared per profile', async () => {
+    const u = new edge.Unstuck({ apiKey: 'k' });
+    const fakePage = () => ({ context: () => ({ newCDPSession: async () => ({}), browser: () => null, newPage: async () => ({}) }) });
+    const p = fakePage();
+    const w = u.wrap(p);
+    expect(w).toBe(p);
+    expect(w.unstuck.lastRescue).toBeNull();
+    expect(u.wrap(fakePage(), { profile: 'other' }).unstuck).toBeDefined();
+    expect(edge.UnstuckRescueError).toBe(node.UnstuckRescueError);
+    await u.close();
   });
 });

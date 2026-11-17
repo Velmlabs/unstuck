@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import readline from 'node:readline';
-import { createRpcPeer, Methods, PROTOCOL_VERSION, RpcCallError, type HelloResult, type RpcPeer } from '@velmlabs/unstuck-protocol';
+import { createRpcPeer, Methods, PROTOCOL_MINOR, PROTOCOL_VERSION, RpcCallError, type EngineCapability, type HelloResult, type RpcPeer } from '@velmlabs/unstuck-protocol';
 import { UnstuckEngineError } from './errors';
 import { VERSION } from './version';
 
@@ -44,6 +44,8 @@ export function resolveEnginePath(
 export interface EngineProcess {
   peer: RpcPeer;
   engineVersion: string;
+  /** What the engine offers beyond takeovers (none from an engine older than protocol minor 1). */
+  capabilities: EngineCapability[];
   /** Resolves with the exit code once the process is gone. */
   exited: Promise<number | null>;
   /** Keeps the agent process alive while a takeover runs; let it exit otherwise. */
@@ -98,7 +100,7 @@ export async function spawnEngine(
   let hello: HelloResult;
   try {
     hello = await Promise.race([
-      peer.request<HelloResult>(Methods.hello, { sdk: 'ts', sdkVersion: VERSION, protocolVersion: PROTOCOL_VERSION }),
+      peer.request<HelloResult>(Methods.hello, { sdk: 'ts', sdkVersion: VERSION, protocolVersion: PROTOCOL_VERSION, protocolMinor: PROTOCOL_MINOR }),
       spawnError,
       earlyExit,
       handshakeTimeout,
@@ -117,5 +119,5 @@ export async function spawnEngine(
     spawnError.catch(() => {});
   }
   setBusy(false);
-  return { peer, engineVersion: hello.engineVersion, exited, setBusy, kill: () => child.kill() };
+  return { peer, engineVersion: hello.engineVersion, capabilities: hello.capabilities ?? [], exited, setBusy, kill: () => child.kill() };
 }

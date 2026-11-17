@@ -25,12 +25,16 @@ const toStored = (c: CdpCookie): StoredCookie => ({
 });
 
 async function allCookies(cdp: CdpClient): Promise<CdpCookie[]> {
+  // On a page's session, Storage.getCookies answers for the browser's default context, so a page in its own context
+  // (Playwright's newContext) would read none: Network.getAllCookies reads the page's own. Storage is the fallback for
+  // CDP browsers without it.
   try {
-    return (await cdp.send<{ cookies: CdpCookie[] }>('Storage.getCookies')).cookies;
+    const r = await cdp.send<{ cookies?: CdpCookie[] }>('Network.getAllCookies');
+    if (Array.isArray(r?.cookies)) return r.cookies;
   } catch {
-    // Page-level sessions (and some CDP browsers) don't offer the Storage domain.
-    return (await cdp.send<{ cookies: CdpCookie[] }>('Network.getAllCookies')).cookies;
+    // not offered: fall through
   }
+  return (await cdp.send<{ cookies: CdpCookie[] }>('Storage.getCookies')).cookies;
 }
 
 const onSite = (domain: string, site: string) => {

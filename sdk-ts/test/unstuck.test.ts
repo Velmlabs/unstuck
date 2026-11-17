@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Unstuck, UnstuckConfigError, UnstuckEngineError } from '../src/index';
@@ -329,5 +331,97 @@ setInterval(() => {}, 1000);`);
     clearTimeout(killer);
     expect(out.trim()).toBe('timed_out');
     expect(code).toBe(0);
+  });
+});
+
+describe('Unstuck.wrap (binary mode)', () => {
+  const INTERSTITIAL = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../core/test/fixtures/human-checks/cloudflare-interstitial.html'), 'utf8');
+  /** A fake engine: hello with `capabilities` (or none), takeovers answer resolved, browser.paintCheck runs `onPaint`. */
+  const engineWith = (capabilities: string | null, onPaint = '') =>
+    fakeEngine(`
+import readline from 'node:readline';
+const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
+const pending = new Map();
+let next = 1000;
+const request = (method, params) => new Promise((resolve, reject) => { const id = next++; pending.set(id, { resolve, reject }); out({ id, method, params }); });
+readline.createInterface({ input: process.stdin }).on('line', async (l) => {
+  const m = JSON.parse(l);
+  if (m.method === undefined && pending.has(m.id)) { const p = pending.get(m.id); pending.delete(m.id); return m.error ? p.reject(m.error) : p.resolve(m.result); }
+  if (m.method === 'engine.hello') out({ id: m.id, result: { engineVersion: 'fake', protocolVersion: 1, ${capabilities === null ? '' : `protocolMinor: 1, capabilities: ${capabilities}, `}sawMinor: m.params.protocolMinor } });
+  else if (m.method === 'takeover') out({ id: m.id, result: { status: 'resolved', sessionId: 's', url: 'u', durationS: 0 } });
+  else if (m.method === 'browser.paintCheck') { ${onPaint} }
+  else if (m.method === 'shutdown') { out({ id: m.id, result: {} }); process.exit(0); }
+});`);
+  const blockedPage = async () => {
+    const ctx = await browser.newContext();
+    await ctx.route('**/*', (route: any) => route.fulfill({ status: 403, contentType: 'text/html', body: INTERSTITIAL }));
+    return { ctx, page: await ctx.newPage() };
+  };
+  let home: string;
+  beforeAll(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-wrap-home-'));
+    vi.stubEnv('UNSTUCK_HOME', home);
+  });
+  afterAll(() => {
+    vi.unstubAllEnvs();
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('an engine without capabilities: no paint check, and a challenge still opens a takeover', async () => {
+    const unstuck = new Unstuck({ enginePath: engineWith(null, "out({ id: m.id, error: { code: 'unknown_method', message: 'no' } });"), onLink: () => {} });
+    const { ctx, page } = await blockedPage();
+    const w = unstuck.wrap(page, { onRescueFail: 'return', remember: true });
+    await w.goto('https://shop.example/');
+    // The fake engine's "Done" leaves the page blocked; what matters is that a takeover ran.
+    expect(w.unstuck.lastRescue).toMatchObject({ status: 'still_blocked', takeover: { status: 'resolved' } });
+    await unstuck.close();
+    await ctx.close();
+  });
+
+  it('paintCheck capability and { paint: false } → goto rejects with browser_cannot_render_captcha; the probe tab opens and closes', async () => {
+    const onPaint = `
+      const { pageId } = await request('page.create', { pageId: m.params.pageId });
+      const nav = await request('cdp.send', { pageId, method: 'Runtime.evaluate', params: { expression: '1 + 1', returnByValue: true } });
+      await request('page.close', { pageId });
+      const gone = await request('cdp.send', { pageId, method: 'Runtime.evaluate', params: { expression: '1' } }).then(() => 'still there', (e) => e.message);
+      process.stderr.write('probe ' + JSON.stringify({ two: nav.result.value, gone }) + '\\n');
+      out({ id: m.id, result: { paint: nav.result.value === 2 && /unknown page/.test(gone) ? false : 'unknown' } });`;
+    const unstuck = new Unstuck({ enginePath: engineWith("['guard', 'paintCheck']", onPaint), onLink: () => {} });
+    const { ctx, page } = await blockedPage();
+    const w = unstuck.wrap(page);
+    await expect(w.goto('https://shop.example/')).rejects.toMatchObject({ name: 'UnstuckRescueError', status: 'browser_cannot_render_captcha' });
+    expect(ctx.pages()).toHaveLength(1); // the probe tab is closed again
+    // Asked once per browser: a second page on it reuses the answer.
+    const w2 = unstuck.wrap(await ctx.newPage(), { onRescueFail: 'return' });
+    await w2.goto('https://shop.example/');
+    expect(w2.unstuck.lastRescue!.status).toBe('browser_cannot_render_captcha');
+    await unstuck.close();
+    await ctx.close();
+  });
+
+  it('page.create for an unknown opener and page.close for an unknown page are errors, not hangs', async () => {
+    const onPaint = `
+      const a = await request('page.create', { pageId: 'nope' }).then(() => 'ok', (e) => e.message);
+      const b = await request('page.close', { pageId: 'nope' }).then(() => 'ok', (e) => e.message);
+      out({ id: m.id, result: { paint: /unknown page/.test(a) && /unknown page/.test(b) ? false : 'unknown' } });`;
+    const unstuck = new Unstuck({ enginePath: engineWith("['guard', 'paintCheck']", onPaint), onLink: () => {} });
+    const { ctx, page } = await blockedPage();
+    const w = unstuck.wrap(page, { onRescueFail: 'return' });
+    await w.goto('https://shop.example/');
+    expect(w.unstuck.lastRescue!.status).toBe('browser_cannot_render_captcha');
+    await unstuck.close();
+    await ctx.close();
+  });
+
+  it('wrap in in-process mode uses its own takeover and no paint check', async () => {
+    const unstuck = new Unstuck({ mode: 'in-process', apiKey: 'k' });
+    const takeover = vi.spyOn(unstuck, 'takeover').mockResolvedValue({ status: 'timed_out', sessionId: 's', url: 'u', durationS: 1 });
+    const { ctx, page } = await blockedPage();
+    const w = unstuck.wrap(page, { onRescueFail: 'return' });
+    await w.goto('https://shop.example/');
+    expect(w.unstuck.lastRescue!.status).toBe('timed_out');
+    expect(takeover).toHaveBeenCalledOnce();
+    await unstuck.close();
+    await ctx.close();
   });
 });

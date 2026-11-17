@@ -3,11 +3,18 @@ import {
   RpcCallError,
   type CdpSendParams,
   type CdpSubscribeParams,
+  type PageCloseParams,
+  type PageCreateParams,
+  type PaintCheckResult,
   type TakeoverLinkParams,
   type TakeoverParams,
   type TakeoverResult,
 } from '@velmlabs/unstuck-protocol';
+import { createFileSessionStore, onceRenderCheck, profileFile, type RenderCheck } from '@velmlabs/unstuck-core';
 import { attachPage, PageClosedError, type AttachedPage } from './attach';
+import { adapterFor, createWrap } from './browser/wrap';
+import { nodeStoreFs, unstuckHome } from './browser/node-store-fs';
+import type { WrapOptions, Wrapped } from './browser/options';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
 import { UnstuckConfigError, UnstuckEngineError } from './errors';
 import { InProcessUnstuck } from './in-process';
@@ -38,6 +45,19 @@ export class Unstuck {
   private inFlight = 0;
   /** Set for `mode: 'in-process'`: every method delegates to it. */
   private readonly inProcess: InProcessUnstuck | null;
+  /** Pages the engine may open a probe tab next to (browser.paintCheck → page.create), by pageId. */
+  private readonly openers = new Map<string, unknown>();
+  /** Probe tabs the engine opened, so page.close can close them. */
+  private readonly probes = new Map<string, unknown>();
+  /** One paint check per browser (binary mode). */
+  private readonly renderChecks = new WeakMap<object, RenderCheck>();
+  private readonly browserIds = new WeakMap<object, string>();
+  private nextOpener = 0;
+  private readonly wrapper = createWrap({
+    takeover: (page, o) => this.takeover(page, o),
+    store: (profile) => createFileSessionStore(nodeStoreFs(), profileFile(unstuckHome(), profile)),
+    renderCheck: (page) => (this.inProcess ? undefined : this.renderCheckFor(page)),
+  });
 
   constructor(private readonly opts: UnstuckOptions = {}) {
     validateOptions(opts);
@@ -135,6 +155,38 @@ export class Unstuck {
     }
   }
 
+  /**
+   * Guards a Playwright page: navigations and clicks that land on a human check (a CAPTCHA, Cloudflare's "verify you
+   * are human") bring a person in and return once they're past it. Returns the same page, with `page.unstuck`.
+   */
+  wrap<P extends object>(page: P, o?: WrapOptions): Wrapped<P> {
+    return this.wrapper(page, o);
+  }
+
+  /** browser.paintCheck when the engine offers it; 'unknown' (go ahead) from an older engine. */
+  private renderCheckFor(page: unknown): RenderCheck {
+    const browser = adapterFor(page).browserKey(page);
+    let check = this.renderChecks.get(browser);
+    if (!check) {
+      let id = this.browserIds.get(browser);
+      if (!id) this.browserIds.set(browser, (id = `browser-${this.nextOpener++}`));
+      const browserKey = id;
+      check = onceRenderCheck(async () => {
+        const engine = await this.ensureEngine();
+        if (!engine.capabilities.includes('paintCheck')) return 'unknown';
+        const pageId = `opener-${this.nextOpener++}`;
+        this.openers.set(pageId, page);
+        try {
+          return (await engine.peer.request<PaintCheckResult>(Methods.paintCheck, { pageId, browserKey })).paint;
+        } finally {
+          this.openers.delete(pageId);
+        }
+      });
+      this.renderChecks.set(browser, check);
+    }
+    return check;
+  }
+
   /** Stops the engine (cancelling any running takeover). */
   async close(): Promise<void> {
     if (this.inProcess) return this.inProcess.close();
@@ -165,6 +217,26 @@ export class Unstuck {
         const page = this.pages.get(p.pageId);
         if (!page) throw new Error(`unknown page ${p.pageId}`);
         for (const event of p.events) page.subscribe(event, (params) => engine.peer.notify(Methods.cdpEvent, { pageId: p.pageId, method: event, params }));
+        return {};
+      });
+      engine.peer.handle(Methods.pageCreate, async (raw) => {
+        const opener = this.openers.get((raw as PageCreateParams).pageId);
+        if (!opener) throw new Error(`unknown page ${(raw as PageCreateParams).pageId}`);
+        const tab = await adapterFor(opener).newPage(opener);
+        const attached = await attachPage(tab);
+        this.pages.set(attached.pageId, attached);
+        this.probes.set(attached.pageId, tab);
+        return { pageId: attached.pageId };
+      });
+      engine.peer.handle(Methods.pageClose, async (raw) => {
+        const { pageId } = raw as PageCloseParams;
+        const tab = this.probes.get(pageId);
+        const attached = this.pages.get(pageId);
+        if (!tab || !attached) throw new Error(`unknown page ${pageId}`);
+        this.probes.delete(pageId);
+        this.pages.delete(pageId);
+        await attached.detach();
+        await (tab as { close(): Promise<void> }).close();
         return {};
       });
       engine.peer.onNotification(Methods.takeoverLink, (raw) => {
