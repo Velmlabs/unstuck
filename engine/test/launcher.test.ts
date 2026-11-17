@@ -144,6 +144,27 @@ describe('launchChrome', () => {
   });
 });
 
+describe('a browser outlives no engine', () => {
+  it('if the engine dies without stopping it (kill -9, a crash), the reaper kills the browser and removes its profile', async () => {
+    const bin = script("process.on('SIGTERM', () => {}); console.error('DevTools listening on ws://127.0.0.1:1/devtools/browser/x'); setInterval(() => {}, 1000);");
+    const b = await launchChrome({ path: bin });
+    const { pid, userDataDir } = b as unknown as { pid: number; userDataDir: string };
+    const reaper = (b as unknown as { reaper: { stdin: { destroy(): void } } }).reaper;
+    expect(alive(pid)).toBe(true);
+    reaper.stdin.destroy(); // what the engine's death does to the reaper's pipe
+    await expect.poll(() => alive(pid), { timeout: 5000 }).toBe(false);
+    await expect.poll(() => fs.existsSync(userDataDir), { timeout: 5000 }).toBe(false);
+  });
+
+  it('a normal stop() also ends the reaper, which then kills nothing', async () => {
+    const bin = script("console.error('DevTools listening on ws://127.0.0.1:1/devtools/browser/x'); setInterval(() => {}, 1000);");
+    const b = await launchChrome({ path: bin });
+    const reaperPid = (b as unknown as { reaper: { pid: number } }).reaper.pid;
+    await b.stop();
+    await expect.poll(() => alive(reaperPid), { timeout: 5000 }).toBe(false);
+  });
+});
+
 const require = createRequire(import.meta.url);
 
 describe('launchObscura', () => {

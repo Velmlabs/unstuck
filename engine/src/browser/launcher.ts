@@ -140,8 +140,42 @@ function stopper(proc: ChildProcess, graceMs: number, cleanup: () => void): () =
 
 const seconds = (ms: number) => `${ms / 1000} s`;
 
+/**
+ * A tiny process that outlives a killed engine (kill -9, a crash): it holds a pipe from the engine, and when that
+ * closes it kills the browser's process group and removes its profile. Without it, a browser in its own process group
+ * would keep running, cookies and an open debugging port included. It ends as soon as the browser exits, so it never
+ * signals a process group that was reused later. POSIX only (Windows has no process groups to reap).
+ */
+function startReaper(browser: ChildProcess, dir = ''): ChildProcess | null {
+  if (process.platform === 'win32' || !browser.pid) return null;
+  // `kill -9 -PGID` is the spelling every POSIX sh (dash too) accepts for a process group.
+  let reaper: ChildProcess;
+  try {
+    reaper = nodeSpawn('sh', ['-c', 'cat >/dev/null; kill -9 -"$1" 2>/dev/null; if [ -n "$2" ]; then rm -rf -- "$2"; fi', 'unstuck-reaper', String(browser.pid), dir], {
+      stdio: ['pipe', 'ignore', 'ignore'],
+      detached: true,
+    });
+  } catch {
+    return null;
+  }
+  reaper.on('error', () => {});
+  reaper.stdin?.on('error', () => {});
+  reaper.unref();
+  (reaper.stdin as unknown as { unref?: () => void } | null)?.unref?.();
+  const end = () => {
+    try {
+      process.kill(-reaper.pid!, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  };
+  if (browser.exitCode !== null || browser.signalCode !== null) end();
+  else browser.once('exit', end);
+  return reaper;
+}
+
 /** Starts headless Chrome on a free DevTools port with a throwaway profile. */
-export async function launchChrome(o: LaunchOptions & { isRoot?: boolean }): Promise<LaunchedBrowser & { pid: number; userDataDir: string }> {
+export async function launchChrome(o: LaunchOptions & { isRoot?: boolean }): Promise<LaunchedBrowser & { pid: number; userDataDir: string; reaper: ChildProcess | null }> {
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-chrome-'));
   const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${userDataDir}`, '--no-first-run', '--no-default-browser-check'];
   if (o.isRoot ?? process.getuid?.() === 0) args.push('--no-sandbox');
@@ -149,6 +183,7 @@ export async function launchChrome(o: LaunchOptions & { isRoot?: boolean }): Pro
   const removeDir = () => fs.rmSync(userDataDir, { recursive: true, force: true });
   const proc = (o.spawn ?? nodeSpawn)(o.path, args, { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   const output = tail(proc);
+  const reaper = startReaper(proc, userDataDir);
   const stop = stopper(proc, o.stopGraceMs ?? STOP_GRACE_MS, removeDir);
   const timeoutMs = o.startTimeoutMs ?? START_TIMEOUT_MS;
   try {
@@ -163,7 +198,7 @@ export async function launchChrome(o: LaunchOptions & { isRoot?: boolean }): Pro
       proc.once('exit', (code) => reject(new Error(`${o.path} exited with code ${code} before DevTools was ready:\n${output()}`)));
       setTimeout(() => reject(new Error(`${o.path} did not start within ${seconds(timeoutMs)}:\n${output()}`)), timeoutMs).unref();
     });
-    return { cdpUrl, kind: 'chrome', pid: proc.pid!, userDataDir, stop };
+    return { cdpUrl, kind: 'chrome', pid: proc.pid!, userDataDir, stop, reaper };
   } catch (e) {
     await stop();
     throw e;
@@ -186,6 +221,7 @@ export async function launchObscura(o: LaunchOptions): Promise<LaunchedBrowser &
   const port = await freePort();
   const proc = (o.spawn ?? nodeSpawn)(o.path, ['serve', '--port', String(port), '--allow-private-network'], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });
   const output = tail(proc);
+  startReaper(proc);
   const stop = stopper(proc, o.stopGraceMs ?? STOP_GRACE_MS, () => {});
   const timeoutMs = o.startTimeoutMs ?? START_TIMEOUT_MS;
   let failed: Error | null = null;

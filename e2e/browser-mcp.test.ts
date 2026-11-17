@@ -104,5 +104,16 @@ describe('Unstuck Browser over MCP', () => {
     expect(r.content[0].text).toContain('--allow-private-network');
     await m.close();
   });
+
+  it('kill -9 of the MCP server still stops its Chrome and removes the profile (no browser left with an open debugging port)', async () => {
+    const before = profiles();
+    const m = await mcp(['--mcp', '--browser', '--allow-private-network']);
+    await m.call('fetch_page', { url: `${site.url}/article` });
+    const started = [...profiles()].filter((d) => !before.has(d));
+    expect(started).toHaveLength(1);
+    process.kill((m.client as any)._transport._process.pid as number, 'SIGKILL');
+    await expect.poll(() => fs.existsSync(path.join(os.tmpdir(), started[0]!)), { timeout: 10_000 }).toBe(false);
+    await m.close().catch(() => {});
+  });
 });
 
