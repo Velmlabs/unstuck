@@ -53,3 +53,97 @@ async def browser():
 async def pw():
     async with async_playwright() as p:
         yield p
+
+
+GUARD_ENGINE = """
+import json, sys
+OUTCOMES = json.loads(OUTCOMES_JSON)
+CAPS = CAPS_JSON
+LOG = LOG_PATH
+PROBE = PROBE_FLAG
+RESCUE_NOTES = NOTES_FLAG
+next_id = [1000]
+state = {"page": None}
+def out(m):
+    sys.stdout.write(json.dumps(m) + "\\n"); sys.stdout.flush()
+def log(m):
+    with open(LOG, "a") as f:
+        f.write(json.dumps(m) + "\\n")
+def request(method, params):
+    i = next_id[0]; next_id[0] += 1
+    out({"id": i, "method": method, "params": params})
+    for line in sys.stdin:
+        r = json.loads(line)
+        if r.get("id") == i and "method" not in r:
+            log({"method": "<-" + method, "params": r})
+            return r
+        handle(r)
+def handle(m):
+    method = m.get("method")
+    if method is None:
+        return
+    log(m)
+    if "id" not in m:
+        return  # a notification (cdp.closed, cdp.event)
+    if method == "engine.hello":
+        res = {"engineVersion": "fake-guard", "protocolVersion": 1}
+        if CAPS is not None:
+            res.update({"protocolMinor": 1, "capabilities": CAPS})
+        out({"id": m["id"], "result": res})
+    elif method == "guard.open":
+        state["page"] = m["params"]["pageId"]
+        if PROBE:
+            created = request("page.create", {"pageId": m["params"]["pageId"]})
+            tab = created["result"]["pageId"]
+            request("cdp.send", {"pageId": tab, "method": "Runtime.evaluate", "params": {"expression": "1 + 1", "returnByValue": True}})
+            request("page.close", {"pageId": tab})
+            request("page.close", {"pageId": tab})
+            request("page.create", {"pageId": "nope"})
+        out({"id": m["id"], "result": {"guardId": "g1"}})
+    elif method in ("guard.after", "guard.check", "guard.askHuman"):
+        if RESCUE_NOTES:
+            out({"method": "guard.rescue", "params": {"guardId": "g1", "pageId": state["page"], "active": True}})
+            request("cdp.send", {"pageId": "nope", "method": "Runtime.evaluate", "params": {"expression": "0"}})
+            out({"method": "guard.rescue", "params": {"guardId": "g1", "pageId": state["page"], "active": False}})
+        out({"id": m["id"], "result": OUTCOMES.pop(0) if OUTCOMES else None})
+    elif method == "guard.before":
+        out({"id": m["id"], "result": None})
+    elif method == "guard.getSession":
+        out({"id": m["id"], "result": {"site": "shop.example", "userAgent": "UA/1", "cookieHeader": "cf_clearance=ok", "cookies": [
+            {"name": "cf_clearance", "value": "ok", "domain": ".shop.example", "path": "/", "expires": -1, "httpOnly": True, "secure": True, "sameSite": "Lax"}]}})
+    elif method in ("guard.rememberSite", "guard.forgetSite", "guard.forgetAll", "guard.close"):
+        out({"id": m["id"], "result": {}})
+    elif method == "shutdown":
+        out({"id": m["id"], "result": {}}); sys.exit(0)
+    else:
+        out({"id": m["id"], "error": {"code": "unknown_method", "message": method}})
+for line in sys.stdin:
+    handle(json.loads(line))
+"""
+
+
+class GuardEngine:
+    """A scripted engine that answers the guard methods; `calls(method)` lists the params it received."""
+
+    def __init__(self, tmp_path, outcomes, capabilities=("guard", "paintCheck"), probe=False, rescue_notes=False) -> None:
+        import json
+
+        self.log = tmp_path / "calls.jsonl"
+        body = (
+            GUARD_ENGINE.replace("OUTCOMES_JSON", repr(json.dumps(list(outcomes))))
+            .replace("CAPS_JSON", "None" if capabilities is None else repr(list(capabilities)))
+            .replace("LOG_PATH", repr(str(self.log)))
+            .replace("PROBE_FLAG", repr(probe))
+            .replace("NOTES_FLAG", repr(rescue_notes))
+        )
+        self.path = write_engine(tmp_path, body)
+
+    def entries(self):
+        import json
+
+        if not self.log.exists():
+            return []
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def calls(self, method: str):
+        return [e.get("params") for e in self.entries() if e["method"] == method]

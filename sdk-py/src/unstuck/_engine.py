@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Mapping
 
 from ._errors import UnstuckEngineError
-from ._rpc import PROTOCOL_VERSION, RpcCallError, RpcPeer
+from ._rpc import PROTOCOL_MINOR, PROTOCOL_VERSION, RpcCallError, RpcPeer
 from ._version import __version__
 
 HINT = "Set UNSTUCK_ENGINE_PATH to a working unstuck-engine binary."
@@ -42,6 +42,8 @@ class EngineProcess:
         self.peer = peer
         self._reader = reader
         self.engine_version = ""
+        self.capabilities: frozenset[str] = frozenset()
+        """What the engine offers beyond takeovers (empty for an engine older than protocol minor 1)."""
 
     async def wait(self) -> int | None:
         code = await self._proc.wait()
@@ -102,7 +104,7 @@ async def spawn_engine(
     engine = EngineProcess(proc, peer, asyncio.ensure_future(read()))
     try:
         hello = await asyncio.wait_for(
-            peer.request("engine.hello", {"sdk": "py", "sdkVersion": __version__, "protocolVersion": PROTOCOL_VERSION}),
+            peer.request("engine.hello", {"sdk": "py", "sdkVersion": __version__, "protocolVersion": PROTOCOL_VERSION, "protocolMinor": PROTOCOL_MINOR}),
             timeout=handshake_timeout_s,
         )
     except asyncio.TimeoutError:
@@ -118,4 +120,5 @@ async def spawn_engine(
             raise UnstuckEngineError(f"the Unstuck engine at {path} exited with code {code} before the handshake. {HINT}", path) from None
         raise UnstuckEngineError(f"the Unstuck engine at {path} refused the handshake: {e.message}. {HINT}", path) from None
     engine.engine_version = hello["engineVersion"]
+    engine.capabilities = frozenset(hello.get("capabilities") or ())
     return engine

@@ -1,17 +1,24 @@
 """Unstuck: human takeover for AI browser agents."""
 
 from ._client import Unstuck
-from ._errors import PageClosedError, UnstuckConfigError, UnstuckEngineError
-from ._types import TakeoverLink, TakeoverResult, TakeoverStatus
+from ._errors import PageClosedError, UnstuckConfigError, UnstuckEngineError, UnstuckRescueError
+from ._types import HumanCheck, RescueEvent, SiteSession, StoredCookie, TakeoverLink, TakeoverResult, TakeoverStatus
 from ._version import __version__
+from ._wrap import PageGuard
 
 __all__ = [
+    "HumanCheck",
     "PageClosedError",
+    "PageGuard",
+    "RescueEvent",
+    "SiteSession",
+    "StoredCookie",
     "TakeoverLink",
     "TakeoverResult",
     "TakeoverStatus",
     "Unstuck",
     "UnstuckConfigError",
     "UnstuckEngineError",
+    "UnstuckRescueError",
     "__version__",
 ]

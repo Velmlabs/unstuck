@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from typing import Any, Callable, Literal
+from typing import Any, Awaitable, Callable, Literal, Sequence
 from urllib.parse import urlparse
 
 from ._attach import AttachedPage, attach_page
 from ._engine import EngineProcess, resolve_engine_path, spawn_engine
 from ._errors import PageClosedError, UnstuckConfigError, UnstuckEngineError
 from ._rpc import RpcCallError
-from ._types import TakeoverLink, TakeoverResult
+from ._types import CheckKind, RescueEvent, TakeoverLink, TakeoverResult
+from ._wrap import wrap_page
 
 SHUTDOWN_GRACE_S = 2.0
 _PAGE_CLOSED = TakeoverResult(status="failed", session_id="", url="", duration_s=0, detail="page_closed")
@@ -77,6 +78,10 @@ class Unstuck:
         self._require_code = require_code
         self._engine: asyncio.Task[EngineProcess] | None = None
         self._pages: dict[str, AttachedPage] = {}
+        # Probe tabs the engine opened (page.create), and popup followers of active guard rescues.
+        self._probes: dict[str, Any] = {}
+        self._rescue_popups: dict[str, Callable[[], Awaitable[None]]] = {}
+        self._tasks: set[asyncio.Future[Any]] = set()
 
     async def __aenter__(self) -> "Unstuck":
         return self
@@ -120,9 +125,7 @@ class Unstuck:
         loop = asyncio.get_running_loop()
         closed_early = loop.create_future()
         notify_close: list[Callable[[str], None]] = []
-        popups: list[AttachedPage] = []
-        popup_tasks: set[asyncio.Future[None]] = set()
-        popup_listener: list[Callable[[Any], None]] = []
+        stop_following: list[Callable[[], Awaitable[None]]] = []
         answered: list[bool] = []
 
         def on_close(reason_: str) -> None:
@@ -141,21 +144,7 @@ class Unstuck:
             self._pages[attached.page_id] = attached
             notify_close.append(lambda r: engine.peer.notify("cdp.closed", {"pageId": attached.page_id, "reason": r}))
 
-            async def follow(popup_page: Any) -> None:
-                try:
-                    popup = await attach_page(popup_page)
-                except Exception:  # noqa: BLE001 - a popup that closes before we attach is not followed
-                    return
-                popups.append(popup)
-                self._pages[popup.page_id] = popup
-                popup.on_close(lambda r: engine.peer.notify("cdp.closed", {"pageId": popup.page_id, "reason": r}))
-                engine.peer.notify("page.popup", {"pageId": attached.page_id, "popupPageId": popup.page_id})
-
-            def on_popup(popup_page: Any) -> None:
-                popup_tasks.add(asyncio.ensure_future(follow(popup_page)))
-
-            page.on("popup", on_popup)
-            popup_listener.append(on_popup)
+            stop_following.append(self._follow(engine, attached, page))
             params = {"pageId": attached.page_id, "reason": reason, "timeoutS": timeout_s or self._timeout_s, "site": _site_of(attached.url())}
             code = self._require_code if require_code is None else require_code
             if code is not None:
@@ -178,16 +167,71 @@ class Unstuck:
             if notify_close and not answered:
                 # Cancelled by the caller (e.g. asyncio.wait_for): end the engine session so the link stops working.
                 notify_close[0]("cancelled by caller")
-            for listener in popup_listener:
-                page.remove_listener("popup", listener)
-            await asyncio.gather(*popup_tasks, return_exceptions=True)
-            for popup in popups:
-                self._pages.pop(popup.page_id, None)
-                await popup.detach()
+            for stop in stop_following:
+                await stop()
             self._pages.pop(attached.page_id, None)
             if not closed_early.done():
                 closed_early.cancel()
             await attached.detach()
+
+    def wrap(
+        self,
+        page: Any,
+        *,
+        rescue: Sequence[CheckKind] = ("challenge",),
+        remember: bool = False,
+        profile: str = "default",
+        max_rescues_per_hour: int = 10,
+        on_rescue_fail: Literal["throw", "return"] = "throw",
+        on_rescue: Callable[[RescueEvent], None] | None = None,
+        timeout_s: int | None = None,
+        allowed_sites: list[str] | None = None,
+        alerts: bool | Literal["required"] | None = None,
+        require_code: bool | None = None,
+    ) -> Any:
+        """Guards an async Playwright page: navigations and clicks that land on a human check (a CAPTCHA, Cloudflare's
+        "verify you are human") bring a person in and return once they're past it. Returns the same page, with
+        ``page.unstuck``. A rescue that doesn't end ``resolved`` raises UnstuckRescueError (``on_rescue_fail="return"``
+        returns normally instead; read ``page.unstuck.last_rescue``)."""
+        return wrap_page(
+            self, page, rescue=rescue, remember=remember, profile=profile, max_rescues_per_hour=max_rescues_per_hour,
+            on_rescue_fail=on_rescue_fail, on_rescue=on_rescue, timeout_s=timeout_s, allowed_sites=allowed_sites,
+            alerts=alerts, require_code=require_code,
+        )
+
+    def _background(self, aw: Awaitable[Any]) -> None:
+        task = asyncio.ensure_future(aw)
+        self._tasks.add(task)
+        task.add_done_callback(lambda t: (self._tasks.discard(t), t.cancelled() or t.exception()))
+
+    def _follow(self, engine: EngineProcess, attached: AttachedPage, page: Any) -> Callable[[], Awaitable[None]]:
+        """Follows the popups `page` opens (a CAPTCHA provider's window) for the engine; returns how to stop."""
+        popups: list[AttachedPage] = []
+        tasks: set[asyncio.Future[None]] = set()
+
+        async def follow(popup_page: Any) -> None:
+            try:
+                popup = await attach_page(popup_page)
+            except Exception:  # noqa: BLE001 - a popup that closes before we attach is not followed
+                return
+            popups.append(popup)
+            self._pages[popup.page_id] = popup
+            popup.on_close(lambda r: engine.peer.notify("cdp.closed", {"pageId": popup.page_id, "reason": r}))
+            engine.peer.notify("page.popup", {"pageId": attached.page_id, "popupPageId": popup.page_id})
+
+        def on_popup(popup_page: Any) -> None:
+            tasks.add(asyncio.ensure_future(follow(popup_page)))
+
+        page.on("popup", on_popup)
+
+        async def stop() -> None:
+            page.remove_listener("popup", on_popup)
+            await asyncio.gather(*tasks, return_exceptions=True)
+            for popup in popups:
+                self._pages.pop(popup.page_id, None)
+                await popup.detach()
+
+        return stop
 
     async def close(self) -> None:
         """Stops the engine, cancelling any running takeover."""
@@ -236,7 +280,36 @@ class Unstuck:
                 page.subscribe(event, lambda p, e=event: peer.notify("cdp.event", {"pageId": params["pageId"], "method": e, "params": p}))
             return {}
 
+        async def page_create(params: dict[str, Any]) -> dict[str, Any]:
+            opener = page_for(params)
+            tab = await opener._page.context.new_page()
+            attached = await attach_page(tab)
+            self._pages[attached.page_id] = attached
+            self._probes[attached.page_id] = tab
+            return {"pageId": attached.page_id}
+
+        async def page_close(params: dict[str, Any]) -> dict[str, Any]:
+            tab = self._probes.pop(params["pageId"], None)
+            if tab is None:
+                raise RuntimeError(f"unknown page {params['pageId']}")
+            attached = self._pages.pop(params["pageId"])
+            await attached.detach()
+            await tab.close()
+            return {}
+
+        def guard_rescue(params: dict[str, Any]) -> None:
+            key = params["guardId"]
+            if params["active"]:
+                attached = self._pages.get(params["pageId"])
+                if attached is not None and key not in self._rescue_popups:
+                    self._rescue_popups[key] = self._follow(engine, attached, attached._page)
+            elif key in self._rescue_popups:
+                self._background(self._rescue_popups.pop(key)())
+
         peer.handle("cdp.send", cdp_send)
         peer.handle("cdp.subscribe", cdp_subscribe)
+        peer.handle("page.create", page_create)
+        peer.handle("page.close", page_close)
+        peer.on_notification("guard.rescue", guard_rescue)
         peer.on_notification("takeover.link", lambda p: self._on_link(TakeoverLink.from_wire(p)))
         return engine

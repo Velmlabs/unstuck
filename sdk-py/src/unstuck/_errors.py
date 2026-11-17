@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ._types import HumanCheck, RescueEvent
+
 
 class UnstuckEngineError(Exception):
     """The engine binary could not be found, started, or kept running."""
@@ -21,3 +26,15 @@ class PageClosedError(Exception):
 
     def __init__(self) -> None:
         super().__init__("page closed")
+
+
+class UnstuckRescueError(Exception):
+    """A wrapped page met a human check that a person didn't get it past (see ``status``)."""
+
+    def __init__(self, event: "RescueEvent") -> None:
+        detail = f" ({event.detail})" if event.detail else ""
+        super().__init__(f"Unstuck could not get past a {event.check.kind} on {event.check.site}: {event.status}{detail}")
+        self.status = event.status
+        self.detail = event.detail
+        self.check: HumanCheck = event.check
+        self.event = event
