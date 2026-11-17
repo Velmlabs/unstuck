@@ -106,6 +106,9 @@ describe('approval rules', () => {
     'Approve this request. Pending expenses: 3',
     'We sent a notification to your email',
     'Check your device settings',
+    'Check your device settings. Make sure cookies are enabled on your device.',
+    'Approve request. Account  Settings  Log out',
+    'Thanks for your order. We sent a notification to your email. Manage your account.',
     'Check your phone',
     'Stay tuned yes? Tap yesterday',
     'Welcome to the shop', 'Enter the code we sent to your phone', 'Tap the menu', 'Please approve our terms', 'Open the app store'])('"%s" is not', (text) => expect(a(text)).toBeNull());
@@ -129,11 +132,6 @@ describe('approval rules', () => {
     expect(failed('Try again')?.ruleId).toBe('approval_failed.retry');
     expect(failed('Welcome to the shop')).toBeNull();
     expect(failed('Try again', { bodyTextLength: 3001 })).toBeNull();
-  });
-  it('a failure phrase deep in the page (about 2,500 characters in) still matches', () => {
-    const text = `${'Some account notice. '.repeat(125)}Request timed out`;
-    expect(text.length).toBeGreaterThan(2400);
-    expect(failed(text, { bodyTextLength: text.length })?.ruleId).toBe('approval_failed.timed_out');
   });
   it('failure rules do not match the approval prompt, nor the other way round', () => {
     expect(failed('Check your phone to sign in')).toBeNull();

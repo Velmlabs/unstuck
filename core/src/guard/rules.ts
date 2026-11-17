@@ -27,7 +27,7 @@ export const RULES_VERSION = 2;
 // Wording of sign-in approval prompts (push to a phone). Kept short-page only (maxBodyText) so articles don't match.
 const APPROVE = /\b(check your (phone|device)|tap yes|approve (this )?(sign-in|login|request)|we sent a (notification|prompt|push) to|open the .* app to (confirm|approve)|confirm it['\u2019]s you on your (phone|device))\b/i;
 // Sign-in or identity wording; keeps "Approve request" on an admin page, "check your device settings" etc. from matching.
-const APPROVE_CONTEXT = /sign[- ]?in|log[- ]?in|verif|identity|it(['\u2019]s| is) you|authenticat|2-step|two-step|account|on your (phone|mobile|device)/i;
+const APPROVE_CONTEXT = /\bsign[- ]?in(g)?\b|\blog[- ]?in\b|\bverif(y|ication)\b|\bit(['\u2019]?s| is) (really )?you\b|\bauthenticat|\b(2|two)[- ]?(step|factor)\b|\bapprove (this|the) (request|sign-in|login) on your (phone|device)\b/i;
 
 const HUMAN = /verify (that )?you('| a)?re (a )?human|are you a robot|human verification|press (and|&) hold|checking (if the site connection is secure|your browser)|unusual traffic from your computer/i;
 
