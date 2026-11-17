@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Publishing 0.2.9 (docs/superpowers/specs/2026-11-14-publish-design.md).
+// Publishing (see the publish design in the private design notes).
 //   pnpm release           dry run: build everything into release/, prove it works from a clean install, and record each
 //                          artifact's SHA-256 with the commit in release/dry-run-passed.json
 //   pnpm release:publish   publishes exactly those artifacts (scripts/publish.mjs)

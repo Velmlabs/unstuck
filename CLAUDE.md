@@ -10,4 +10,4 @@
 
 - Test coverage must stay above 90% (lines, statements, functions, branches) in every package; `pnpm test` enforces it.
 - `protocol/`, `core/` and `viewer/` must not import Node built-ins (`node scripts/check-runtime-agnostic.mjs protocol/src core/src viewer/src`).
-- Design spec: `docs/superpowers/specs/2026-11-12-unstuck-mvp-design.md`. Plans: `docs/superpowers/plans/`.
+- Design notes (specs and plans) live in the private unstuck-cloud repo under `docs/oss-design/`; never commit them here.

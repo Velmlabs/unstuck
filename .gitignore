@@ -18,5 +18,6 @@ __pycache__/
 .dev.vars.*
 dist-hosted/
 
-# Local design notes (specs and plans): kept on disk, never committed. Files already tracked stay tracked.
+# Design notes and agent tooling never go in this repo (they live in the private repo).
 docs/superpowers/
+.claude/
