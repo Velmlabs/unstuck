@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@0.0.85", "--cdp-endpoint", "http://127.0.0.1:9222"]
+    },
+    "unstuck": {
+      "command": "npx",
+      "args": ["-y", "@velmlabs/unstuck-engine", "--mcp", "--open"],
+      "env": {
+        "UNSTUCK_CDP_URL": "http://127.0.0.1:9222"
+      },
+      "timeout": 900000
+    }
+  }
+}

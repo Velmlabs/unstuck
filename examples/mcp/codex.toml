@@ -1,0 +1,15 @@
+# ~/.codex/config.toml: read by the Codex CLI, the ChatGPT desktop app and the Codex IDE extension.
+# Chrome must be running with --remote-debugging-port=9222 (see README.md).
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@0.0.85", "--cdp-endpoint", "http://127.0.0.1:9222"]
+startup_timeout_sec = 60 # the first start downloads the package (default 10)
+
+[mcp_servers.unstuck]
+command = "npx"
+args = ["-y", "@velmlabs/unstuck-engine", "--mcp", "--open"]
+startup_timeout_sec = 60
+tool_timeout_sec = 900 # a person may take minutes (default 60, which would end the takeover early)
+
+[mcp_servers.unstuck.env]
+UNSTUCK_CDP_URL = "http://127.0.0.1:9222"

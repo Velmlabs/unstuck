@@ -1,0 +1,18 @@
+# Merge into ~/.config/goose/config.yaml. Chrome must be running with --remote-debugging-port=9222 (see README.md).
+extensions:
+  playwright:
+    name: playwright
+    type: stdio
+    cmd: npx
+    args: ["-y", "@playwright/mcp@0.0.85", "--cdp-endpoint", "http://127.0.0.1:9222"]
+    enabled: true
+    timeout: 300
+  unstuck:
+    name: unstuck
+    type: stdio
+    cmd: npx
+    args: ["-y", "@velmlabs/unstuck-engine", "--mcp", "--open"]
+    envs:
+      UNSTUCK_CDP_URL: "http://127.0.0.1:9222"
+    enabled: true
+    timeout: 900 # seconds: a person may take minutes

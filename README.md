@@ -83,15 +83,52 @@ Nothing else in your code changes. The whole quickstart, with every option: [uns
   <img src="docs/screenshots/viewer-done-iphone13.png" alt="The viewer after Done: control is back with the agent" width="260">
 </p>
 
-### Using Claude Code, Cursor or another AI agent?
+### Using Claude Code, Codex or another AI agent?
 
-Give it a `request_human_takeover` tool (or the two-step `start_human_takeover`, below). Start Chrome with a debugging port, then add Unstuck as an MCP server:
+Give it a `request_human_takeover` tool (or the two-step `start_human_takeover`, below). Every setup has two parts: a Chrome started with a debugging port, which the agent drives through a browser MCP server such as [Playwright MCP](https://github.com/microsoft/playwright-mcp), and the Unstuck MCP server pointed at the same Chrome.
+
+```bash
+google-chrome --remote-debugging-port=9222 --user-data-dir="$HOME/.unstuck-chrome"   # macOS and Windows: see examples/mcp
+```
+
+**Claude Code:**
 
 ```bash
 claude mcp add unstuck -e UNSTUCK_CDP_URL=http://127.0.0.1:9222 -- npx -y @velmlabs/unstuck-engine --mcp --open
+claude mcp add playwright -- npx -y @playwright/mcp@0.0.85 --cdp-endpoint http://127.0.0.1:9222
 ```
 
-Tell your agent: *"If you hit a CAPTCHA or a login, call request_human_takeover with the reason."* Setup for Claude Desktop and Cursor: [unstuck.sh/docs/mcp](https://unstuck.sh/docs/mcp/).
+**Codex CLI and the ChatGPT desktop app** (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.unstuck]
+command = "npx"
+args = ["-y", "@velmlabs/unstuck-engine", "--mcp", "--open"]
+startup_timeout_sec = 60
+tool_timeout_sec = 900 # a person may take minutes (default 60, which would end the takeover early)
+
+[mcp_servers.unstuck.env]
+UNSTUCK_CDP_URL = "http://127.0.0.1:9222"
+```
+
+Add the Playwright server from [`examples/mcp/codex.toml`](examples/mcp/codex.toml) too. Then ask: *"Open portal.example.com and download this month's invoice. If you hit a CAPTCHA or a login, call request_human_takeover with the reason."* With `--open` the link opens in this computer's browser; set `UNSTUCK_API_KEY` in the server's `env` to get it on your phone.
+
+| Agent | How | Config |
+|---|---|---|
+| Claude Code | MCP, or the [plugin](#give-your-agent-the-unstuck-skill) | [`claude-code.sh`](examples/mcp/claude-code.sh) |
+| Claude Desktop | MCP (`claude_desktop_config.json`) | [`playwright-mcp.json`](examples/mcp/playwright-mcp.json) |
+| Codex CLI, ChatGPT desktop app | MCP (`~/.codex/config.toml`) | [`codex.toml`](examples/mcp/codex.toml) |
+| Cursor | MCP (`~/.cursor/mcp.json`) | [`playwright-mcp.json`](examples/mcp/playwright-mcp.json) |
+| VS Code (GitHub Copilot), Copilot CLI | MCP (`~/.copilot/mcp-config.json`) | [`copilot-mcp-config.json`](examples/mcp/copilot-mcp-config.json) |
+| Gemini CLI | MCP (`~/.gemini/settings.json`) | [`gemini-settings.json`](examples/mcp/gemini-settings.json) |
+| Antigravity CLI | MCP (`~/.gemini/config/mcp_config.json`) | [`antigravity-mcp-config.json`](examples/mcp/antigravity-mcp-config.json) |
+| Devin Desktop (Windsurf), Cline | MCP | [`playwright-mcp.json`](examples/mcp/playwright-mcp.json) |
+| OpenCode | MCP (`opencode.json`) | [`opencode.json`](examples/mcp/opencode.json) |
+| Goose | MCP extension (`config.yaml`) | [`goose.yaml`](examples/mcp/goose.yaml) |
+| pi | MCP (`~/.pi/agent/mcp.json`) | [`pi-mcp.json`](examples/mcp/pi-mcp.json) |
+| Claude.ai, ChatGPT and Gemini on the web or phone | not supported: they only add remote MCP servers by URL, and Unstuck runs next to your browser | |
+
+Step-by-step setup, checks and troubleshooting for each agent: [unstuck.sh/docs/agents](https://unstuck.sh/docs/agents/).
 
 **No phone alerts? Let the agent show you the link.** The server also has a two-step flow: `start_human_takeover` returns the link at once, the agent shows it in the chat, and `wait_for_human_takeover` picks up the result after you tap Done. Open the link yourself or forward it to whoever will solve the step (WhatsApp, Slack…): previews connect nothing until someone taps Start, the link works on one device, and it dies when the takeover ends. Share it only with that person. Tell your agent: *"If you hit a CAPTCHA or a login, call start_human_takeover and show me the link."* Without `UNSTUCK_API_KEY` (or your own relay) the link opens only on the agent's computer.
 
@@ -122,6 +159,7 @@ Set `UNSTUCK_API_KEY` (from [your dashboard](https://unstuck.sh/dashboard/keys))
 | Stack | Guide | Example |
 |---|---|---|
 | MCP: Claude Code, Claude Desktop, Cursor, Playwright MCP | [unstuck.sh/docs/mcp](https://unstuck.sh/docs/mcp) | [`examples/mcp`](examples/mcp) |
+| AI agents: Codex, ChatGPT desktop, VS Code, Gemini CLI, OpenCode, Goose, pi and more | [unstuck.sh/docs/agents](https://unstuck.sh/docs/agents/) | [`examples/mcp`](examples/mcp) |
 | Agent skill: Claude Code plugin, or any agent that reads skills | [unstuck.sh/docs/skill](https://unstuck.sh/docs/skill/) | [`plugins/unstuck`](plugins/unstuck) |
 | Playwright (TypeScript, Python) | [unstuck.sh/docs/playwright](https://unstuck.sh/docs/playwright) | [`examples/playwright-ts`](examples/playwright-ts), [`examples/playwright-py`](examples/playwright-py) |
 | Puppeteer | [unstuck.sh/docs/puppeteer](https://unstuck.sh/docs/puppeteer) | [`examples/puppeteer`](examples/puppeteer) |

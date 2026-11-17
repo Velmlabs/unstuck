@@ -12,12 +12,25 @@ Unstuck attaches to a Chrome your agent already drives. Start it with port 9222:
 
 A separate `--user-data-dir` keeps this browser apart from your everyday profile.
 
-## 2. Add the server to your client
+## 2. Add the servers to your client
 
-- **Claude Code:** run `claude-code.sh`.
-- **Claude Desktop:** merge `claude-desktop.json` into Settings → Developer → Edit Config.
-- **Cursor:** merge `cursor.json` into `~/.cursor/mcp.json`.
-- **With the Playwright MCP server**, so the agent browses and Unstuck takes over the same browser: use `playwright-mcp.json`.
+Each file adds Unstuck and, where the client needs one, the Playwright MCP server pointed at the same Chrome, so the agent browses and Unstuck takes over the same tab. Setup steps for each client, checked on 2026-11-17: [unstuck.sh/docs/agents](https://unstuck.sh/docs/agents/).
+
+| Client | File | Where it goes |
+|---|---|---|
+| Claude Code | `claude-code.sh` | run it |
+| Claude Desktop | `claude-desktop.json`, or `playwright-mcp.json` with a browser | Settings → Developer → Edit Config |
+| Cursor | `cursor.json`, or `playwright-mcp.json` with a browser | `~/.cursor/mcp.json` |
+| Cline, Devin Desktop (Windsurf) | `playwright-mcp.json` | Cline's MCP settings; `~/.config/devin/mcp_config.json` |
+| Codex CLI, ChatGPT desktop app | `codex.toml` | `~/.codex/config.toml` |
+| VS Code (GitHub Copilot), Copilot CLI | `copilot-mcp-config.json` | `~/.copilot/mcp-config.json` |
+| Gemini CLI | `gemini-settings.json` | `~/.gemini/settings.json` |
+| Antigravity CLI | `antigravity-mcp-config.json` | `~/.gemini/config/mcp_config.json` |
+| OpenCode | `opencode.json` | `~/.config/opencode/opencode.json` |
+| Goose | `goose.yaml` | `~/.config/goose/config.yaml` |
+| pi | `pi-mcp.json` | `~/.pi/agent/mcp.json` |
+
+Merge the servers into any config you already have; don't replace the file.
 
 ## 3. Ask for help
 
