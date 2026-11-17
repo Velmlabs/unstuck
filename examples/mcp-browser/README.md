@@ -29,7 +29,9 @@ at `UNSTUCK_CDP_URL` instead of starting one.
   `status: "human_needed"` with the link to show them. With no other way to reach the person (no `--open`, no
   Unstuck Cloud alerts) it returns the link at once, since only the agent can show it. Call `resume_after_human` with its `takeover_id` until it
   returns the original call's result. Other browsing calls meanwhile return `human_takeover_active`.
-- `get_session`, `remember_site`, `forget_site`: a site's cookies, saved to or removed from the profile.
+- `get_session`, `remember_site`, `forget_site`: a site's cookies, saved to or removed from the profile. `get_session`,
+  `include_session` and `remember_site` work only for the site the tab is on, once a person got past its check there
+  (or it's remembered on the profile), so a page can't talk the agent into exporting another site's cookies.
 
 The takeover tools (`request_human_takeover`, `start_human_takeover`, `wait_for_human_takeover`,
 `cancel_human_takeover`) work on the same tab when you don't pass `cdp_url`.

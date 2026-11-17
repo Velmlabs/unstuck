@@ -6,6 +6,7 @@ import {
   createGuard,
   onceRenderCheck,
   profileFile,
+  siteOf,
   type Engine,
   type Guard,
   type LinkInfo,
@@ -56,6 +57,8 @@ export class BrowserSession {
   /** The browsing call that has the tab now; others wait for it (or for a person to take the tab). */
   private current: Promise<void> | null = null;
   private readonly waiters = new Set<() => void>();
+  /** Sites a person got past (or logged in on) through this session: the only ones whose cookies may be handed out. */
+  readonly solved = new Set<string>();
   /** The last snapshot the agent got; its refs are what click/type/select act on. A main-frame navigation clears it. */
   snapshot: Snapshot | null = null;
   readonly store: SessionStore;
@@ -166,6 +169,9 @@ export class BrowserSession {
         remember: this.c.remember,
         maxRescuesPerHour: this.c.maxRescuesPerHour,
         canRenderCaptcha,
+        onRescue: (o) => {
+          if (o.status === 'resolved' && o.check.site) this.solved.add(siteOf(o.check.site));
+        },
         takeover: ({ reason }) =>
           this.d
             .runTakeover(cdp, reason, (info, control) => {

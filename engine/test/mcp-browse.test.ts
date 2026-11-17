@@ -137,14 +137,36 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     await m.close();
   });
 
-  it('include_session returns cookies, the header and the user agent', async () => {
-    const m = await open();
-    solved = true;
+  it('include_session returns cookies, the header and the user agent, for the site a person just got past', async () => {
+    const m = await open({ inToolWaitMs: 8000 });
+    const person = m.person();
     const r = await m.call('fetch_page', { url: `${site}/cf`, include_session: true });
+    await person;
+    expect(r.structuredContent).toMatchObject({ rescued: true });
     expect(r.structuredContent.session).toMatchObject({ site: '127.0.0.1', cookie_header: 'cf_clearance=ok', user_agent: expect.stringContaining('Mozilla') });
     expect(r.structuredContent.session.cookies[0]).toMatchObject({ name: 'cf_clearance', value: 'ok' });
     const s = await m.call('get_session', { domain: '127.0.0.1' });
     expect(s.structuredContent).toMatchObject({ site: '127.0.0.1', cookie_header: 'cf_clearance=ok' });
+    await m.close();
+  });
+
+  it("a page can't get other sites' cookies: get_session, include_session and remember_site are for the tab's own site after a person got past it", async () => {
+    const m = await open();
+    solved = true; // the shop lets us in without anyone solving anything: no person, no cookies
+    const r = await m.call('fetch_page', { url: `${site}/cf`, include_session: true });
+    expect(r.isError).toBeFalsy();
+    expect(r.structuredContent).not.toHaveProperty('session');
+    expect(r.structuredContent.session_note).toMatch(/only for a site a person got past/);
+    const refusal = /^get_session gives cookies only for the site this tab is on, after a person got past its check/;
+    for (const domain of ['127.0.0.1', 'mail.google.com']) {
+      const g = await m.call('get_session', { domain });
+      expect(g.isError, domain).toBe(true);
+      expect(g.content[0]!.text).toMatch(refusal);
+    }
+    const rem = await m.call('remember_site', { domain: 'mail.google.com' });
+    expect(rem.isError).toBe(true);
+    expect(rem.content[0]!.text).toMatch(/^remember_site saves only the site this tab is on, after a person got past its check/);
+    expect((await m.call('forget_site', { domain: 'mail.google.com' })).structuredContent).toEqual({ forgotten: 'mail.google.com' });
     await m.close();
   });
 

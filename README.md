@@ -193,7 +193,8 @@ Unstuck Cloud the link opens on this machine, and it comes back to the agent at 
 - **Rate limit.** At most 10 person-checks an hour per profile (`maxRescuesPerHour`); past that a check ends as
   `rescue_limited` without bothering anyone.
 - **Cookies for other tools.** `getSession(domain)` / `include_session: true` hands over a site's cookies and user agent
-  for curl or an HTTP client. That's best effort: some sites tie a clearance to the browser, so fetching through the
+  for curl or an HTTP client. Over MCP it's only for the site the tab is on, once a person got past its check, so a
+  page can't talk the agent into handing out another site's cookies. That's best effort: some sites tie a clearance to the browser, so fetching through the
   browser (`fetch_page`) is the reliable path.
 - **Obscura** has limited support: it doesn't draw CAPTCHA widgets, so a challenge there ends at once with
   `browser_cannot_render_captcha`. Logins and 2FA work.

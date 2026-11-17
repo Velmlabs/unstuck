@@ -89,6 +89,20 @@ const httpOnly = (url: string): boolean => {
   }
 };
 
+const SESSION_REFUSED = (what: string) =>
+  `${what} the site this tab is on, after a person got past its check (or logged in) through Unstuck, or a site remembered on this profile. Open that site first; another site's cookies are never handed out.`;
+
+/** The site the tab is on, from the browser's own history (a page can't fake it). */
+async function tabSite(cdp: DirectCdp): Promise<string | null> {
+  try {
+    const h = await cdp.send<{ currentIndex: number; entries: { url: string }[] }>('Page.getNavigationHistory');
+    const url = h.entries[h.currentIndex]?.url;
+    return url ? siteOf(new URL(url).hostname) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function registerBrowseTools(
   server: McpServer,
   d: {
@@ -101,6 +115,16 @@ export function registerBrowseTools(
   },
 ): void {
   const { session } = d;
+
+  /**
+   * A site whose cookies may leave the browser: the tab's own site, and one a person got past here or remembered on
+   * this profile. Otherwise a page could talk the agent into exporting any logged-in site's cookies.
+   */
+  const exportable = async (cdp: DirectCdp, domain: string): Promise<string | null> => {
+    const site = siteOf(domain);
+    if (!site || site !== (await tabSite(cdp))) return null;
+    return session.solved.has(site) || (await session.store.load(site)) ? site : null;
+  };
 
   /** Runs one browsing action with the guard; a person who needs longer than inToolWaitMs gets the link instead. */
   async function guarded(action: (tab: { cdp: DirectCdp; guard: Guard }) => Promise<RescueOutcome | null>, finish: () => Promise<Out>): Promise<CallToolResult> {
@@ -205,7 +229,12 @@ export function registerBrowseTools(
             title: page.title,
             content: page.content,
             ...(page.truncated ? { truncated: true } : {}),
-            ...(include_session ? { session: sessionOut(await guardRef!.getSession(siteOf(new URL(finalUrl).hostname))) } : {}),
+            ...(include_session ? await (async () => {
+              const ok = await exportable(cdp, new URL(finalUrl).hostname);
+              return ok
+                ? { session: sessionOut(await guardRef!.getSession(ok)) }
+                : { session_note: 'include_session gives cookies only for a site a person got past (or one remembered on this profile), while the tab is on it' };
+            })() : {}),
           };
         },
       );
@@ -230,10 +259,15 @@ export function registerBrowseTools(
     SESSION_TOOL,
     {
       title: "Get a site's session",
-      description: `The browser's cookies, Cookie header and user agent for a site, e.g. to download a file with curl after ${FETCH_TOOL} got past a check. Treat them like a password.`,
+      description: `The browser's cookies, Cookie header and user agent for the site this tab is on, once a person got past its check (or it's remembered on this profile), e.g. to download a file with curl after ${FETCH_TOOL}. Never for any other site. Treat them like a password and never send them to another site.`,
       inputSchema: domainInput,
     },
-    ({ domain }) => onGuard(async ({ guard }) => sessionOut(await guard.getSession(siteOf(domain)))),
+    ({ domain }) =>
+      onGuard(async ({ cdp, guard }) => {
+        const site = await exportable(cdp, domain);
+        if (!site) throw new Error(SESSION_REFUSED('get_session gives cookies only for'));
+        return sessionOut(await guard.getSession(site));
+      }),
   );
 
   server.registerTool(
@@ -256,12 +290,13 @@ export function registerBrowseTools(
     REMEMBER_TOOL,
     {
       title: 'Remember a site',
-      description: "Save a site's cookies to this profile now, so the next visit (even after a restart) starts signed in or past its check.",
+      description: "Save the cookies of the site this tab is on to this profile, once a person got past its check or logged in, so the next visit (even after a restart) starts signed in or past it.",
       inputSchema: domainInput,
     },
     ({ domain }) =>
-      onGuard(async ({ guard }) => {
-        const site = siteOf(domain);
+      onGuard(async ({ cdp, guard }) => {
+        const site = await exportable(cdp, domain);
+        if (!site) throw new Error(SESSION_REFUSED('remember_site saves only'));
         await guard.rememberSite(site);
         return { remembered: domain, cookies: (await session.store.load(site))?.cookies.length ?? 0 };
       }),
