@@ -84,13 +84,62 @@ export interface DetectOptions {
 }
 
 /** Looks at the page for a human check. A widget that may pass by itself gets a grace period first. */
+const WIDGET_TOKENS = ['cf-turnstile-response', 'g-recaptcha-response', 'h-captcha-response'];
+
+interface DomNode {
+  nodeName?: string;
+  backendNodeId?: number;
+  attributes?: string[];
+  children?: DomNode[];
+  shadowRoots?: DomNode[];
+}
+
+/**
+ * Widget iframes the page itself can't list: Turnstile renders its iframe inside a closed shadow root, out of reach of
+ * querySelectorAll. Only looked for when the page has an empty widget token field, so ordinary pages don't pay for it.
+ */
+async function shadowFrames(cdp: CdpClient): Promise<PageFacts['iframes']> {
+  const found: { src: string; backendNodeId: number }[] = [];
+  try {
+    const { root } = await cdp.send<{ root: DomNode }>('DOM.getDocument', { depth: -1, pierce: true });
+    const walk = (n: DomNode, inShadow: boolean) => {
+      if (inShadow && n.nodeName === 'IFRAME' && n.backendNodeId !== undefined) {
+        const a = n.attributes ?? [];
+        const i = a.indexOf('src');
+        if (i >= 0 && a[i + 1]) found.push({ src: a[i + 1]!, backendNodeId: n.backendNodeId });
+      }
+      for (const c of n.children ?? []) walk(c, inShadow);
+      for (const r of n.shadowRoots ?? []) walk(r, true);
+    };
+    walk(root, false);
+  } catch {
+    return [];
+  }
+  const frames: PageFacts['iframes'] = [];
+  for (const f of found) {
+    try {
+      const { model } = await cdp.send<{ model: { width: number; height: number } }>('DOM.getBoxModel', { backendNodeId: f.backendNodeId });
+      frames.push({ src: f.src, width: model.width, height: model.height, visible: model.width > 0 && model.height > 0 });
+    } catch {
+      // no box: not rendered, so not a widget anyone could see
+    }
+  }
+  return frames;
+}
+
+async function facts(cdp: CdpClient): Promise<PageFacts | null> {
+  const f = await collectFacts(cdp, MARKERS);
+  if (f && WIDGET_TOKENS.some((t) => f.tokenFields[t] === '')) f.iframes.push(...(await shadowFrames(cdp)));
+  return f;
+}
+
 export async function detectHumanCheck(cdp: CdpClient, o: DetectOptions = {}): Promise<HumanCheck | null> {
   const opts = { scope: o.scope ?? (['challenge'] as const), requestedUrl: o.requestedUrl };
-  const facts = await collectFacts(cdp, MARKERS);
-  if (!facts) return null;
-  const found = matchRules(facts, o.document ?? null, opts);
+  const facts0 = await facts(cdp);
+  if (!facts0) return null;
+  const found = matchRules(facts0, o.document ?? null, opts);
   if (!found || !WIDGET_RULES.has(found.ruleId)) return found;
   await new Promise((r) => setTimeout(r, o.widgetGraceMs ?? WIDGET_GRACE_MS));
-  const again = await collectFacts(cdp, MARKERS);
+  const again = await facts(cdp);
   return again ? matchRules(again, o.document ?? null, opts) : null;
 }

@@ -73,6 +73,7 @@ describe('detectHumanCheck on vendor fixtures (real Chromium)', () => {
   it.each([
     ['cloudflare-interstitial.html', 'cloudflare.interstitial', ['challenge']],
     ['cloudflare-turnstile.html', 'cloudflare.turnstile', ['challenge']],
+    ['cloudflare-turnstile-shadow.html', 'cloudflare.turnstile', ['challenge']],
     ['recaptcha-v2.html', 'recaptcha.v2', ['challenge']],
     ['hcaptcha.html', 'hcaptcha', ['challenge']],
     ['generic-verify.html', 'generic.heading', ['challenge']],

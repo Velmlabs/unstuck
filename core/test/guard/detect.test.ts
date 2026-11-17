@@ -103,6 +103,42 @@ describe('detectHumanCheck', () => {
     expect(cdp.methods().filter((m) => m === 'Runtime.evaluate')).toHaveLength(2);
   });
 
+  it("a widget whose iframe sits in a closed shadow root (today's Turnstile) is found through the DOM domain", async () => {
+    const cdp = new FakeCdp();
+    // In the page: the token field, but no iframe (the widget hides it in a closed shadow root).
+    cdp.respond('Runtime.evaluate', () => ({ result: { value: facts({ tokenFields: { 'cf-turnstile-response': '' } }) } }));
+    cdp.respond('DOM.getDocument', () => ({
+      root: {
+        nodeName: '#document',
+        children: [
+          {
+            nodeName: 'DIV',
+            shadowRoots: [{ nodeName: '#document-fragment', children: [{ nodeName: 'IFRAME', backendNodeId: 9, attributes: ['src', 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/x/3x00000000000000000000FF/auto/normal'] }] }],
+          },
+        ],
+      },
+    }));
+    cdp.respond('DOM.getBoxModel', () => ({ model: { width: 300, height: 65 } }));
+    await expect(detectHumanCheck(cdp, { widgetGraceMs: 10 })).resolves.toMatchObject({ ruleId: 'cloudflare.turnstile', vendor: 'cloudflare' });
+  });
+
+  it('a shadow-root widget iframe that is tiny (an invisible widget) or has no box is not a check', async () => {
+    for (const box of [() => ({ model: { width: 0, height: 0 } }), () => { throw new Error('Could not compute box model'); }]) {
+      const cdp = new FakeCdp();
+      cdp.respond('Runtime.evaluate', () => ({ result: { value: facts({ tokenFields: { 'cf-turnstile-response': '' } }) } }));
+      cdp.respond('DOM.getDocument', () => ({ root: { nodeName: '#document', shadowRoots: [{ nodeName: '#document-fragment', children: [{ nodeName: 'IFRAME', backendNodeId: 9, attributes: ['src', 'https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/x'] }] }] } }));
+      cdp.respond('DOM.getBoxModel', box);
+      await expect(detectHumanCheck(cdp, { widgetGraceMs: 10 })).resolves.toBeNull();
+    }
+  });
+
+  it('a page with no widget token field never pays for the DOM walk', async () => {
+    const cdp = new FakeCdp();
+    cdp.respond('Runtime.evaluate', () => ({ result: { value: facts() } }));
+    await expect(detectHumanCheck(cdp, { widgetGraceMs: 10 })).resolves.toBeNull();
+    expect(cdp.methods()).not.toContain('DOM.getDocument');
+  });
+
   it('a non-widget check is reported at once', async () => {
     const cdp = new FakeCdp();
     cdp.respond('Runtime.evaluate', () => ({ result: { value: facts({ headings: ['Verify you are human'] }) } }));

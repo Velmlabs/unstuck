@@ -1,0 +1,6 @@
+<!doctype html><html><head><title>Sign up</title></head><body><h1>Create an account</h1><form><input name="email"><div class="cf-turnstile" id="ts"></div><input type="hidden" name="cf-turnstile-response" value=""><button>Sign up</button></form>
+<script>
+  // As today's Turnstile renders it: the iframe inside a closed shadow root, invisible to querySelectorAll.
+  const root = document.getElementById('ts').attachShadow({ mode: 'closed' });
+  root.innerHTML = '<iframe src="https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv/x/0x4AAA/auto/normal" width="300" height="65" style="border:0"></iframe>';
+</script></body></html>
