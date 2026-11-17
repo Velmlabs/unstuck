@@ -54,6 +54,8 @@ export interface LinkInfo {
 export interface TakeoverControl {
   /** Ends the takeover at once as `failed` with this detail (e.g. `alert_failed`); nothing happens once it has ended. */
   fail(detail: string): void;
+  /** Ends the takeover at once as `cancelled` with this detail (e.g. the agent stopped waiting); nothing happens once it has ended. */
+  cancel(detail: string): void;
   /** Someone has opened the link and joined (true from the first accepted hello on, also after they left). */
   joined(): boolean;
 }
@@ -95,7 +97,6 @@ export interface TakeoverOptions {
 
 export interface RunningTakeover extends TakeoverControl {
   result: Promise<TakeoverResult>;
-  cancel(detail: string): void;
 }
 
 const FINAL_EVENT: Record<TakeoverStatus, SessionEvent> = {
@@ -591,7 +592,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     go('notified');
     emit('link', { expiresAt });
     try {
-      opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, joined });
+      opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, cancel, joined });
     } catch {
       // A link handler that throws is the caller's bug: the takeover keeps running (an alert may already be on its way).
     }
@@ -601,11 +602,14 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   function fail(detail: string): void {
     finish('failed', detail);
   }
+  function cancel(detail: string): void {
+    finish('cancelled', detail);
+  }
   function joined(): boolean {
     return redeemed;
   }
 
-  return { result, cancel: (detail) => finish('cancelled', detail), fail, joined };
+  return { result, cancel, fail, joined };
 }
 
 function isRelease(m: ViewerInput): boolean {

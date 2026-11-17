@@ -306,6 +306,7 @@ describe('sendTakeoverAlert', () => {
     let looked = false;
     const outcome = sendTakeoverAlert(spy, alerts, info, 'x.com', {
       fail,
+      cancel: vi.fn(),
       joined: () => {
         looked = true;
         return joined;
