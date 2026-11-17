@@ -184,12 +184,23 @@ describe('createRelayTransport', () => {
     expect(closed).toBe(1);
   });
 
-  it('ignores a quick_answer frame: it is never treated as a new viewer connection', async () => {
-    const { ws } = await published();
+  it('ignores a quick_answer frame: it never opens a viewer connection', async () => {
+    const { t, ws } = await published();
+    const onConn = vi.fn();
+    t.onConnection(ID, onConn);
     ws.text({ t: 'quick_answer', choice: 1 });
     await new Promise((r) => realSetTimeout(r, 0));
     ws.text({ t: 'ping' });
+    expect(onConn).not.toHaveBeenCalled();
     expect(ws.json()).toContainEqual({ t: 'pong' });
+    expect(ws.json().some((m: { t: string }) => m.t === 'close')).toBe(false);
+  });
+
+  it('ignores a quick_answer frame without a handler: no close frame is sent back', async () => {
+    const { ws } = await published();
+    ws.text({ t: 'quick_answer', choice: 1 });
+    await new Promise((r) => realSetTimeout(r, 0));
+    expect(ws.json().some((m: { t: string }) => m.t === 'close')).toBe(false);
     expect(ws.readyState).toBe(1);
   });
 
