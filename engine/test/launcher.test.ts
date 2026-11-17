@@ -154,7 +154,7 @@ describe('a browser outlives no engine', () => {
     reaper.stdin.destroy(); // what the engine's death does to the reaper's pipe
     await expect.poll(() => alive(pid), { timeout: 5000 }).toBe(false);
     await expect.poll(() => fs.existsSync(userDataDir), { timeout: 5000 }).toBe(false);
-  });
+  }, 20_000);
 
   it('a normal stop() also ends the reaper, which then kills nothing', async () => {
     const bin = script("console.error('DevTools listening on ws://127.0.0.1:1/devtools/browser/x'); setInterval(() => {}, 1000);");

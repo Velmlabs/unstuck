@@ -163,6 +163,8 @@ function startReaper(browser: ChildProcess, dir = ''): ChildProcess | null {
   reaper.unref();
   (reaper.stdin as unknown as { unref?: () => void } | null)?.unref?.();
   const end = () => {
+    // A reaper whose pipe already closed is doing its job (killing, then removing the profile): leave it to finish.
+    if (reaper.stdin?.destroyed) return;
     try {
       process.kill(-reaper.pid!, 'SIGKILL');
     } catch {
