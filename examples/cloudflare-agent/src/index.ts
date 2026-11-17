@@ -136,6 +136,7 @@ function unstuckConfig(env: Env): { options: UnstuckOptions; alerts: boolean | '
   return { options: { relay: env.UNSTUCK_RELAY_URL, agentKey: env.UNSTUCK_AGENT_KEY, onLink }, alerts: false };
 }
 
+// #region link-webhook
 /**
  * An onLink handler that POSTs the link to an incoming webhook: `text` for Slack-style webhooks, `content` for Discord.
  * The link carries the session's secret: it goes only to this webhook, never to the agent's state or the log.
@@ -158,6 +159,7 @@ function linkWebhook(webhookUrl: string): (link: TakeoverLink) => Promise<void> 
     }
   };
 }
+// #endregion link-webhook
 
 function targetUrl(env: Env): string {
   const url = new URL(env.TARGET_URL || 'https://example.com');
