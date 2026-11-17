@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@cloudflare/puppeteer": "^1.4.0",
-    "@velmlabs/unstuck": "^0.2.9"
+    "@velmlabs/unstuck": "^0.3.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261116.1",

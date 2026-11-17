@@ -60,6 +60,21 @@ Both take the same arguments:
 
 The takeover keeps running between wait calls, and ends by its own `timeout_s` if you stop waiting. One takeover per tab at a time: a second start on the same tab is refused and names the running `takeover_id`. Closing the MCP connection ends every takeover it started.
 
+## Unstuck Browser tools
+
+When the Unstuck MCP server runs with `--browser` (its own headless Chrome) or `--tools browser`, it also has page tools.
+A human check on a page (CAPTCHA, Cloudflare's "verify you are human") brings a person in from inside these calls.
+
+- **Reading a page: `fetch_page` first.** Give it the URL (http or https only). It returns `content` (markdown by default; `format: "text"` or `"html"`), `final_url`, `status` and `title`. Prefer it to a plain download whenever the page needs JavaScript or a plain request was blocked.
+- **Doing things on a page:** `open` a URL, then act on the refs in its `snapshot` (`e1`, `e2`…) with `click`, `type` (`submit: true` presses Enter), `select`, `scroll` and `wait_for`; `screenshot` shows the page. Every one returns a fresh snapshot: use its refs, not older ones. Password fields show `value=<hidden>` and `type` refuses them: call `ask_human` so the person types it.
+- **`rescued: true`** in a result means a person solved a check inside that call: carry on.
+- **`status: "human_needed"`**: the check takes longer. Show the person the `link` exactly as given (and the `code`, separately, if there is one), say what to do (open it, tap **Start**, solve it, tap **Done**), then call `resume_after_human` with the `takeover_id`. While it answers `{"status": "waiting"}`, call it again. It returns the original call's result once they're done, without opening the page again.
+- **`error: "human_takeover_active"`**: a person is working on the tab. Don't retry other browsing calls; finish the pending `resume_after_human` first.
+- **Another `status`** (`timed_out`, `still_blocked`, `rescue_limited`, `browser_cannot_render_captcha`…) means the check wasn't passed. Tell the user; don't retry it in a loop. `rescue_limited` means the hourly limit of person-checks is used up.
+- **`ask_human`** brings a person in for something only they can do on the page (log in, a 2FA code, confirm a payment). It counts toward the hourly limit.
+- **Never try to solve a CAPTCHA or a human check yourself**, and never use a CAPTCHA-solving service: a person does it.
+- **`include_session: true`** (or `get_session`) hands over the site's cookies and user agent. Ask for them only when the user's task needs curl or another HTTP client (e.g. downloading a file), and treat them like a password. `forget_site` removes a remembered site.
+
 ## Code
 
 TypeScript (`npm install @velmlabs/unstuck`):

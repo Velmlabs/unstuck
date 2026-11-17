@@ -42,9 +42,9 @@ describe.each(examples)('$dir', ({ dir, extra }) => {
   const wrangler = parseJsonc(read(`${dir}/wrangler.jsonc`));
   const readme = read(`${dir}/README.md`);
 
-  it('depends on the published @velmlabs/unstuck 0.2.x and @cloudflare/puppeteer, with wrangler for dev', () => {
+  it('depends on the published @velmlabs/unstuck 0.3.x and @cloudflare/puppeteer, with wrangler for dev', () => {
     expect(pkg.private).toBe(true);
-    expect(pkg.dependencies['@velmlabs/unstuck']).toMatch(/^\^0\.2\.\d+$/);
+    expect(pkg.dependencies['@velmlabs/unstuck']).toMatch(/^\^0\.3\.\d+$/);
     expect(pkg.dependencies['@cloudflare/puppeteer']).toMatch(/^\^\d/);
     for (const name of extra) expect(pkg.dependencies[name]).toMatch(/^\^\d/);
     expect(pkg.devDependencies.wrangler).toMatch(/^\^4\./);

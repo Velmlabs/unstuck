@@ -1,6 +1,6 @@
 {
   "name": "@velmlabs/unstuck-core",
-  "version": "0.2.9",
+  "version": "0.3.0",
   "description": "The Unstuck takeover engine core: screencast, input, sessions and transports, usable in Node or Cloudflare Workers.",
   "keywords": [
     "ai",

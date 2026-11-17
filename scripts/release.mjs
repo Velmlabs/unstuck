@@ -31,7 +31,7 @@ process.on('exit', () => fs.rmSync(path.dirname(emptyNpmrc), { recursive: true, 
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = path.join(root, 'release');
-const VERSION = '0.2.9';
+const VERSION = '0.3.0';
 const TS = [
   { dir: 'protocol', name: '@velmlabs/unstuck-protocol' },
   { dir: 'core', name: '@velmlabs/unstuck-core' },

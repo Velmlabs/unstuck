@@ -107,6 +107,24 @@ importers:
         specifier: ^25.0.1
         version: 25.0.1
 
+  examples/browser-playwright-ts:
+    dependencies:
+      '@velmlabs/unstuck':
+        specifier: workspace:*
+        version: link:../../sdk-ts
+      playwright:
+        specifier: 1.63.0
+        version: 1.63.0
+
+  examples/browser-puppeteer:
+    dependencies:
+      '@velmlabs/unstuck':
+        specifier: workspace:*
+        version: link:../../sdk-ts
+      puppeteer:
+        specifier: 25.17.0
+        version: 25.17.0(yauzl@2.10.0)
+
   examples/cdp:
     dependencies:
       '@velmlabs/unstuck':

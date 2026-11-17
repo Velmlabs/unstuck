@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "unstuck": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@velmlabs/unstuck-engine",
+        "--mcp",
+        "--browser"
+      ]
+    }
+  }
+}

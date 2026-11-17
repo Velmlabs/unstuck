@@ -1,0 +1,7 @@
+# ~/.codex/config.toml: Unstuck Browser for the Codex CLI, the ChatGPT desktop app and the Codex IDE extension.
+# Unstuck starts its own headless Chrome on the first browsing call (Chrome or Chromium must be installed).
+[mcp_servers.unstuck]
+command = "npx"
+args = ["-y", "@velmlabs/unstuck-engine", "--mcp", "--browser"]
+startup_timeout_sec = 60 # the first start downloads the package (default 10)
+tool_timeout_sec = 900   # a person may take minutes on a check (default 60)

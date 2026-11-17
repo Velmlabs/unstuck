@@ -154,10 +154,56 @@ curl -fsSL https://unstuck.sh/skills/unstuck/SKILL.md -o ~/.claude/skills/unstuc
 
 Set `UNSTUCK_API_KEY` (from [your dashboard](https://unstuck.sh/dashboard/keys)) for links that open on any phone and for phone alerts. Full guide: [unstuck.sh/docs/skill](https://unstuck.sh/docs/skill/).
 
+## Unstuck Browser: rescue built into your agent's browser
+
+Wrap your agent's page once. From then on, a navigation or click that lands on a CAPTCHA or a "verify you are human"
+check (Cloudflare, Turnstile, reCAPTCHA, hCaptcha) brings a person in through a link, and the agent's own call
+returns once they're past it. No other code changes.
+
+```ts
+const unstuck = new Unstuck();
+const page = unstuck.wrap(await browser.newPage()); // Playwright or Puppeteer
+await page.goto('https://shop.example/'); // a check here: a person solves it, then goto returns
+```
+
+```python
+page = unstuck.wrap(await browser.new_page())  # async Playwright
+await page.goto("https://shop.example/")
+```
+
+A check a person couldn't get past throws `UnstuckRescueError` with its `status` (`timed_out`, `still_blocked`,
+`rescue_limited`…), or pass `onRescueFail: 'return'` and read `page.unstuck.lastRescue`. `page.unstuck.askHuman(reason)`
+brings a person in for a login or a 2FA code. For browser-use, `UnstuckTools` adds `check_page` and `ask_human`.
+
+**Chat agents, with Unstuck's own browser.** The MCP server can start a headless Chrome of its own:
+
+```bash
+claude mcp add unstuck -- npx -y @velmlabs/unstuck-engine --mcp --browser
+```
+
+The agent gets `fetch_page` (a page's readable content, as markdown), `open`, `snapshot`, `click`, `type` and the
+other page tools, and `ask_human`. A quick check is solved inside the call. A longer one returns the link for the agent
+to show you, and `resume_after_human` finishes the call. Configs for Claude Desktop and Codex:
+[`examples/mcp-browser`](examples/mcp-browser).
+
+- **Session memory.** With `remember: true` (on by default in the MCP server), the cookies a person's rescue earned are
+  kept in `~/.unstuck/profiles/<profile>/sites.json` (readable only by you), so the next visit goes straight through.
+  `forgetSite(domain)` / `forget_site` removes a site.
+- **Rate limit.** At most 10 person-checks an hour per profile (`maxRescuesPerHour`); past that a check ends as
+  `rescue_limited` without bothering anyone.
+- **Cookies for other tools.** `getSession(domain)` / `include_session: true` hands over a site's cookies and user agent
+  for curl or an HTTP client. That's best effort: some sites tie a clearance to the browser, so fetching through the
+  browser (`fetch_page`) is the reliable path.
+- **Obscura** has limited support: it doesn't draw CAPTCHA widgets, so a challenge there ends at once with
+  `browser_cannot_render_captcha`. Logins and 2FA work.
+
+A person solves every check; the site's terms still apply. Full guide: [unstuck.sh/docs/browser](https://unstuck.sh/docs/browser/).
+
 ## Works with
 
 | Stack | Guide | Example |
 |---|---|---|
+| Unstuck Browser: `wrap(page)` for Playwright, Puppeteer, browser-use; MCP with its own browser (`--browser`) | [unstuck.sh/docs/browser](https://unstuck.sh/docs/browser/) | [`examples/browser-playwright-ts`](examples/browser-playwright-ts), [`examples/browser-playwright-py`](examples/browser-playwright-py), [`examples/browser-puppeteer`](examples/browser-puppeteer), [`examples/mcp-browser`](examples/mcp-browser) |
 | MCP: Claude Code, Claude Desktop, Cursor, Playwright MCP | [unstuck.sh/docs/mcp](https://unstuck.sh/docs/mcp) | [`examples/mcp`](examples/mcp) |
 | AI agents: Codex, ChatGPT desktop, VS Code, Gemini CLI, OpenCode, Goose, pi and more | [unstuck.sh/docs/agents](https://unstuck.sh/docs/agents/) | [`examples/mcp`](examples/mcp) |
 | Agent skill: Claude Code plugin, or any agent that reads skills | [unstuck.sh/docs/skill](https://unstuck.sh/docs/skill/) | [`plugins/unstuck`](plugins/unstuck) |

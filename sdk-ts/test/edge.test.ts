@@ -38,7 +38,7 @@ describe('edge entry', () => {
         .flatMap((m) => m[1]!.split(',').map((n) => n.trim()))
         .sort();
     expect(typeNames('edge.ts')).toEqual(typeNames('index.ts'));
-    expect(typeNames('edge.ts')).toEqual(['PageGuard', 'RescueEvent', 'TakeoverLink', 'TakeoverOptions', 'TakeoverResult', 'TakeoverStatus', 'UnstuckOptions', 'WrapOptions', 'Wrapped']);
+    expect(typeNames('edge.ts')).toEqual(['HumanCheck', 'PageGuard', 'RescueEvent', 'RescueStatus', 'SessionStore', 'SiteRecord', 'SiteSession', 'StoredCookie', 'TakeoverLink', 'TakeoverOptions', 'TakeoverResult', 'TakeoverStatus', 'UnstuckOptions', 'WrapOptions', 'Wrapped']);
   });
 
   it('validates options in the constructor', () => {
