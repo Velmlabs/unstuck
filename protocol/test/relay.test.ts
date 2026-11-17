@@ -70,3 +70,12 @@ describe('agent close codes (security finding 5)', () => {
     expect(parseAgentToRelay(JSON.stringify({ t: 'close', c: 1, code }))).toBeNull();
   });
 });
+
+describe('human bridge relay frames', () => {
+  it('hello may carry a mode; quick_answer is a relay-to-agent frame', () => {
+    expect(parseAgentToRelay('{"t":"hello","expiresAt":1,"secret":"s","mode":"question"}')).toMatchObject({ mode: 'question' });
+    expect(parseAgentToRelay('{"t":"hello","expiresAt":1,"secret":"s","mode":"other"}')).toBeNull();
+    expect(parseRelayToAgent('{"t":"quick_answer","choice":0}')).toEqual({ t: 'quick_answer', choice: 0 });
+    expect(parseRelayToAgent('{"t":"quick_answer","choice":9}')).toBeNull();
+  });
+});

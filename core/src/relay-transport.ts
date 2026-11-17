@@ -163,7 +163,9 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
           resolve();
         } else if (m.t === 'ping') ws.send('{"t":"pong"}');
         else if (m.t === 'close') closeConn(s, m.c);
-        else {
+        else if (m.t === 'quick_answer') {
+          // Not handled yet: never treated as a new viewer connection.
+        } else {
           const conn: Conn = { messages: [], closes: [], closed: false };
           s.conns.set(m.c, conn);
           const vc = viewerConnection(s, ws, m.c, conn);

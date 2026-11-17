@@ -1,7 +1,7 @@
 // Unstuck Browser: the data shared by core, the engine and the SDKs when a wrapped page meets a human check.
 import type { TakeoverResult } from './result';
 
-export type CheckKind = 'challenge' | 'login' | '2fa';
+export type CheckKind = 'challenge' | 'approval' | 'login' | '2fa';
 export type CheckVendor = 'cloudflare' | 'recaptcha' | 'hcaptcha' | 'generic';
 
 /** A human check found on a page (`kind: 'ask'` when the agent asked for a person itself). */
@@ -44,4 +44,21 @@ export interface SiteSession {
   userAgent: string;
   cookies: StoredCookie[];
   cookieHeader: string;
+}
+
+/** The kind an alert (push, inbox card) carries. */
+export type AlertKind = 'challenge' | 'approval' | 'login' | 'question' | 'other';
+
+/** challenge, approval and login keep their name, 2fa counts as login, and anything else (`ask`) is other. */
+export function alertKindOf(kind: HumanCheck['kind']): AlertKind {
+  switch (kind) {
+    case 'challenge':
+    case 'approval':
+    case 'login':
+      return kind;
+    case '2fa':
+      return 'login';
+    default:
+      return 'other';
+  }
 }

@@ -84,6 +84,18 @@ describe('takeover session', () => {
     expect(v.closed).toBeNull();
   });
 
+  it('treats approved, switch_control and answer as bad_message in a control session', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'approved' });
+    v.push({ t: 'switch_control' });
+    v.push({ t: 'answer', choice: 0 });
+    await settle();
+    expect(v.json().slice(1)).toEqual(Array(3).fill({ t: 'error', code: 'bad_message', message: expect.any(String) }));
+    expect(v.closed).toBeNull();
+  });
+
   it('Review Focus 2: a second viewer with the same token is rejected; the holder is unaffected', async () => {
     const t = setup();
     await settle();

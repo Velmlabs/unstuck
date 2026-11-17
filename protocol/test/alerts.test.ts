@@ -96,3 +96,12 @@ describe('parseAlertFragment', () => {
     expect(parseAlertFragment('#x=dev_1.')).toBeNull();
   });
 });
+
+describe('alert payload mode and question', () => {
+  it('round-trips mode and question', async () => {
+    const kp = await newDeviceKeyPair();
+    const pub = await exportDevicePublicKey(kp.publicKey);
+    const blob = await sealAlert(pub, 'dev', 'sess', { t: 'ask', k: 'key', reason: 'r', site: 's', expiresAt: 1, mode: 'question', question: 'Which?' });
+    expect(await openAlert(kp.privateKey, 'dev', 'sess', blob)).toMatchObject({ mode: 'question', question: 'Which?' });
+  });
+});

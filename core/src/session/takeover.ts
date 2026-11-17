@@ -101,6 +101,7 @@ export interface RunningTakeover extends TakeoverControl {
 
 const FINAL_EVENT: Record<TakeoverStatus, SessionEvent> = {
   resolved: 'done',
+  answered: 'done',
   cancelled: 'cancel',
   timed_out: 'timeout',
   failed: 'error',
@@ -494,7 +495,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   function handleInput(conn: ViewerConnection, raw: string | Uint8Array): void {
     const msg = typeof raw === 'string' ? parseViewerMessage(raw) : null;
-    if (!msg || msg.t === 'hello') return reject(conn, 'bad_message', false);
+    // approved, switch_control and answer belong to approval and question sessions, which this session isn't.
+    if (!msg || msg.t === 'hello' || msg.t === 'approved' || msg.t === 'switch_control' || msg.t === 'answer') return reject(conn, 'bad_message', false);
     switch (msg.t) {
       case 'ping':
         return sendJson(conn, { t: 'pong' });

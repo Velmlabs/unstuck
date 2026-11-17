@@ -85,7 +85,7 @@ describe('protocol minor 1', () => {
   it('keeps major 1, adds minor 1 and the guard method names', async () => {
     const t = await import('../src/rpc-types');
     expect(t.PROTOCOL_VERSION).toBe(1);
-    expect(t.PROTOCOL_MINOR).toBe(1);
+    expect(t.PROTOCOL_MINOR).toBe(2);
     expect(t.Methods).toMatchObject({
       guardOpen: 'guard.open',
       guardBefore: 'guard.before',

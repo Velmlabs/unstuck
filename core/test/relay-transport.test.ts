@@ -184,6 +184,15 @@ describe('createRelayTransport', () => {
     expect(closed).toBe(1);
   });
 
+  it('ignores a quick_answer frame: it is never treated as a new viewer connection', async () => {
+    const { ws } = await published();
+    ws.text({ t: 'quick_answer', choice: 1 });
+    await new Promise((r) => realSetTimeout(r, 0));
+    ws.text({ t: 'ping' });
+    expect(ws.json()).toContainEqual({ t: 'pong' });
+    expect(ws.readyState).toBe(1);
+  });
+
   it('answers ping with pong; unpublish sends end and closes', async () => {
     const { t, ws } = await published();
     ws.text({ t: 'ping' });

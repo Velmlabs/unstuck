@@ -142,11 +142,11 @@ describe('runStdioHost', () => {
     await expect(h.sdk.request(Methods.hello, { sdk: 'ts', sdkVersion: '0', protocolVersion: PROTOCOL_VERSION })).resolves.toEqual({
       engineVersion: '9.9.9',
       protocolVersion: 1,
-      protocolMinor: 1,
+      protocolMinor: 2,
       capabilities: ['guard', 'paintCheck'],
     });
     // A newer SDK with a higher minor is still served.
-    await expect(h.sdk.request(Methods.hello, { sdk: 'py', sdkVersion: '0', protocolVersion: PROTOCOL_VERSION, protocolMinor: 7 })).resolves.toMatchObject({ protocolMinor: 1 });
+    await expect(h.sdk.request(Methods.hello, { sdk: 'py', sdkVersion: '0', protocolVersion: PROTOCOL_VERSION, protocolMinor: 7 })).resolves.toMatchObject({ protocolMinor: 2 });
     h.input.end();
     await h.done;
   });

@@ -1,6 +1,7 @@
 // Sealing of takeover links to a paired phone (notifications). Web Crypto only.
 // Ephemeral ECDH P-256 -> HKDF-SHA-256 -> AES-256-GCM. Blob = base64url(65-byte ephemeral public key | 12-byte IV | ciphertext + tag).
 import { b64urlDecode, b64urlEncode } from './e2e';
+import type { SessionMode } from './viewer';
 
 export interface AlertPayload {
   t: string;
@@ -8,6 +9,9 @@ export interface AlertPayload {
   reason: string;
   site: string;
   expiresAt: number;
+  mode?: SessionMode;
+  /** The question, for the inbox (never sent for a private question's answer). */
+  question?: string;
 }
 
 const PUB_BYTES = 65;

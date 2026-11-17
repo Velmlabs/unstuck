@@ -17,18 +17,19 @@ export interface RpcNotification {
   params?: unknown;
 }
 
-import type { CheckKind } from './guard';
+import type { AlertKind, CheckKind } from './guard';
 
 export const PROTOCOL_VERSION = 1;
 /** Additions within major 1. An engine that sends no minor is minor 0 and has no capabilities. */
-export const PROTOCOL_MINOR = 1;
-export type EngineCapability = 'guard' | 'paintCheck';
+export const PROTOCOL_MINOR = 2;
+export type EngineCapability = 'guard' | 'paintCheck' | 'ask';
 
 /** Method names on the SDK <-> engine JSON-lines channel. */
 export const Methods = {
   // SDK -> engine requests
   hello: 'engine.hello',
   takeover: 'takeover',
+  ask: 'ask',
   shutdown: 'shutdown',
   guardOpen: 'guard.open',
   guardBefore: 'guard.before',
@@ -54,6 +55,8 @@ export const Methods = {
   pagePopup: 'page.popup',
   // engine -> SDK notifications
   takeoverLink: 'takeover.link',
+  /** Like takeover.link, for an ask. */
+  askLink: 'ask.link',
   /** A guard's rescue started (active: true) or ended; the SDK follows popups only while one is active. */
   guardRescue: 'guard.rescue',
 } as const;
@@ -84,6 +87,20 @@ export interface TakeoverParams {
    * the takeover with `alert_failed` when Unstuck Cloud can't accept the link for at least one paired phone; without
    * Unstuck Cloud the engine answers the request with error code `config_error`.
    */
+  alerts?: boolean | 'required';
+  /** `approval`: the person only confirms a sign-in on their own device; no remote control. Default `control`. */
+  mode?: 'control' | 'approval';
+  /** The kind the alert carries; default `other`. */
+  kind?: AlertKind;
+}
+export interface AskParams {
+  question: string;
+  choices?: string[];
+  allowText?: boolean;
+  /** Keep the question and answer from Unstuck Cloud (default true). */
+  private?: boolean;
+  details?: string;
+  timeoutS?: number;
   alerts?: boolean | 'required';
 }
 export interface CdpSendParams {
@@ -116,6 +133,14 @@ export interface TakeoverLinkParams {
   expiresAt: number;
   /** The 6-digit code, when the takeover requires one. Never part of the URL. */
   code?: string;
+  kind?: AlertKind;
+}
+export interface AskLinkParams {
+  sessionId: string;
+  url: string;
+  reason: string;
+  expiresAt: number;
+  code?: string;
 }
 
 export interface GuardOpenParams {
@@ -130,6 +155,7 @@ export interface GuardOpenParams {
   allowedSites?: string[];
   requireCode?: boolean;
   alerts?: boolean | 'required';
+  approvalTimeoutS?: number;
 }
 export interface GuardOpenResult {
   guardId: string;

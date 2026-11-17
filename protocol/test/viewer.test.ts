@@ -163,3 +163,24 @@ describe('frame credit', () => {
     expect(parseViewerMessage(new TextDecoder().decode(p))).toEqual({ t: 'ack', seq: 9 });
   });
 });
+
+describe('human bridge viewer messages', () => {
+  it('parses approved, switch_control and answer', () => {
+    expect(parseViewerMessage('{"t":"approved"}')).toEqual({ t: 'approved' });
+    expect(parseViewerMessage('{"t":"switch_control"}')).toEqual({ t: 'switch_control' });
+    expect(parseViewerMessage('{"t":"answer","choice":2}')).toEqual({ t: 'answer', choice: 2 });
+    expect(parseViewerMessage('{"t":"answer","text":"later"}')).toEqual({ t: 'answer', text: 'later' });
+    expect(parseViewerMessage('{"t":"answer","choice":6}')).toBeNull();
+    expect(parseViewerMessage(JSON.stringify({ t: 'answer', text: 'x'.repeat(501) }))).toBeNull();
+    expect(parseViewerMessage('{"t":"answer","choice":1,"extra":1}')).toBeNull();
+  });
+
+  it('accepts a mode message and the answered state, rejects bad modes', () => {
+    const mode = { t: 'mode', mode: 'question', reason: 'r', site: 's', agentName: 'a', question: { text: 'q?', choices: ['a', 'b'], allowText: false, details: 'd' } };
+    expect(Value.Check(EngineToViewerSchema, mode)).toBe(true);
+    expect(Value.Check(EngineToViewerSchema, { t: 'mode', mode: 'approval', reason: 'r', site: 's' })).toBe(true);
+    expect(Value.Check(EngineToViewerSchema, { t: 'mode', mode: 'other', reason: 'r', site: 's' })).toBe(false);
+    expect(Value.Check(EngineToViewerSchema, { t: 'state', status: 'answered', answer: { choice: 1, label: 'b', text: 't' } })).toBe(true);
+    expect(Value.Check(EngineToViewerSchema, { t: 'state', status: 'answered', answer: { bogus: 1 } })).toBe(false);
+  });
+});

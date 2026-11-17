@@ -1,5 +1,6 @@
 // Relay wire protocol (relay spec §5.2–§5.5): agent socket control messages and envelopes.
 import { Type } from '@sinclair/typebox';
+import type { SessionMode } from './viewer';
 import { Value } from '@sinclair/typebox/value';
 
 export const RELAY_SUBPROTOCOL = 'unstuck-relay.1';
@@ -39,9 +40,9 @@ export const RELAY_CLOSE = {
 } as const;
 
 /** `registered` confirms a hello (first registration or a reconnect); only then is the session live. */
-export type RelayToAgent = { t: 'open'; c: number } | { t: 'close'; c: number } | { t: 'ping' } | { t: 'registered' };
+export type RelayToAgent = { t: 'open'; c: number } | { t: 'close'; c: number } | { t: 'ping' } | { t: 'registered' } | { t: 'quick_answer'; choice: number };
 export type AgentToRelay =
-  | { t: 'hello'; expiresAt: number; secret: string }
+  | { t: 'hello'; expiresAt: number; secret: string; mode?: SessionMode }
   | { t: 'close'; c: number; code: number }
   | { t: 'pong' }
   | { t: 'end' }
@@ -63,9 +64,18 @@ const RelayToAgentSchema = Type.Union([
   Type.Object({ t: Type.Literal('close'), c: C }, strict),
   Type.Object({ t: Type.Literal('ping') }, strict),
   Type.Object({ t: Type.Literal('registered') }, strict),
+  Type.Object({ t: Type.Literal('quick_answer'), choice: Type.Integer({ minimum: 0, maximum: 5 }) }, strict),
 ]);
 const AgentToRelaySchema = Type.Union([
-  Type.Object({ t: Type.Literal('hello'), expiresAt: Type.Number(), secret: Type.String({ minLength: 1, maxLength: 128 }) }, strict),
+  Type.Object(
+    {
+      t: Type.Literal('hello'),
+      expiresAt: Type.Number(),
+      secret: Type.String({ minLength: 1, maxLength: 128 }),
+      mode: Type.Optional(Type.Union([Type.Literal('control'), Type.Literal('approval'), Type.Literal('question')])),
+    },
+    strict,
+  ),
   Type.Object({ t: Type.Literal('close'), c: C, code: CloseCode }, strict),
   Type.Object({ t: Type.Literal('pong') }, strict),
   Type.Object({ t: Type.Literal('end') }, strict),

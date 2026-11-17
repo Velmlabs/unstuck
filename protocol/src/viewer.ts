@@ -1,10 +1,35 @@
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
+import type { AskAnswer } from './result';
 
 export const SessionStatusSchema = Type.Union(
-  ['created', 'notifying', 'waiting', 'active', 'resolved', 'timed_out', 'cancelled', 'failed'].map((s) => Type.Literal(s)),
+  ['created', 'notifying', 'waiting', 'active', 'resolved', 'answered', 'timed_out', 'cancelled', 'failed'].map((s) => Type.Literal(s)),
 );
-export type SessionStatus = 'created' | 'notifying' | 'waiting' | 'active' | 'resolved' | 'timed_out' | 'cancelled' | 'failed';
+export type SessionStatus = 'created' | 'notifying' | 'waiting' | 'active' | 'resolved' | 'answered' | 'timed_out' | 'cancelled' | 'failed';
+
+/** control: the person drives the page; approval: confirms a sign-in on their own device; question: answers an ask(). */
+export type SessionMode = 'control' | 'approval' | 'question';
+export const SessionModeSchema = Type.Union([Type.Literal('control'), Type.Literal('approval'), Type.Literal('question')]);
+
+export interface QuestionView {
+  text: string;
+  choices?: string[];
+  allowText: boolean;
+  details?: string;
+}
+const QuestionViewSchema = Type.Object(
+  {
+    text: Type.String(),
+    choices: Type.Optional(Type.Array(Type.String(), { maxItems: 6 })),
+    allowText: Type.Boolean(),
+    details: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+const AskAnswerSchema = Type.Object(
+  { choice: Type.Optional(Type.Number()), label: Type.Optional(Type.String()), text: Type.Optional(Type.String()) },
+  { additionalProperties: false },
+);
 
 const Num = Type.Number();
 const Lit = <T extends string>(v: T) => Type.Literal(v);
@@ -49,6 +74,15 @@ export const ViewerToEngineSchema = Type.Union([
   Type.Object({ t: Lit('done') }, { additionalProperties: false }),
   Type.Object({ t: Lit('cant_solve'), reason: Type.Optional(Type.String({ maxLength: 200 })) }, { additionalProperties: false }),
   Type.Object({ t: Lit('ping') }, { additionalProperties: false }),
+  /** Approval mode: "I've approved it". */
+  Type.Object({ t: Lit('approved') }, { additionalProperties: false }),
+  /** Approval mode: "Open the browser instead". */
+  Type.Object({ t: Lit('switch_control') }, { additionalProperties: false }),
+  /** Question mode: a choice (0-5) and/or typed text. */
+  Type.Object(
+    { t: Lit('answer'), choice: Type.Optional(Type.Integer({ minimum: 0, maximum: 5 })), text: Type.Optional(Type.String({ maxLength: 500 })) },
+    { additionalProperties: false },
+  ),
   /**
    * Frame credit opt-in, sent only to an engine whose ready says `credit: 1` (older engines refuse unknown messages):
    * from now on the engine sends type-2 frames and keeps at most a few (CREDIT_MAX_IN_FLIGHT in core) unacknowledged.
@@ -81,18 +115,28 @@ export const EngineToViewerSchema = Type.Union([
     vn: Type.Optional(Type.String()),
     credit: Type.Optional(Type.Literal(1)),
   }),
-  Type.Object({ t: Lit('state'), status: SessionStatusSchema }),
+  Type.Object({ t: Lit('state'), status: SessionStatusSchema, answer: Type.Optional(AskAnswerSchema) }),
   Type.Object({ t: Lit('error'), code: Type.Union(ViewerErrorCodes.map((c) => Lit(c))), message: Type.String() }),
   Type.Object({ t: Lit('pong') }),
+  Type.Object({
+    t: Lit('mode'),
+    mode: SessionModeSchema,
+    reason: Type.String(),
+    site: Type.String(),
+    agentName: Type.Optional(Type.String()),
+    question: Type.Optional(QuestionViewSchema),
+  }),
   Type.Object({ t: Lit('fields'), fields: Type.Array(FieldSchema, { maxItems: 30 }) }),
   Type.Object({ t: Lit('focus'), kind: Type.Union([FieldKindSchema, Type.Null()]), field: Type.Optional(FieldSchema) }),
 ]);
 export type EngineToViewer =
   /** `credit: 1`: this engine paces frames by the viewer's acks once the viewer opts in with `{ t: 'credit', v: 1 }`. */
   | { t: 'ready'; reason: string; site: string; expiresAt: number; resumeKey: string; vn?: string; credit?: 1 }
-  | { t: 'state'; status: SessionStatus }
+  | { t: 'state'; status: SessionStatus; answer?: AskAnswer }
   | { t: 'error'; code: ViewerErrorCode; message: string }
   | { t: 'pong' }
+  /** Sent only for approval and question sessions (older viewers never see it). */
+  | { t: 'mode'; mode: SessionMode; reason: string; site: string; agentName?: string; question?: QuestionView }
   | { t: 'fields'; fields: Field[] }
   /** `field`: where the focused field is (engine 0.1.3+), so the viewer can outline it; never its value. */
   | { t: 'focus'; kind: FieldKind | null; field?: Field };
