@@ -14,6 +14,7 @@ import { CHROME_NOT_FOUND } from '../src/browser/launcher';
 import { startChromium, type DebugChromium } from './chromium';
 
 const INTERSTITIAL = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../core/test/fixtures/human-checks/cloudflare-interstitial.html'), 'utf8');
+const FORM = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'actions', 'form.html'), 'utf8');
 const ARTICLE = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'extract', 'article.html'), 'utf8');
 // The challenge reloads itself once the person has solved it (as Cloudflare's does).
 const CHALLENGE = INTERSTITIAL.replace('</body>', "<script>setInterval(() => fetch('/cf-status').then((r) => r.text()).then((t) => t === 'ok' && location.reload()), 150);</script></body>");
@@ -29,6 +30,10 @@ beforeAll(async () => {
     const p = (req.url ?? '').split('?')[0]!;
     hits.set(p, (hits.get(p) ?? 0) + 1);
     if (p === '/article') return void res.writeHead(200, { 'content-type': 'text/html' }).end(ARTICLE);
+    if (p === '/done') return void res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><title>Done</title><p>Thanks</p>');
+    if (p === '/links') return void res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><title>Links</title><a href="/cf">Checkout</a>');
+    if (p === '/form') return void res.writeHead(200, { 'content-type': 'text/html' }).end(FORM);
+    if (p === '/login') return void res.writeHead(200, { 'content-type': 'text/html' }).end("<!doctype html><title>Login</title><label>Password <input type=password id=pw></label><script>document.getElementById('pw').value = 'hunter2';</script>");
     if (p === '/doc.pdf') return void res.writeHead(200, { 'content-type': 'application/pdf' }).end('%PDF-1.4\n%%EOF\n');
     if (p === '/data.json') return void res.writeHead(200, { 'content-type': 'application/json' }).end('{"ok":true}');
     if (p === '/cf-status') return void res.writeHead(200, { 'content-type': 'text/plain' }).end(solved ? 'ok' : 'no');
@@ -57,7 +62,7 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
-async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: number; env?: Record<string, string>; noChrome?: boolean } = {}) {
+async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: number; env?: Record<string, string>; noChrome?: boolean; maxRescuesPerHour?: number } = {}) {
   const transport = new FakeTransport();
   let err = '';
   const srv = createMcpServer({
@@ -75,7 +80,7 @@ async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: nu
     stderr: { write: (s: string) => (err += s) },
     ...(o.browse === false
       ? {}
-      : { browse: { source: o.noChrome ? { kind: 'chrome' } : { kind: 'cdp', url: chrome.wsUrl }, profile: 'mcp', remember: o.remember ?? false, maxRescuesPerHour: 10, home, inToolWaitMs: o.inToolWaitMs ?? 1500 } }),
+      : { browse: { source: o.noChrome ? { kind: 'chrome' } : { kind: 'cdp', url: chrome.wsUrl }, profile: 'mcp', remember: o.remember ?? false, maxRescuesPerHour: o.maxRescuesPerHour ?? 10, home, inToolWaitMs: o.inToolWaitMs ?? 1500 } }),
   });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: 'test', version: '0' });
@@ -104,10 +109,13 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     await m.close();
   });
 
-  it('with browse options it adds fetch_page, get_session, forget_site, remember_site and resume_after_human', async () => {
+  it('with browse options it adds fetch_page, the session tools, resume_after_human and the interaction tools', async () => {
     const m = await open();
     const tools = (await m.client.listTools()).tools;
-    expect(BROWSE_TOOL_NAMES).toEqual(['fetch_page', 'get_session', 'forget_site', 'remember_site', 'resume_after_human']);
+    expect(BROWSE_TOOL_NAMES).toEqual([
+      'fetch_page', 'get_session', 'forget_site', 'remember_site', 'resume_after_human',
+      'open', 'snapshot', 'click', 'type', 'select', 'scroll', 'wait_for', 'screenshot', 'ask_human',
+    ]);
     expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES, ...BROWSE_TOOL_NAMES].sort());
     const fetchPage = tools.find((t) => t.name === 'fetch_page')!;
     expect(fetchPage.description).toMatch(/a person solves/i);
@@ -166,6 +174,7 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     expect(h.content[0]!.text).toContain(`Then call resume_after_human with takeover_id "${id}"; while it answers "waiting", call it again.`);
     expect((await m.call('fetch_page', { url: `${site}/article` })).structuredContent).toEqual({ error: 'human_takeover_active', takeover_id: id });
     expect((await m.call('get_session', { domain: '127.0.0.1' })).structuredContent).toEqual({ error: 'human_takeover_active', takeover_id: id });
+    expect((await m.call('screenshot')).structuredContent).toEqual({ error: 'human_takeover_active', takeover_id: id });
     expect((await m.call('resume_after_human', { takeover_id: id, max_wait_s: 1 })).structuredContent).toMatchObject({ status: 'waiting', takeover_id: id, joined: false });
     const person = m.person();
     const r = await m.call('resume_after_human', { takeover_id: id });
@@ -234,7 +243,7 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
 
   it("a missing Chrome is the tool's error text, for every browsing tool", async () => {
     const m = await open({ noChrome: true });
-    for (const [name, args] of [['fetch_page', { url: `${site}/article` }], ['get_session', { domain: 'x.example' }]] as const) {
+    for (const [name, args] of [['fetch_page', { url: `${site}/article` }], ['get_session', { domain: 'x.example' }], ['screenshot', {}]] as const) {
       const r = await m.call(name, args);
       expect(r.isError).toBe(true);
       expect(r.content[0]!.text).toBe(CHROME_NOT_FOUND);
@@ -265,4 +274,74 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     expect(r.structuredContent).toMatchObject({ status: 'cancelled', check: { vendor: 'cloudflare' } });
     await m.close();
   });
+
+  it('open returns a snapshot; click on a link onto /cf is rescued and returns the snapshot past it', async () => {
+    const m = await open({ inToolWaitMs: 8000 });
+    const o = await m.call('open', { url: `${site}/links` });
+    expect(o.structuredContent).toMatchObject({ url: `${site}/links`, title: 'Links' });
+    expect(o.structuredContent.snapshot).toMatch(/\[e1\] link "Checkout"/);
+    expect((await m.call('open', { url: 'file:///etc/hosts' })).content[0]!.text).toBe('open opens http and https URLs only');
+    const person = m.person();
+    const c = await m.call('click', { ref: 'e1' });
+    await person;
+    expect(c.structuredContent).toMatchObject({ rescued: true, title: 'Shop', url: `${site}/cf` });
+    expect(c.structuredContent.snapshot).toContain('heading "Shop"');
+    expect((await m.call('snapshot')).structuredContent.snapshot).toContain('Page: Shop');
+    await m.close();
+  });
+
+  it('ask_human runs a takeover on the browsing tab and returns a snapshot; it counts toward the hourly limit', async () => {
+    const m = await open({ inToolWaitMs: 8000, maxRescuesPerHour: 1 });
+    await m.call('open', { url: `${site}/links` });
+    const person = m.person();
+    const a = await m.call('ask_human', { reason: 'Log in with your account' });
+    await person;
+    expect(a.structuredContent).toMatchObject({ rescued: true, title: 'Links', snapshot: expect.stringContaining('link "Checkout"') });
+    expect(m.err()).toContain('Log in with your account');
+    const b = await m.call('ask_human', { reason: 'Again' });
+    expect(b.isError).toBe(true);
+    expect(b.structuredContent).toMatchObject({ status: 'rescue_limited', check: { kind: 'ask' } });
+    await m.close();
+  });
+
+  it('screenshot returns a PNG image', async () => {
+    const m = await open();
+    await m.call('open', { url: `${site}/links` });
+    const r = (await m.client.callTool({ name: 'screenshot', arguments: {} })) as { content: { type: string; data?: string; mimeType?: string }[] };
+    expect(r.content[0]).toMatchObject({ type: 'image', mimeType: 'image/png' });
+    expect(Buffer.from(r.content[0]!.data!, 'base64').subarray(1, 4).toString()).toBe('PNG');
+    await m.close();
+  });
+
+  it('the snapshot never contains a typed password, and type refuses the field', async () => {
+    const m = await open();
+    const o = await m.call('open', { url: `${site}/login` });
+    expect(o.structuredContent.snapshot).toMatch(/\[e1\] textbox "Password" value=<hidden>/);
+    expect(JSON.stringify(o)).not.toContain('hunter2');
+    const t = await m.call('type', { ref: 'e1', text: 'guess' });
+    expect(t.isError).toBe(true);
+    expect(t.content[0]!.text).toBe('e1 is a password field: call ask_human so the person types it');
+    await m.close();
+  });
+
+  it('type, select, scroll and wait_for on a form; stale refs and bad wait_for calls are errors', async () => {
+    const m = await open();
+    const o = await m.call('open', { url: `${site}/form` });
+    const ref = (re: RegExp) => /^\[(e\d+)\]/.exec(o.structuredContent.snapshot.split('\n').find((l: string) => re.test(l)))![1]!;
+    expect((await m.call('type', { ref: ref(/textbox "Name"/), text: 'Ana' })).structuredContent.snapshot).toContain('textbox "Name" value="Ana"');
+    expect((await m.call('select', { ref: ref(/combobox "Size"/), value: 'Large' })).structuredContent.title).toBe('size l');
+    expect((await m.call('select', { ref: ref(/combobox "Size"/), value: 'XXL' })).content[0]!.text).toMatch(/^no option "XXL" in e\d+$/);
+    expect((await m.call('scroll', { direction: 'bottom' })).structuredContent.snapshot).toContain('link "Elsewhere"');
+    expect((await m.call('wait_for', { text: 'Ready now', timeout_s: 5 })).structuredContent.snapshot).toContain('Ready now');
+    expect((await m.call('wait_for', { text: 'Never', timeout_s: 1 })).content[0]!.text).toBe('wait_for: "Never" did not appear within 1 s');
+    expect((await m.call('wait_for', { ref: ref(/button "Count"/), timeout_s: 1 })).isError).toBeFalsy();
+    expect((await m.call('wait_for', { timeout_s: 1 })).content[0]!.text).toBe('wait_for takes text or ref, not both and not neither');
+    const stale = ref(/button "Count"/);
+    const sent = await m.call('type', { ref: ref(/textbox "Name"/), text: 'Ana B', submit: true });
+    expect(sent.structuredContent.url).toContain('/done?name=Ana+B');
+    await m.call('open', { url: `${site}/links` });
+    expect((await m.call('click', { ref: stale })).content[0]!.text).toBe(`ref ${stale} is not on the page any more: take a new snapshot`);
+    await m.close();
+  });
 });
+

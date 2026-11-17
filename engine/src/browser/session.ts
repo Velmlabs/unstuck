@@ -16,6 +16,7 @@ import {
 import { connectCdp, type DirectCdp } from '../direct-cdp';
 import { findChrome, launchChrome, launchObscura, type LaunchedBrowser } from './launcher';
 import { probeCaptchaPaint } from './paint-check';
+import type { Snapshot } from './snapshot';
 
 export interface BrowseConfig {
   source: { kind: 'chrome' } | { kind: 'obscura'; path: string } | { kind: 'cdp'; url: string };
@@ -52,6 +53,8 @@ interface Live {
 export class BrowserSession {
   /** The sessionId of the rescue a person is working on, if any. */
   holder: string | null = null;
+  /** The last snapshot the agent got; its refs are what click/type/select act on. A main-frame navigation clears it. */
+  snapshot: Snapshot | null = null;
   readonly store: SessionStore;
   private starting: Promise<Live> | null = null;
   private live: Live | null = null;
@@ -106,6 +109,9 @@ export class BrowserSession {
     }
     try {
       const cdp = await connect(url, { createUrl: 'about:blank' });
+      cdp.on('Page.frameNavigated', (p: { frame?: { parentId?: string } }) => {
+        if (!p.frame?.parentId) this.snapshot = null;
+      });
       const canRenderCaptcha = onceRenderCheck(() =>
         probeCaptchaPaint(async (probeUrl) => {
           const tab = await connect(url, { createUrl: probeUrl });

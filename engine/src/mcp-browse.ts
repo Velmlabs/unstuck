@@ -7,6 +7,8 @@ import type { RescueOutcome, SiteSession, TakeoverResult } from '@velmlabs/unstu
 import { deleteCookies, readCookies, siteOf, type Guard, type LinkInfo, type TakeoverControl } from '@velmlabs/unstuck-core';
 import type { BrowserSession } from './browser/session';
 import { extractPage, type ContentFormat } from './browser/extract';
+import { takeSnapshot, type Snapshot } from './browser/snapshot';
+import { clickRef, RefError, screenshotViewport, scrollPage, selectRef, typeRef, waitForTarget } from './browser/actions';
 import type { DirectCdp } from './direct-cdp';
 import { DEFAULT_WAIT_S, linkLead, MAX_WAIT_S, START_TOOL, structured, text, WAIT_TOOL, within, type Out, type TwoStep, type TwoStepRegistry } from './mcp';
 
@@ -15,7 +17,8 @@ export const SESSION_TOOL = 'get_session';
 export const FORGET_TOOL = 'forget_site';
 export const REMEMBER_TOOL = 'remember_site';
 export const RESUME_TOOL = 'resume_after_human';
-export const BROWSE_TOOL_NAMES = [FETCH_TOOL, SESSION_TOOL, FORGET_TOOL, REMEMBER_TOOL, RESUME_TOOL] as const;
+export const INTERACTION_TOOLS = ['open', 'snapshot', 'click', 'type', 'select', 'scroll', 'wait_for', 'screenshot', 'ask_human'] as const;
+export const BROWSE_TOOL_NAMES = [FETCH_TOOL, SESSION_TOOL, FORGET_TOOL, REMEMBER_TOOL, RESUME_TOOL, ...INTERACTION_TOOLS] as const;
 
 const LOAD_TIMEOUT_MS = 30_000;
 const TERMS = "A person solves any human check (CAPTCHA, Cloudflare's \"verify you are human\"); never try to solve one yourself. The site's terms still apply.";
@@ -49,6 +52,42 @@ async function done(o: RescueOutcome | null, finish: () => Promise<Out>): Promis
     return text((e as Error).message, true);
   }
 }
+
+/**
+ * Navigates the tab and waits for its load (at most 30 s). The main document's HTTP status goes to `onStatus` until the
+ * returned stop() is called: the caller keeps listening through the guard's check, so the status of the page a person
+ * leaves behind (a challenge's own reload) is the one reported.
+ */
+async function navigate(cdp: DirectCdp, url: string, onStatus: (s: number) => void): Promise<() => void> {
+  let frameId = '';
+  const offResponse = cdp.on('Network.responseReceived', (p: { type?: string; frameId?: string; response?: { status?: number } }) => {
+    if (p.type === 'Document' && (!frameId || p.frameId === frameId) && p.response?.status) onStatus(p.response.status);
+  });
+  let loaded!: () => void;
+  const load = new Promise<void>((r) => (loaded = r));
+  const offLoad = cdp.on('Page.loadEventFired', () => loaded());
+  try {
+    const nav = await cdp.send<{ frameId: string; errorText?: string }>('Page.navigate', { url });
+    frameId = nav.frameId;
+    if (nav.errorText) throw new Error(`could not open ${url}: ${nav.errorText}`);
+    await within(load, LOAD_TIMEOUT_MS);
+    return offResponse;
+  } catch (e) {
+    offResponse();
+    throw e;
+  } finally {
+    offLoad();
+  }
+}
+
+const httpOnly = (url: string): boolean => {
+  try {
+    const p = new URL(url).protocol;
+    return p === 'http:' || p === 'https:';
+  } catch {
+    return false;
+  }
+};
 
 export function registerBrowseTools(
   server: McpServer,
@@ -115,13 +154,7 @@ export function registerBrowseTools(
       },
     },
     async ({ url, format, include_session }) => {
-      let parsed: URL | null = null;
-      try {
-        parsed = new URL(url);
-      } catch {
-        // not a URL
-      }
-      if (!parsed || (parsed.protocol !== 'http:' && parsed.protocol !== 'https:')) return text('fetch_page opens http and https URLs only', true);
+      if (!httpOnly(url)) return text('fetch_page opens http and https URLs only', true);
       let status = 0;
       let cdpRef: DirectCdp | null = null;
       let guardRef: Guard | null = null;
@@ -131,26 +164,11 @@ export function registerBrowseTools(
           guardRef = guard;
           const pre = await guard.before({ url });
           if (pre && pre.status !== 'resolved') return pre;
-          let frameId = '';
-          const offResponse = cdp.on('Network.responseReceived', (p: { type?: string; frameId?: string; response?: { status?: number } }) => {
-            if (p.type === 'Document' && (!frameId || p.frameId === frameId)) status = p.response?.status ?? status;
-          });
+          const stop = await navigate(cdp, url, (s) => (status = s));
           try {
-            let loaded!: () => void;
-            const load = new Promise<void>((r) => (loaded = r));
-            const offLoad = cdp.on('Page.loadEventFired', () => loaded());
-            const nav = await cdp.send<{ frameId: string; errorText?: string }>('Page.navigate', { url });
-            frameId = nav.frameId;
-            if (nav.errorText) {
-              offLoad();
-              throw new Error(`could not open ${url}: ${nav.errorText}`);
-            }
-            await within(load, LOAD_TIMEOUT_MS);
-            offLoad();
             return await guard.after({ requestedUrl: url });
           } finally {
-            // The status of the page the person left behind counts too (a challenge's own reload).
-            void Promise.resolve().then(() => setTimeout(offResponse, 0));
+            stop();
           }
         },
         async () => {
@@ -254,4 +272,148 @@ export function registerBrowseTools(
       return t.answer();
     },
   );
+
+  /** The page as the agent sees it now; its refs replace the last snapshot's. */
+  const snapshotOut = async (): Promise<Out> => {
+    const { cdp } = await session.tab();
+    const snap = await takeSnapshot(cdp);
+    session.snapshot = snap;
+    return { url: snap.url, title: snap.title, snapshot: snap.text };
+  };
+  /** The last snapshot, for a ref; none (or one a navigation cleared) means the ref is stale. */
+  const lastSnap = (ref: string): Snapshot => {
+    if (!session.snapshot) throw new RefError(ref);
+    return session.snapshot;
+  };
+  const refInput = { ref: z.string().min(1).describe('A ref from the last snapshot, e.g. "e3".') };
+  const ACT = `Returns the page's new snapshot. A human check the page shows brings a person in, as in ${FETCH_TOOL}. ${TERMS}`;
+
+  server.registerTool(
+    'open',
+    {
+      title: 'Open a page',
+      description: `Open an http or https URL in the browsing tab and return a snapshot: the page's headings, text and controls, each control with a ref (e1, e2…) for click, type and select. ${ACT}`,
+      inputSchema: { url: z.string().describe('The http or https URL to open.') },
+    },
+    async ({ url }) => {
+      if (!httpOnly(url)) return text('open opens http and https URLs only', true);
+      return guarded(
+        async ({ cdp, guard }) => {
+          const pre = await guard.before({ url });
+          if (pre && pre.status !== 'resolved') return pre;
+          (await navigate(cdp, url, () => {}))();
+          return guard.after({ requestedUrl: url });
+        },
+        snapshotOut,
+      );
+    },
+  );
+
+  server.registerTool(
+    'snapshot',
+    { title: 'Snapshot the page', description: `The browsing tab's current snapshot (refs for click, type and select). ${ACT}`, inputSchema: {} },
+    () => guarded(async () => null, snapshotOut),
+  );
+
+  server.registerTool(
+    'click',
+    { title: 'Click', description: `Click the element with this ref (a real mouse click). ${ACT}`, inputSchema: refInput },
+    ({ ref }) =>
+      guarded(async ({ cdp, guard }) => {
+        await clickRef(cdp, lastSnap(ref), ref);
+        return guard.after({ mayNavigate: true });
+      }, snapshotOut),
+  );
+
+  server.registerTool(
+    'type',
+    {
+      title: 'Type into a field',
+      description: `Replace the text of the field with this ref (submit: true presses Enter after). Password fields are refused: call ask_human so the person types it. ${ACT}`,
+      inputSchema: { ...refInput, text: z.string().describe('The text to type.'), submit: z.boolean().optional().describe('Press Enter after typing.') },
+    },
+    ({ ref, text: t, submit }) =>
+      guarded(async ({ cdp, guard }) => {
+        await typeRef(cdp, lastSnap(ref), ref, t, submit ?? false);
+        return guard.after({ mayNavigate: submit ?? false });
+      }, snapshotOut),
+  );
+
+  server.registerTool(
+    'select',
+    {
+      title: 'Choose an option',
+      description: `Choose an option of the select with this ref, by its value or its label. ${ACT}`,
+      inputSchema: { ...refInput, value: z.string().describe("The option's value or its label.") },
+    },
+    ({ ref, value }) =>
+      guarded(async ({ cdp, guard }) => {
+        await selectRef(cdp, lastSnap(ref), ref, value);
+        return guard.after();
+      }, snapshotOut),
+  );
+
+  server.registerTool(
+    'scroll',
+    {
+      title: 'Scroll',
+      description: 'Scroll the page (up or down by most of a screen, or to the top or bottom) and return the new snapshot.',
+      inputSchema: { direction: z.enum(['up', 'down', 'top', 'bottom']) },
+    },
+    ({ direction }) =>
+      guarded(async ({ cdp }) => {
+        await scrollPage(cdp, direction);
+        await new Promise((r) => setTimeout(r, 200));
+        return null;
+      }, snapshotOut),
+  );
+
+  server.registerTool(
+    'wait_for',
+    {
+      title: 'Wait for something on the page',
+      description: 'Wait until a text appears on the page, or the element with a ref is visible (timeout_s, default 10, at most 60), then return the snapshot. A timeout is an error.',
+      inputSchema: {
+        text: z.string().min(1).optional().describe('Text to wait for.'),
+        ref: z.string().min(1).optional().describe('A ref from the last snapshot to wait for.'),
+        timeout_s: z.number().int().min(1).max(60).optional().describe('Seconds to wait (default 10).'),
+      },
+    },
+    ({ text: t, ref, timeout_s }) => {
+      if ((t === undefined) === (ref === undefined)) return text('wait_for takes text or ref, not both and not neither', true);
+      const timeoutS = timeout_s ?? 10;
+      return guarded(async ({ cdp }) => {
+        const ok = await waitForTarget(cdp, { ...(t !== undefined ? { text: t } : {}), ...(ref !== undefined ? { ref, snap: lastSnap(ref) } : {}), timeoutS });
+        if (!ok) throw new Error(`wait_for: ${t !== undefined ? `"${t}"` : ref} did not appear within ${timeoutS} s`);
+        return null;
+      }, snapshotOut);
+    },
+  );
+
+  server.registerTool(
+    'screenshot',
+    { title: 'Screenshot', description: 'A PNG of what the browsing tab shows now.', inputSchema: {} },
+    async (): Promise<CallToolResult> => {
+      if (session.holder) return structured({ error: 'human_takeover_active', takeover_id: session.holder }, true);
+      try {
+        const { cdp } = await session.tab();
+        return { content: [{ type: 'image', data: await screenshotViewport(cdp), mimeType: 'image/png' }] };
+      } catch (e) {
+        return text((e as Error).message, true);
+      }
+    },
+  );
+
+  server.registerTool(
+    'ask_human',
+    {
+      title: 'Ask a person',
+      description:
+        'Bring in a person for something only they can do on this page (log in, a 2FA code, a payment confirmation). Returns the snapshot once they are done; ' +
+        `if it takes longer, status "human_needed" with a link to show them, then call ${RESUME_TOOL}. Counts toward the hourly limit.`,
+      inputSchema: { reason: z.string().min(1).describe('What the person should do, e.g. "Log in with your account".') },
+    },
+    ({ reason }) => guarded(({ guard }) => guard.askHuman(reason), snapshotOut),
+  );
+
 }

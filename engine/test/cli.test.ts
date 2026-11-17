@@ -198,7 +198,7 @@ describe('browse flags', () => {
   });
 
   it('main: --mcp --browser lists the browse tools and starts no browser; --tools takeover lists four', async () => {
-    for (const [argv, count] of [[['--mcp', '--browser'], 9], [['--mcp', '--tools', 'takeover'], 4]] as const) {
+    for (const [argv, count] of [[['--mcp', '--browser'], 18], [['--mcp', '--tools', 'takeover'], 4]] as const) {
       const x = io();
       const lines: any[] = [];
       readline.createInterface({ input: x.stdout }).on('line', (l) => lines.push(JSON.parse(l)));
@@ -213,7 +213,7 @@ describe('browse flags', () => {
       const names = lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name);
       expect(names).toHaveLength(count);
       expect(x.err()).toContain(`MCP server ready (tools: ${names.join(', ')})`);
-      if (count === 9) expect(names).toContain('fetch_page');
+      if (count === 18) expect(names).toEqual(expect.arrayContaining(['fetch_page', 'open', 'ask_human']));
       expect(x.err()).not.toMatch(/DevTools/);
     }
   });

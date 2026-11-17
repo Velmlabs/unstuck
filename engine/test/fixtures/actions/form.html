@@ -1,0 +1,17 @@
+<!doctype html>
+<html><head><title>Order</title></head><body>
+<h1>Order form</h1>
+<form id="f" action="/done" method="get">
+  <label>Name <input name="name" id="name"></label>
+  <label>Secret <input type="password" name="pw" id="pw"></label>
+  <label>Size <select name="size" id="size"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select></label>
+  <label><input type="checkbox" id="gift" name="gift"> Gift wrap</label>
+  <button type="submit" id="go">Send</button>
+  <button type="button" id="count" onclick="this.textContent = 'Clicked ' + (++window.clicks)">Count</button>
+</form>
+<script>window.clicks = 0; document.getElementById('size').addEventListener('change', (e) => (document.title = 'size ' + e.target.value));</script>
+<p id="late"></p>
+<script>setTimeout(() => (document.getElementById('late').textContent = 'Ready now'), 600);</script>
+<div style="height: 3000px">tall</div>
+<a href="/other">Elsewhere</a>
+</body></html>
