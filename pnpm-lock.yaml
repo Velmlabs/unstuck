@@ -75,6 +75,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.32.2
         version: 1.32.2(zod@4.6.7)
+      '@mozilla/readability':
+        specifier: 0.6.0
+        version: 0.6.0
       '@velmlabs/unstuck-core':
         specifier: workspace:*
         version: link:../core
@@ -97,6 +100,9 @@ importers:
       '@types/ws':
         specifier: ^8.18.2
         version: 8.18.2
+      jsdom:
+        specifier: ^25.0.1
+        version: 25.0.1
 
   examples/cdp:
     dependencies:
@@ -953,6 +959,10 @@ packages:
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
+
+  '@mozilla/readability@0.6.0':
+    resolution: {integrity: sha512-juG5VWh4qAivzTAeMzvY9xs9HY5rAcr2E4I7tiSSCokRFi7XIZCAu92ZkSTsIj1OPceCifL3cpfteP3pDT9/QQ==}
+    engines: {node: '>=14.0.0'}
 
   '@opentelemetry/api@1.9.1':
     resolution: {integrity: sha512-gLyJlPHPZYdAk1JENA9LeHejZe1Ti77/pTeFm/nMXmQH/HFZlcS/O2XJB+L8fkbrNSqhdtlvjBVjxwUYanNH5Q==}
@@ -3166,6 +3176,8 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@4.6.7)
     transitivePeerDependencies:
       - supports-color
+
+  '@mozilla/readability@0.6.0': {}
 
   '@opentelemetry/api@1.9.1': {}
 

@@ -8,12 +8,13 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "build": "pnpm --filter @velmlabs/unstuck-viewer build && node scripts/embed-viewer.mjs && tsc -p tsconfig.json --noEmit && node scripts/build-binary.mjs",
-    "test": "vitest run --coverage",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "build": "pnpm --filter @velmlabs/unstuck-viewer build && node scripts/embed-viewer.mjs && node scripts/embed-readability.mjs && tsc -p tsconfig.json --noEmit && node scripts/build-binary.mjs",
+    "test": "node scripts/embed-readability.mjs && vitest run --coverage",
+    "typecheck": "node scripts/embed-readability.mjs && tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
+    "@mozilla/readability": "0.6.0",
     "@velmlabs/unstuck-core": "workspace:*",
     "@velmlabs/unstuck-protocol": "workspace:*",
     "pngjs": "^7.0.0",
@@ -22,7 +23,8 @@
   },
   "devDependencies": {
     "@types/pngjs": "^6.0.5",
-    "@types/ws": "^8.18.2"
+    "@types/ws": "^8.18.2",
+    "jsdom": "^25.0.1"
   },
   "bin": {
     "unstuck-engine": "./dist/unstuck-engine"

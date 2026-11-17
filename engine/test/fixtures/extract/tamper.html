@@ -1,0 +1,10 @@
+<!doctype html>
+<html><head><title>Tamper</title></head><body>
+<script>
+  Element.prototype.querySelectorAll = function () { throw new Error('tampered'); };
+  Document.prototype.querySelectorAll = function () { throw new Error('tampered'); };
+  Object.defineProperty(HTMLElement.prototype, 'innerText', { get() { return 'TAMPERED'; } });
+  window.Readability = function () { throw new Error('tampered'); };
+</script>
+<h1>Real content</h1><p>This page tries to break the extractor from its own scripts.</p>
+</body></html>
