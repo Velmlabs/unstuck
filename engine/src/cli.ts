@@ -3,7 +3,7 @@ import { createEmbeddedTransport, type AssetMap } from './embedded';
 import { runStdioHost } from './stdio-host';
 import { JsonlFileEventLog, defaultLogPath } from './jsonl-log';
 import { VERSION } from './version';
-import { createMcpServer } from './mcp';
+import { createMcpServer, TOOL_NAMES } from './mcp';
 import { formatReport, runDoctor } from './doctor';
 import { buildTransport, cloudAlertsFor, selectTransport } from './transport-select';
 import { createCloudAlerter } from './cloud-alerts';
@@ -15,9 +15,12 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
        unstuck-engine doctor --cdp <url>
        unstuck-engine --version | --help
 
---mcp runs an MCP server (tool: request_human_takeover) on stdin/stdout.
-      The browser comes from the tool's cdp_url or UNSTUCK_CDP_URL; --open opens
-      each takeover link in this machine's browser.
+--mcp runs an MCP server on stdin/stdout. Tools: request_human_takeover (one
+      step: blocks until the human is done) and start_human_takeover,
+      wait_for_human_takeover, cancel_human_takeover (two steps: the agent gets
+      the link at once to show in the chat). The browser comes from the tool's
+      cdp_url or UNSTUCK_CDP_URL; --open opens each takeover link in this
+      machine's browser.
 doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
       in a tab of its own and prints whether Unstuck works fully with it.
 
@@ -108,7 +111,7 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
     const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open, alerter });
     const closed = new Promise<void>((r) => io.stdin.once('end', () => r()));
     await server.connect(new StdioServerTransport(io.stdin as Readable, io.stdout as Writable));
-    io.stderr.write('[unstuck] MCP server ready (tool: request_human_takeover)\n');
+    io.stderr.write(`[unstuck] MCP server ready (tools: ${TOOL_NAMES.join(', ')})\n`);
     await closed;
     await server.close();
     return 0;

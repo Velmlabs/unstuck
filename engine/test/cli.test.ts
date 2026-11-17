@@ -72,8 +72,8 @@ describe('main', () => {
     x.stdin.end();
     await expect(run).resolves.toBe(0);
     expect(lines.find((l) => l.id === 1).result.serverInfo).toMatchObject({ name: 'unstuck', version: VERSION });
-    expect(lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name)).toEqual(['request_human_takeover']);
-    expect(x.err()).toMatch(/MCP server ready/);
+    expect(lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name)).toEqual(['request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover', 'cancel_human_takeover']);
+    expect(x.err()).toMatch(/MCP server ready \(tools: request_human_takeover, start_human_takeover, wait_for_human_takeover, cancel_human_takeover\)/);
   });
 
   it('relay mode: the startup line names the relay and never the key', async () => {

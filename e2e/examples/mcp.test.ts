@@ -55,6 +55,39 @@ describe('MCP example', () => {
     }
   });
 
+  it('mcp: two steps: start_human_takeover returns the link at once; the human taps Start and Done; wait_for_human_takeover → resolved', async () => {
+    const port = await freePort();
+    const browser = await chromium.launch({ args: [`--remote-debugging-port=${port}`] });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    await page.goto(site.url + 'captcha');
+    const cfg = readJson('claude-desktop.json').mcpServers.unstuck;
+    const args = cfg.args.slice(2).filter((a: string) => a !== '--open');
+    const transport = new StdioClientTransport({ command: ENGINE, args, env: { ...process.env, ...cfg.env, UNSTUCK_CDP_URL: `http://127.0.0.1:${port}` }, stderr: 'pipe' });
+    transport.stderr!.on('data', () => {});
+    const client = new Client({ name: 'example-test', version: '0.0.0' });
+    await client.connect(transport);
+    try {
+      const names = (await client.listTools()).tools.map((t: { name: string }) => t.name);
+      expect(names).toEqual(expect.arrayContaining(['start_human_takeover', 'wait_for_human_takeover', 'cancel_human_takeover']));
+      const t0 = Date.now();
+      const started = await client.callTool({ name: 'start_human_takeover', arguments: { reason: 'Solve the CAPTCHA', timeout_s: 120 } });
+      expect(Date.now() - t0).toBeLessThan(30_000);
+      const { takeover_id, link } = started.structuredContent;
+      expect(started.content[0].text).toContain(link);
+      const waiting = await client.callTool({ name: 'wait_for_human_takeover', arguments: { takeover_id, max_wait_s: 1 } });
+      expect(waiting.structuredContent).toMatchObject({ status: 'waiting', joined: false });
+      await actAsHuman(link, 'done');
+      // Each wait call stays short (max_wait_s): call again until the takeover has ended.
+      let result;
+      for (let i = 0; i < 10 && (!result || result.structuredContent.status === 'waiting'); i++)
+        result = await client.callTool({ name: 'wait_for_human_takeover', arguments: { takeover_id, max_wait_s: 10 } });
+      expect(result.structuredContent).toMatchObject({ status: 'resolved', session_id: takeover_id });
+    } finally {
+      await client.close();
+      await browser.close();
+    }
+  });
+
   it('mcp: config files are valid and consistent', () => {
     expect(readJson('claude-desktop.json').mcpServers.unstuck).toEqual(UNSTUCK);
     expect(readJson('cursor.json').mcpServers.unstuck).toEqual(UNSTUCK);

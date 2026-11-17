@@ -85,13 +85,15 @@ Nothing else in your code changes. The whole quickstart, with every option: [uns
 
 ### Using Claude Code, Cursor or another AI agent?
 
-Give it a `request_human_takeover` tool. Start Chrome with a debugging port, then add Unstuck as an MCP server:
+Give it a `request_human_takeover` tool (or the two-step `start_human_takeover`, below). Start Chrome with a debugging port, then add Unstuck as an MCP server:
 
 ```bash
 claude mcp add unstuck -e UNSTUCK_CDP_URL=http://127.0.0.1:9222 -- npx -y @velmlabs/unstuck-engine --mcp --open
 ```
 
 Tell your agent: *"If you hit a CAPTCHA or a login, call request_human_takeover with the reason."* Setup for Claude Desktop and Cursor: [unstuck.sh/docs/mcp](https://unstuck.sh/docs/mcp/).
+
+**No phone alerts? Let the agent show you the link.** The server also has a two-step flow: `start_human_takeover` returns the link at once, the agent shows it in the chat, and `wait_for_human_takeover` picks up the result after you tap Done. Open the link yourself or forward it to whoever will solve the step (WhatsApp, Slack…): previews connect nothing until someone taps Start, the link works on one device, and it dies when the takeover ends. Share it only with that person. Tell your agent: *"If you hit a CAPTCHA or a login, call start_human_takeover and show me the link."* Without `UNSTUCK_API_KEY` (or your own relay) the link opens only on the agent's computer.
 
 ### Give your agent the Unstuck skill
 

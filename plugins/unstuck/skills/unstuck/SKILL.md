@@ -21,13 +21,18 @@ Don't call it for things you can do yourself (scrolling, closing a normal pop-up
 
 ## Choose the integration
 
-1. **MCP tool available** (`request_human_takeover`, from the `unstuck` MCP server): use it. Go to *MCP*.
+1. **MCP tools available** (`request_human_takeover` and `start_human_takeover`, from the `unstuck` MCP server): use them. Go to *MCP*.
 2. **You write the automation code** (TypeScript or Python with Playwright, Puppeteer, browser-use, Stagehand): use the SDK. Go to *Code*.
 3. **Neither is set up**: tell the user what Unstuck needs (one package install, and an API key only for links that work on any phone) and ask before installing anything.
 
 ## MCP
 
-Call `request_human_takeover` with:
+The `unstuck` MCP server has two ways to hand a step over:
+
+- **One step, `request_human_takeover`:** blocks until the person is done. Use it when the person gets the link without you: the server opens it on this computer (`--open`, the plugin's default) or sends it to their paired phones (Unstuck Cloud alerts). You never see the link.
+- **Two steps, `start_human_takeover` then `wait_for_human_takeover`:** use it when the person should get the link from you, in this chat: no phone alerts, the person isn't at the agent's computer, or they may forward it to someone else (WhatsApp, Slack…). If you're not sure the person will see a link any other way, use this.
+
+Both take the same arguments:
 
 | Argument | Required | Meaning |
 |---|---|---|
@@ -38,7 +43,22 @@ Call `request_human_takeover` with:
 | `allowed_sites` | no | Other sites the step needs, e.g. `["accounts.google.com"]` for "Sign in with Google" |
 | `alerts` | no | `false` to skip phone alerts for this call |
 
-The link is shown to the user before the tool returns. Wait for the result, then carry on.
+`request_human_takeover` returns the result (see *After the takeover*); carry on from there.
+
+### Two steps: show the link in the chat
+
+1. Call `start_human_takeover`. It returns at once with `takeover_id`, `link`, `expires_at` (and `code` when a 6-digit code is required, `alerted` when a paired phone also got it), plus a short message for you to relay.
+2. Show the person the link, exactly as given, and tell them what to do: open it (or forward it to the one person who'll solve it), tap **Start**, solve the step and tap **Done**. Without an API key or relay the link (`http://127.0.0.1:…`) opens only on the agent's computer, and the returned message says so. Opening the link or a chat app's preview connects nothing until someone taps Start; the link works on one device and stops working when the takeover ends.
+3. If there's a `code`, give it separately from the link (its own message), and tell them to send it another way if they forward the link.
+4. Call `wait_for_human_takeover` with the `takeover_id`. While it answers `{"status": "waiting"}`, call it again; `joined: false` means nobody has tapped Start yet, so you may remind the person. It returns the same result as `request_human_takeover` once the takeover ends.
+5. If the person says they won't do it, or you no longer need it, call `cancel_human_takeover` with the `takeover_id`: the link stops working at once.
+
+| Argument | Tool | Meaning |
+|---|---|---|
+| `takeover_id` | `wait_for_human_takeover`, `cancel_human_takeover` | The id `start_human_takeover` returned |
+| `max_wait_s` | `wait_for_human_takeover` | Seconds one call waits before answering `waiting`: 1 to 120, default 45. Keep it under your client's tool-call timeout (often 60 s) |
+
+The takeover keeps running between wait calls, and ends by its own `timeout_s` if you stop waiting. One takeover per tab at a time: a second start on the same tab is refused and names the running `takeover_id`. Closing the MCP connection ends every takeover it started.
 
 ## Code
 
@@ -109,7 +129,7 @@ Always re-check the page after `resolved`: the person may have landed somewhere 
 
 - **One takeover at a time**, and never more than one for the same blocker unless the user asks.
 - **Keep `reason` short and free of secrets.** It's shown on the person's phone; don't put passwords, codes or personal data in it.
-- **Don't share the link anywhere public.** It gives control of the browser to whoever opens it first. Chat-app link previews and email scanners are safe: the page connects only when a person taps Start.
+- **Share the link only with the person who'll solve it, never anywhere public.** It gives control of the browser tab to whoever opens it first, until the takeover ends. Chat-app link previews and email scanners are safe: the page connects only when a person taps Start.
 - **Limit the sites.** Only add `allowed_sites` the step really needs; the person can't leave those sites.
 - **Say what you're doing.** Tell the user you're handing the step to a human and why.
 

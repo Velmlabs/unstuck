@@ -31,14 +31,17 @@ describe('unstuck plugin', () => {
     for (const word of ['CAPTCHA', '2FA', 'human']) expect(description).toContain(word);
   });
 
-  it("documents exactly the MCP tool's arguments", () => {
-    const real = [...mcp.matchAll(/^\s{8}(\w+): z\b/gm)].map((m) => m[1]).sort();
+  it("documents exactly the MCP tools' arguments", () => {
+    const real = [...new Set([...mcp.matchAll(/^\s{2,8}(\w+): z\b/gm)].map((m) => m[1]))].sort();
     const table = skill.slice(skill.indexOf('## MCP'), skill.indexOf('## Code'));
     const documented = [...table.matchAll(/^\| `(\w+)` \|/gm)].map((m) => m[1]).sort();
     expect(real.length).toBeGreaterThan(3);
     expect(documented).toEqual(real);
-    expect(skill).toContain('`request_human_takeover`');
-    expect(mcp).toContain("'request_human_takeover'");
+    expect(real).toEqual(expect.arrayContaining(['reason', 'alerts', 'takeover_id', 'max_wait_s']));
+    for (const tool of ['request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover', 'cancel_human_takeover']) {
+      expect(skill).toContain(`\`${tool}\``);
+      expect(mcp).toContain(`'${tool}'`);
+    }
   });
 
   it('names the published packages and every result status', () => {
