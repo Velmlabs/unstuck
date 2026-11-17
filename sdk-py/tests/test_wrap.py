@@ -179,3 +179,25 @@ async def test_closing_the_page_closes_its_guard(wrapped):
             break
         await asyncio.sleep(0.05)
     assert engine.calls("guard.close") == [{"guardId": "g1"}]
+
+
+async def test_a_cancelled_first_call_does_not_break_the_page(wrapped):
+    page, engine = await wrapped(outcomes=[])
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(page.goto("https://shop.example/"), 0.001)  # cancelled while the engine starts
+    await page.goto("https://shop.example/")
+    assert await page.title() == "Home"
+
+
+async def test_guarded_locators_are_playwright_locators(wrapped):
+    from playwright.async_api import Locator, expect
+
+    page, engine = await wrapped(outcomes=[None, None, {"status": "resolved", "check": CF, "waitedS": 1}])
+    await page.goto("https://shop.example/")
+    loc = page.get_by_role("link", name="Checkout")
+    assert isinstance(loc, Locator) and isinstance(loc.first, Locator) and isinstance(loc.filter(has_text="Check"), Locator)
+    await expect(loc).to_be_visible()
+    await expect(page.locator("a")).to_have_count(1)
+    await page.locator("#q").fill("x")
+    await loc.first.click()
+    assert len(engine.calls("guard.after")) == 3 and page.unstuck.last_rescue.status == "resolved"

@@ -28,31 +28,47 @@ LOCATOR_ACTIONS = ("click", "dblclick", "tap", "fill", "press", "press_sequentia
 Run = Callable[..., Awaitable[Any]]
 
 
-def _raw(x: Any) -> Any:
-    return x._inner if isinstance(x, _GuardedLocator) else x
+_GUARDED_CLASSES: dict[type, type] = {}
 
 
-class _GuardedLocator:
-    """A locator whose actions are guarded (they may navigate) and whose chained locators are guarded too."""
+def _guarded_class(base: type) -> type:
+    """A subclass of the library's own Locator class: `isinstance(x, Locator)` (and so `expect(locator)`) still holds.
+    Actions run guarded; chained locators (methods and the `first`/`last` properties) are guarded too."""
+    cls = _GUARDED_CLASSES.get(base)
+    if cls is not None:
+        return cls
+    ns: dict[str, Any] = {}
+    for name in LOCATOR_ACTIONS:
+        original = inspect.getattr_static(base, name, None)
+        if original is None:
+            continue
 
-    def __init__(self, inner: Any, run: Run) -> None:
-        object.__setattr__(self, "_inner", inner)
-        object.__setattr__(self, "_run", run)
+        def act(self: Any, *args: Any, __original: Any = original, **kwargs: Any) -> Any:
+            return self._unstuck_run(lambda: __original(self, *args, **kwargs), navigates=False, may_navigate=True)
 
-    def __getattr__(self, name: str) -> Any:
-        value = getattr(self._inner, name)
-        if name in LOCATOR_CHAIN:
-            if callable(value):
-                return lambda *a, **k: _GuardedLocator(value(*[_raw(x) for x in a], **{n: _raw(v) for n, v in k.items()}), self._run)
-            return _GuardedLocator(value, self._run)  # first / last are properties
-        if name in LOCATOR_ACTIONS:
-            return lambda *a, **k: self._run(lambda: value(*a, **k), navigates=False, may_navigate=True)
-        if callable(value):
-            return lambda *a, **k: value(*[_raw(x) for x in a], **{n: _raw(v) for n, v in k.items()})
-        return value
+        ns[name] = act
+    for name in LOCATOR_CHAIN:
+        original = inspect.getattr_static(base, name, None)
+        if isinstance(original, property):
+            ns[name] = property(lambda self, __p=original: _guard_locator(__p.fget(self), self._unstuck_run))
+        elif original is not None:
 
-    def __repr__(self) -> str:
-        return f"<guarded {self._inner!r}>"
+            def chain(self: Any, *args: Any, __original: Any = original, **kwargs: Any) -> Any:
+                return _guard_locator(__original(self, *args, **kwargs), self._unstuck_run)
+
+            ns[name] = chain
+    cls = type(f"Guarded{base.__name__}", (base,), ns)
+    _GUARDED_CLASSES[base] = cls
+    return cls
+
+
+def _guard_locator(locator: Any, run: Run) -> Any:
+    """Guards a locator in place (same object, a guarded subclass of its class)."""
+    if locator is None or isinstance(locator, tuple(_GUARDED_CLASSES.values())):
+        return locator
+    locator._unstuck_run = run
+    locator.__class__ = _guarded_class(type(locator))
+    return locator
 
 
 class _GuardedNavigation:
@@ -117,9 +133,10 @@ class PageGuard:
     async def _id(self) -> str:
         if self._guard_id is not None:
             return self._guard_id
-        if self._opening is None or self._opening.done() and self._opening.exception() is not None:
+        # A failed or cancelled open is tried again; a caller giving up (wait_for) never cancels the shared open.
+        if self._opening is None or (self._opening.done() and (self._opening.cancelled() or self._opening.exception() is not None)):
             self._opening = asyncio.ensure_future(self._open())
-        self._guard_id = await self._opening
+        self._guard_id = await asyncio.shield(self._opening)
         return self._guard_id
 
     async def _call(self, method: str, params: dict[str, Any] | None = None) -> Any:
@@ -229,7 +246,7 @@ def wrap_page(
 
     def factory(name: str) -> None:
         original = getattr(page, name)
-        setattr(page, name, lambda *a, **k: _GuardedLocator(original(*[_raw(x) for x in a], **{n: _raw(v) for n, v in k.items()}), guard.run))
+        setattr(page, name, lambda *a, **k: _guard_locator(original(*a, **k), guard.run))
 
     for name in _NAVIGATING:
         navigating(name)
