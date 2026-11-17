@@ -605,6 +605,20 @@ describe('takeover session', () => {
     fail!('again'); // after the end: nothing changes
   });
 
+  it('the link handler can cancel the takeover (e.g. the agent stopped it): cancelled at once, the link stops working', async () => {
+    const transport = new FakeTransport();
+    const engine = createEngine({ transport });
+    let control: TakeoverControl | undefined;
+    const p = engine.takeover(new FakeCdp(), { reason: 'x', onLink: (_l, c) => (control = c) });
+    await settle();
+    control!.cancel('cancelled_by_agent');
+    await settle();
+    await expect(p).resolves.toMatchObject({ status: 'cancelled', detail: 'cancelled_by_agent' });
+    expect(transport.unpublished).toHaveLength(1);
+    control!.cancel('again'); // after the end: nothing changes
+    await expect(p).resolves.toMatchObject({ detail: 'cancelled_by_agent' });
+  });
+
   it('the link handler can tell whether someone has joined through the link (also after they left)', async () => {
     const transport = new FakeTransport();
     const engine = createEngine({ transport });
