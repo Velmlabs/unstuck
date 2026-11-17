@@ -37,3 +37,11 @@ Merge the servers into any config you already have; don't replace the file.
 Tell your agent, for example: *"If you hit a CAPTCHA or a login, call request_human_takeover with the reason."* The tool blocks until the person is done and returns JSON like `{"status":"resolved","duration_s":42}`.
 
 To send the link through Unstuck Cloud (so it opens on any phone, from anywhere), add `"UNSTUCK_API_KEY": "uk_live_…"` to the server's `env`.
+
+## Show the link in the chat (two-step flow)
+
+Since 0.2.9 the server also has `start_human_takeover`, which returns the link at once so the agent can show it to
+you, and `wait_for_human_takeover`, which waits in short rounds (45 s by default) for Done or Can't solve. That keeps
+each tool call under the client's timeout. Ask your agent: *"If you hit a CAPTCHA or a login, call
+start_human_takeover and show me the link."* The link opens on any device only with Unstuck Cloud (`UNSTUCK_API_KEY`)
+or your own relay; otherwise it is a `127.0.0.1` link for this computer.
