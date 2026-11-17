@@ -30,7 +30,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./testing": "./src/testing/index.ts",
-    "./testing/settle": "./test/settle.ts"
+    "./testing/settle": "./test/settle.ts",
+    "./testing/store": "./test/store-conformance.ts"
   },
   "files": [
     "dist"
