@@ -1,6 +1,6 @@
 [project]
 name = "unstuck"
-version = "0.2.8"
+version = "0.2.9"
 description = "Human takeover for AI browser agents: when your agent gets stuck, a human takes over the live browser and hands it back."
 readme = "README.md"
 license = "Apache-2.0"

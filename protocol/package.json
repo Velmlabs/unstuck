@@ -1,6 +1,6 @@
 {
   "name": "@velmlabs/unstuck-protocol",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Wire protocol shared by the Unstuck engine, viewer and relays (frames, RPC, end-to-end encryption).",
   "keywords": [
     "ai",
