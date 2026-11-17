@@ -1,6 +1,6 @@
 # Unstuck Browser: a wrapper for your agent's headless browser that asks a person when it's stuck
 
-**Date:** 2026-11-17 · **Status:** draft for the owner's review · **Repo:** velmlabs/unstuck (open source), shipped in
+**Date:** 2026-11-17 · **Status:** decisions complete; awaiting the owner's approval of this document · **Repo:** velmlabs/unstuck (open source), shipped in
 the existing packages.
 
 ## Intent
@@ -197,11 +197,16 @@ The spike of 2026-11-12 (`docs/spikes/obscura.md`) and the engine's `doctor` bot
 So challenges can't be solved inside Obscura today. Login, 2FA and other first-party pages can. Re-run the probe on
 each new Obscura release.
 
-**v1 Obscura scope: OPEN, owner's decision pending.** The options:
-- (a) Detect challenges and fail clearly (`browser_cannot_render_captcha`); rescue only login, 2FA and first-party
-  pages.
-- (b) Also hand off to a full Chrome: copy the cookies over, the person solves there, copy them back. This needs Chrome
-  on the machine. It may not stick, because clearance cookies are tied to the User-Agent and IP, and to fingerprints.
+**v1 Obscura scope (owner's decision, 2026-11-17): limited support.**
+
+- **Login, 2FA and first-party pages:** full rescue in Obscura.
+- **Challenges (reCAPTCHA, hCaptcha, Turnstile, Cloudflare interstitials):** detected, then the call fails clearly with
+  `browser_cannot_render_captcha` and the hint "this browser can't show CAPTCHAs; use Chrome for this site". No
+  takeover is opened that a person couldn't complete.
+- **How it's decided:** by the engine's existing cross-origin-iframe paint check (`doctor`), cached per browser
+  connection, not by sniffing the browser name. When a future Obscura release paints those frames, challenges work
+  with no code change.
+- **Not in v1:** handing off to Chrome (copying cookies over and back).
 
 ## Testing
 
