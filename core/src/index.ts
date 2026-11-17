@@ -24,3 +24,4 @@ export { createRateLimiter, DEFAULT_MAX_RESCUES_PER_HOUR, RATE_WINDOW_MS, type R
 export { waitForNavigation, waitForQuiet, NAV_GRACE_MS, LOAD_WAIT_MS, SETTLE_QUIET_MS, SETTLE_MAX_MS } from './guard/settle';
 export { rescue, reasonFor, type RescueOptions, type TakeoverRunner } from './guard/rescue';
 export { createGuard, type Guard, type GuardOptions } from './guard/guard';
+export { onceRenderCheck, BROWSER_CANNOT_RENDER_HINT, type RenderCheck } from './guard/render-check';

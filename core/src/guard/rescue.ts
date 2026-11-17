@@ -2,6 +2,7 @@ import type { CheckKind, HumanCheck, RescueOutcome, TakeoverResult } from '@velm
 import type { CdpClient } from '../cdp';
 import { detectHumanCheck } from './detect';
 import type { RateLimiter } from './rate-limit';
+import { BROWSER_CANNOT_RENDER_HINT, type RenderCheck } from './render-check';
 import { waitForQuiet } from './settle';
 
 /** Runs one takeover for a check (the SDKs and the engine each bind their own). */
@@ -27,6 +28,8 @@ export interface RescueOptions {
   quietMs?: number;
   maxSettleMs?: number;
   now?: () => number;
+  /** A challenge on a browser that can't draw CAPTCHA widgets fails at once instead of opening a takeover no one can finish. */
+  canRenderCaptcha?: RenderCheck;
 }
 
 /** Brings in a person for one check. Never rejects: every way it can end is an outcome. */
@@ -35,6 +38,10 @@ export async function rescue(cdp: CdpClient, check: HumanCheck, o: RescueOptions
   const start = now();
   const out = (status: RescueOutcome['status'], extra: Partial<RescueOutcome> = {}): RescueOutcome => ({ status, check, waitedS: Math.round((now() - start) / 100) / 10, ...extra });
   try {
+    // 'unknown' goes ahead: a doubtful probe must never block Chrome.
+    if (check.kind === 'challenge' && o.canRenderCaptcha && (await o.canRenderCaptcha()) === false) {
+      return { status: 'browser_cannot_render_captcha', check, waitedS: 0, detail: BROWSER_CANNOT_RENDER_HINT };
+    }
     const slot = await o.limiter.tryStart();
     if (!slot.ok) {
       return out('rescue_limited', { detail: `at most ${o.limiter.maxPerHour} person-checks per hour on profile "${o.profile ?? 'default'}"; the next one is possible in ${Math.ceil(slot.retryInS / 60)} min` });

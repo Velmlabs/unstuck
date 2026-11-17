@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { rescue, reasonFor } from '../../src/guard/rescue';
 import { createRateLimiter } from '../../src/guard/rate-limit';
 import { createMemorySessionStore } from '../../src/guard/store';
@@ -85,5 +85,31 @@ describe('rescue', () => {
       return { status: 'resolved', sessionId: 's1', url: 'https://shop.example/', durationS: 3 };
     });
     expect((await rescue(cdp, cfCheck, { takeover: run, limiter: limiter(), quietMs: 500 })).status).toBe('resolved');
+  });
+});
+
+describe('rescue on a browser that cannot paint cross-origin iframes', () => {
+  it('a challenge fails clearly, without a takeover or a slot', async () => {
+    const run = runner();
+    const l = createRateLimiter(createMemorySessionStore(), { maxPerHour: 1 });
+    const o = await rescue(fakePage({ facts: page() }), cfCheck, { takeover: run, limiter: l, canRenderCaptcha: async () => false });
+    expect(o).toMatchObject({ status: 'browser_cannot_render_captcha', detail: "this browser can't show CAPTCHAs; use Chrome for this site", waitedS: 0 });
+    expect(run).not.toHaveBeenCalled();
+    expect(await l.tryStart()).toEqual({ ok: true });
+  });
+
+  it('login and 2FA are rescued on such a browser, without probing', async () => {
+    const run = runner();
+    const probe = async () => false as const;
+    const spy = vi.fn(probe);
+    expect((await rescue(fakePage({ facts: page() }), { ...cfCheck, kind: 'login', vendor: undefined }, { takeover: run, limiter: limiter(), canRenderCaptcha: spy, quietMs: 10 })).status).toBe('resolved');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("'unknown' goes ahead with the takeover", async () => {
+    const run = runner();
+    expect((await rescue(fakePage({ facts: page() }), cfCheck, { takeover: run, limiter: limiter(), canRenderCaptcha: async () => 'unknown', quietMs: 10 })).status).toBe('resolved');
+    expect(run).toHaveBeenCalledTimes(1);
   });
 });

@@ -129,3 +129,12 @@ describe('createGuard', () => {
     expect(cdp.listenerCount('Network.responseReceived')).toBe(0);
   });
 });
+
+describe('createGuard on a browser that cannot paint CAPTCHAs', () => {
+  it('passes the render check to the rescue', async () => {
+    const run = runner();
+    const g = await createGuard({ cdp: fakePage({ facts: blocked() }), takeover: run, store: createMemorySessionStore(), canRenderCaptcha: async () => false, widgetGraceMs: 5 });
+    expect(await g.after()).toMatchObject({ status: 'browser_cannot_render_captcha' });
+    expect(run).not.toHaveBeenCalled();
+  });
+});

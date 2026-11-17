@@ -5,6 +5,7 @@ import { readCookies, sessionFor, setMissingCookies } from './cookies';
 import { detectHumanCheck } from './detect';
 import { trackMainDocument } from './main-document';
 import { createRateLimiter } from './rate-limit';
+import type { RenderCheck } from './render-check';
 import { rescue, type TakeoverRunner } from './rescue';
 import { waitForNavigation } from './settle';
 import type { SessionStore } from './store';
@@ -21,6 +22,7 @@ export interface GuardOptions {
   onRescue?: (o: RescueOutcome) => void;
   widgetGraceMs?: number;
   now?: () => number;
+  canRenderCaptcha?: RenderCheck;
 }
 
 /** Watches one page: checks it around the agent's actions and brings in a person when a human check appears. */
@@ -69,7 +71,7 @@ export async function createGuard(o: GuardOptions): Promise<Guard> {
   };
 
   const run = async (check: HumanCheck, reason?: string): Promise<RescueOutcome> => {
-    const outcome = await rescue(cdp, check, { takeover: o.takeover, limiter, profile: o.profile, scope, now: o.now, ...(reason ? { reason } : {}) });
+    const outcome = await rescue(cdp, check, { takeover: o.takeover, limiter, profile: o.profile, scope, now: o.now, canRenderCaptcha: o.canRenderCaptcha, ...(reason ? { reason } : {}) });
     lastRescue = outcome;
     o.onRescue?.(outcome);
     if (o.remember && outcome.status === 'resolved') {
