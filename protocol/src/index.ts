@@ -6,3 +6,4 @@ export * from './viewer';
 export * from './relay';
 export * from './e2e';
 export * from './alerts';
+export * from './guard';
