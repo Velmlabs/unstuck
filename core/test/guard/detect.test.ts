@@ -88,30 +88,37 @@ describe('matchRules', () => {
 describe('approval rules', () => {
   const a = (text: string, o: Partial<PageFacts> = {}) => matchRules(facts({ bodyTextHead: text, ...o }), null, { scope: ['approval'] });
   it.each([
-    'Check your phone',
-    'Check your device',
-    'Tap Yes on the notification',
+    'Check your phone to verify it is you',
+    'Check your device. Verify your identity',
+    'Tap Yes on the notification to sign in',
     'Approve this sign-in',
     'Approve login',
-    'Approve request',
-    'We sent a notification to your phone',
-    'We sent a push to your phone',
+    'Approve this request on your phone',
+    'We sent a notification to your phone to verify it is you',
+    'We sent a push to your phone. Sign in',
     'Open the Okta Verify app to approve',
-    'Open the Authenticator app to confirm',
+    'Open the Authenticator app to confirm your account',
     "Confirm it's you on your device",
     'Confirm it\u2019s you on your phone',
   ])('"%s" is an approval prompt', (text) => expect(a(text)).toMatchObject({ kind: 'approval', ruleId: 'approval.prompt' }));
-  it.each(['Welcome to the shop', 'Enter the code we sent to your phone', 'Tap the menu', 'Please approve our terms', 'Open the app store'])('"%s" is not', (text) => expect(a(text)).toBeNull());
+  it.each([
+    'Admin: Approve request. Expense list: Lunch $12, Taxi $30',
+    'Approve this request. Pending expenses: 3',
+    'We sent a notification to your email',
+    'Check your device settings',
+    'Check your phone',
+    'Stay tuned yes? Tap yesterday',
+    'Welcome to the shop', 'Enter the code we sent to your phone', 'Tap the menu', 'Please approve our terms', 'Open the app store'])('"%s" is not', (text) => expect(a(text)).toBeNull());
   it('is out of scope by default and never wins over earlier rules', () => {
     expect(matchRules(facts({ bodyTextHead: 'Check your phone' }), null, { scope: ['challenge', '2fa'] })).toBeNull();
   });
   it('needs no password or one-time code field', () => {
-    expect(a('Check your phone', { passwordVisible: true })).toBeNull();
-    expect(a('Check your phone', { otpVisible: true })).toBeNull();
+    expect(a('Check your phone to sign in', { passwordVisible: true })).toBeNull();
+    expect(a('Check your phone to sign in', { otpVisible: true })).toBeNull();
   });
   it('is capped by the whole body length, not the head that was read', () => {
-    expect(a('Check your phone', { bodyTextLength: 3000 })).not.toBeNull();
-    expect(a('Check your phone', { bodyTextLength: 3001 })).toBeNull();
+    expect(a('Check your phone to sign in', { bodyTextLength: 3000 })).not.toBeNull();
+    expect(a('Check your phone to sign in', { bodyTextLength: 3001 })).toBeNull();
   });
   const failed = (text: string, o: Partial<PageFacts> = {}) => matchRules(facts({ bodyTextHead: text, ...o }), null, { scope: ['approval'], rules: APPROVAL_FAILED_RULES });
   it('failure rules', () => {
@@ -123,8 +130,13 @@ describe('approval rules', () => {
     expect(failed('Welcome to the shop')).toBeNull();
     expect(failed('Try again', { bodyTextLength: 3001 })).toBeNull();
   });
+  it('a failure phrase deep in the page (about 2,500 characters in) still matches', () => {
+    const text = `${'Some account notice. '.repeat(125)}Request timed out`;
+    expect(text.length).toBeGreaterThan(2400);
+    expect(failed(text, { bodyTextLength: text.length })?.ruleId).toBe('approval_failed.timed_out');
+  });
   it('failure rules do not match the approval prompt, nor the other way round', () => {
-    expect(failed('Check your phone')).toBeNull();
+    expect(failed('Check your phone to sign in')).toBeNull();
     expect(a('Request timed out. Try again')).toBeNull();
   });
 });

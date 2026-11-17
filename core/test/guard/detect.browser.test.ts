@@ -110,12 +110,15 @@ describe('detectHumanCheck on vendor fixtures (real Chromium)', () => {
     it.each(['google', 'microsoft', 'okta', 'duo', 'apple', 'generic'])('approval-%s is an approval', async (name) => {
       expect(await detect(`approval-${name}.html`, { scope: ['challenge', 'approval'] })).toMatchObject({ kind: 'approval', ruleId: 'approval.prompt' });
     });
-    it.each(['article-about-2fa', 'login-with-tap-yes', 'otp', 'login'])('%s is not an approval', async (name) => {
+    it.each(['article-about-2fa', 'login-with-tap-yes', 'otp', 'login', 'admin-approve-request', 'notification-sent-email', 'device-settings-error'])('%s is not an approval', async (name) => {
       expect((await detect(`${name}.html`, { scope: ['approval'] }))?.kind).not.toBe('approval');
     });
     it.each(['duo', 'okta', 'microsoft'])('approval-failed-%s matches the failure rules only', async (name) => {
       expect(await detect(`approval-failed-${name}.html`, { scope: ['approval'], rules: APPROVAL_FAILED_RULES })).toMatchObject({ ruleId: expect.stringMatching(/^approval_failed\./) });
       expect(await detect(`approval-failed-${name}.html`, { scope: ['approval'] })).toBeNull();
+    });
+    it('a failure phrase past 2,000 characters is still read', async () => {
+      expect(await detect('approval-failed-late.html', { scope: ['approval'], rules: APPROVAL_FAILED_RULES })).toMatchObject({ ruleId: 'approval_failed.timed_out' });
     });
     it('approval is out of scope unless listed', async () => {
       expect(await detect('approval-google.html', { scope: ['challenge'] })).toBeNull();

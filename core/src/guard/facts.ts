@@ -58,7 +58,7 @@ function factsInPage(markers: string[]) {
       .filter(Boolean)
       .slice(0, 10),
     bodyTextLength: text.length,
-    bodyTextHead: text.slice(0, 2000),
+    bodyTextHead: text.slice(0, 3000),
   };
 }
 
