@@ -7,4 +7,8 @@ export { main, USAGE, type CliIO } from './cli';
 export { connectBrowser, connectCdp, normalizeCdpUrl, pickTarget, type DirectCdp, type BrowserCdp, type TargetInfo } from './direct-cdp';
 export { VERSION } from './version';
 export { createMcpServer, openInBrowser, TOOL_NAME, START_TOOL, WAIT_TOOL, CANCEL_TOOL, TOOL_NAMES, type McpServerOptions } from './mcp';
+export { BROWSE_TOOL_NAMES, FETCH_TOOL, RESUME_TOOL } from './mcp-browse';
+export { BrowserSession, type BrowseConfig } from './browser/session';
+export { findChrome, launchChrome, launchObscura, CHROME_NOT_FOUND, OBSCURA_NOT_FOUND, type LaunchedBrowser } from './browser/launcher';
+export { extractPage, NotHtmlError, type ContentFormat, type Extracted } from './browser/extract';
 export { runDoctor, formatReport, type DoctorReport } from './doctor';

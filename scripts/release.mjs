@@ -164,28 +164,42 @@ const tsStatus = await takeover('npx', ['tsx', 'index.ts', siteUrl], app, noEngi
 if (tsStatus !== 'resolved') throw new Error(`TypeScript takeover: ${tsStatus}`);
 console.log('resolved (engine found through @velmlabs/unstuck-engine, no UNSTUCK_ENGINE_PATH)');
 
-step('MCP: npx @velmlabs/unstuck-engine --mcp answers tools/list');
-const mcp = spawn(path.join(app, 'node_modules/.bin/unstuck-engine'), ['--mcp'], { cwd: app, stdio: ['pipe', 'pipe', 'inherit'] });
-const rpc = (msg) => mcp.stdin.write(JSON.stringify(msg) + '\n');
-let mcpOut = '';
-const tools = await new Promise((resolve, reject) => {
-  const timer = setTimeout(() => reject(new Error(`MCP server didn't answer:\n${mcpOut}`)), 30_000);
-  mcp.stdout.on('data', (d) => {
-    mcpOut += d;
-    for (const line of mcpOut.split('\n')) {
-      try {
-        const m = JSON.parse(line);
-        if (m.id === 2) (clearTimeout(timer), resolve(m.result.tools.map((t) => t.name)));
-      } catch {}
-    }
+/** Starts the installed MCP server with `args`, asks tools/list, and returns the tool names (and its stderr). */
+async function mcpTools(args) {
+  const mcp = spawn(path.join(app, 'node_modules/.bin/unstuck-engine'), args, { cwd: app, stdio: ['pipe', 'pipe', 'pipe'] });
+  const rpc = (msg) => mcp.stdin.write(JSON.stringify(msg) + '\n');
+  let mcpOut = '';
+  let mcpErr = '';
+  mcp.stderr.on('data', (d) => (mcpErr += d));
+  const names = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`MCP server (${args.join(' ')}) didn't answer:\n${mcpOut}\n${mcpErr}`)), 30_000);
+    mcp.stdout.on('data', (d) => {
+      mcpOut += d;
+      for (const line of mcpOut.split('\n')) {
+        try {
+          const m = JSON.parse(line);
+          if (m.id === 2) (clearTimeout(timer), resolve(m.result.tools.map((t) => t.name)));
+        } catch {}
+      }
+    });
+    rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'release-check', version: '0' } } });
+    rpc({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
   });
-  rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'release-check', version: '0' } } });
-  rpc({ jsonrpc: '2.0', method: 'notifications/initialized' });
-  rpc({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
-});
-mcp.kill();
+  mcp.kill();
+  return { names, stderr: mcpErr };
+}
+
+step('MCP: npx @velmlabs/unstuck-engine --mcp answers tools/list');
+const tools = (await mcpTools(['--mcp'])).names;
 if (!tools.includes('request_human_takeover')) throw new Error(`MCP tools: ${tools}`);
 console.log(`tools: ${tools.join(', ')}`);
+
+step('MCP: --mcp --browser lists fetch_page and starts no browser');
+const browse = await mcpTools(['--mcp', '--browser']);
+if (!browse.names.includes('fetch_page') || !browse.names.includes('resume_after_human')) throw new Error(`MCP --browser tools: ${browse.names}`);
+if (/DevTools listening/.test(browse.stderr)) throw new Error('MCP --browser started a browser before any tool call');
+console.log(`tools: ${browse.names.join(', ')}`);
 
 step('Python: fresh venv, pip install, Playwright takeover');
 const venvRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'unstuck-py-'));

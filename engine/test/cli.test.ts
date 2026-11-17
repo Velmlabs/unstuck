@@ -5,7 +5,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { main, USAGE } from '../src/cli';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+import { browseConfig, main, USAGE } from '../src/cli';
 import { VERSION } from '../src/version';
 import type { AssetMap } from '../src/embedded';
 
@@ -148,3 +150,72 @@ describe.skipIf(!fs.existsSync(bin))('compiled binary', { timeout: 20_000 }, () 
     await new Promise((r) => p.on('close', r));
   });
 });
+
+describe('browse flags', () => {
+  const env = { UNSTUCK_HOME: '/u' };
+  it('--browser (bare) is chrome; profile mcp, remember on, 10 an hour by default', () => {
+    expect(browseConfig(['--mcp', '--browser'], env)).toEqual({ browse: { source: { kind: 'chrome' }, profile: 'mcp', remember: true, maxRescuesPerHour: 10, home: '/u' } });
+    expect(browseConfig(['--mcp', '--browser=chrome', '--profile', 'work', '--no-remember', '--max-rescues-per-hour', '3'], env)).toEqual({
+      browse: { source: { kind: 'chrome' }, profile: 'work', remember: false, maxRescuesPerHour: 3, home: '/u' },
+    });
+  });
+
+  it('--browser=obscura takes --obscura-path, else OBSCURA_PATH, else obscura on PATH', () => {
+    expect(browseConfig(['--mcp', '--browser=obscura', '--obscura-path', '/o/obscura'], env)).toMatchObject({ browse: { source: { kind: 'obscura', path: '/o/obscura' } } });
+    expect(browseConfig(['--mcp', '--browser=obscura'], { ...env, OBSCURA_PATH: '/env/obscura' })).toMatchObject({ browse: { source: { kind: 'obscura', path: '/env/obscura' } } });
+    const dir = fs.mkdtempSync(path.join(fs.realpathSync(require('node:os').tmpdir()), 'bin-'));
+    fs.writeFileSync(path.join(dir, 'obscura'), '#!/bin/sh\n', { mode: 0o755 });
+    expect(browseConfig(['--mcp', '--browser=obscura'], { ...env, PATH: `/nope:${dir}` })).toMatchObject({ browse: { source: { kind: 'obscura', path: path.join(dir, 'obscura') } } });
+    expect(browseConfig(['--mcp', '--browser=obscura'], { ...env, PATH: '/nope' })).toEqual({ error: 'Obscura not found: pass --obscura-path <path to the obscura binary> or set OBSCURA_PATH.' });
+  });
+
+  it('--tools browser wraps UNSTUCK_CDP_URL, and needs it without --browser', () => {
+    expect(browseConfig(['--mcp', '--tools', 'browser'], { ...env, UNSTUCK_CDP_URL: 'http://127.0.0.1:9222' })).toMatchObject({ browse: { source: { kind: 'cdp', url: 'http://127.0.0.1:9222' } } });
+    expect(browseConfig(['--mcp', '--tools', 'browser'], env)).toEqual({ error: '--tools browser wraps the browser at UNSTUCK_CDP_URL; set it, or use --browser to let Unstuck start its own' });
+    expect(browseConfig(['--mcp', '--tools', 'browser', '--browser'], env)).toMatchObject({ browse: { source: { kind: 'chrome' } } });
+  });
+
+  it('--tools takeover (or no flag) is the four takeover tools; usage errors for the rest', () => {
+    expect(browseConfig(['--mcp', '--tools', 'takeover'], env)).toEqual({});
+    expect(browseConfig(['--mcp'], env)).toEqual({});
+    for (const argv of [
+      ['--mcp', '--browser', '--tools', 'takeover'],
+      ['--stdio', '--browser'],
+      ['--stdio', '--profile', 'x'],
+      ['--mcp', '--browser=firefox'],
+      ['--mcp', '--tools', 'all'],
+      ['--mcp', '--browser', '--max-rescues-per-hour', '0'],
+      ['--mcp', '--browser', '--profile', '../x'],
+      ['--mcp', '--no-remember'],
+    ])
+      expect(browseConfig(argv, env), argv.join(' ')).toHaveProperty('error');
+  });
+
+  it('main: a browse usage error exits 2 with its line', async () => {
+    const x = io('');
+    await expect(main(['--mcp', '--tools', 'browser'], x)).resolves.toBe(2);
+    expect(x.err()).toContain('--tools browser wraps the browser at UNSTUCK_CDP_URL; set it, or use --browser to let Unstuck start its own');
+  });
+
+  it('main: --mcp --browser lists the browse tools and starts no browser; --tools takeover lists four', async () => {
+    for (const [argv, count] of [[['--mcp', '--browser'], 9], [['--mcp', '--tools', 'takeover'], 4]] as const) {
+      const x = io();
+      const lines: any[] = [];
+      readline.createInterface({ input: x.stdout }).on('line', (l) => lines.push(JSON.parse(l)));
+      const run = main([...argv], x);
+      const send = (m: object) => x.stdin.write(JSON.stringify(m) + '\n');
+      send({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '0' } } });
+      send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+      send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+      await vi.waitFor(() => expect(lines.some((l) => l.id === 2)).toBe(true), { timeout: 4_000 });
+      x.stdin.end();
+      await expect(run).resolves.toBe(0);
+      const names = lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name);
+      expect(names).toHaveLength(count);
+      expect(x.err()).toContain(`MCP server ready (tools: ${names.join(', ')})`);
+      if (count === 9) expect(names).toContain('fetch_page');
+      expect(x.err()).not.toMatch(/DevTools/);
+    }
+  });
+});
+

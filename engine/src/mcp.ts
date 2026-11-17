@@ -14,8 +14,11 @@ import {
   type Transport,
 } from '@velmlabs/unstuck-core';
 import { connectCdp, type DirectCdp } from './direct-cdp';
-import { hostnames } from '@velmlabs/unstuck-core';
+import { hostnames, type StoreFs } from '@velmlabs/unstuck-core';
 import { VERSION } from './version';
+import { BrowserSession, IN_TOOL_WAIT_MS, type BrowseConfig, type BrowserSessionDeps } from './browser/session';
+import { nodeStoreFs } from './browser/node-store-fs';
+import { registerBrowseTools, type BrowseRescue } from './mcp-browse';
 
 /** The one-step tool: blocks until the takeover ends. */
 export const TOOL_NAME = 'request_human_takeover';
@@ -50,6 +53,10 @@ export interface McpServerOptions {
   alerter?: CloudAlerter;
   /** How long a finished two-step result stays available (default FINISHED_KEEP_MS; tests shorten it). */
   finishedKeepMs?: number;
+  /** Unstuck Browser (`--browser`, `--tools browser`): adds fetch_page and the session tools. Absent: the four takeover tools only. */
+  browse?: BrowseConfig;
+  storeFs?: StoreFs;
+  launch?: BrowserSessionDeps['launch'];
 }
 
 /** The desktop opener for a link: the URL is always one argument, never parsed by a shell. */
@@ -70,18 +77,18 @@ export function openInBrowser(url: string): void {
 }
 
 const ignore = () => {};
-const text = (t: string, isError = false): CallToolResult => ({ content: [{ type: 'text' as const, text: t }], ...(isError ? { isError: true } : {}) });
+export const text = (t: string, isError = false): CallToolResult => ({ content: [{ type: 'text' as const, text: t }], ...(isError ? { isError: true } : {}) });
 
-type Out = Record<string, unknown>;
+export type Out = Record<string, unknown>;
 /** A result as JSON text plus the same object as structured content (the two-step tools). */
-const structured = (out: Out, isError: boolean, lead?: string): CallToolResult => ({
+export const structured = (out: Out, isError: boolean, lead?: string): CallToolResult => ({
   content: [...(lead ? [{ type: 'text' as const, text: lead }] : []), { type: 'text' as const, text: JSON.stringify(out) }],
   structuredContent: out,
   ...(isError ? { isError: true } : {}),
 });
 
 /** The tool result for a finished takeover. */
-function resultOut(r: TakeoverResult, cancelledByAgent = false): Out {
+export function resultOut(r: TakeoverResult, cancelledByAgent = false): Out {
   const out: Out = { status: r.status, session_id: r.sessionId, url: r.url, duration_s: r.durationS, ...(r.detail ? { detail: r.detail } : {}) };
   // A cancelled takeover's detail can be the human's own words: data for the agent, never instructions.
   if (r.status === 'cancelled' && r.detail && r.detail !== 'cant_solve' && !(cancelledByAgent && r.detail === AGENT_CANCEL_DETAIL))
@@ -90,7 +97,7 @@ function resultOut(r: TakeoverResult, cancelledByAgent = false): Out {
 }
 
 /** Resolves with `p`'s value, or undefined after `ms` (or when `signal` aborts). */
-function within<T>(p: Promise<T>, ms: number, signal?: AbortSignal): Promise<T | undefined> {
+export function within<T>(p: Promise<T>, ms: number, signal?: AbortSignal): Promise<T | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort = ignore;
   const gaveUp = new Promise<undefined>((r) => {
@@ -110,7 +117,7 @@ function isLoopback(link: string): boolean {
   return host === 'localhost' || host === '[::1]' || /^127\./.test(host);
 }
 
-const minutes = (ms: number) => Math.max(1, Math.round(ms / 60_000));
+export const minutes = (ms: number) => Math.max(1, Math.round(ms / 60_000));
 
 const takeoverInput = {
   reason: z.string().min(1).describe('What the human should do, e.g. "Solve the CAPTCHA"'),
@@ -131,8 +138,27 @@ const takeoverInput = {
 };
 type TakeoverArgs = { reason: string; cdp_url?: string; target_id?: string; timeout_s?: number; allowed_sites?: string[]; alerts?: boolean | 'required' };
 
-/** A takeover started with start_human_takeover. */
-interface TwoStep {
+/** The text that shows the person a takeover link; `next` says which tool to call after. */
+export function linkLead(info: LinkInfo, o: { expiresInS: number; alerted?: boolean; next: string }): string {
+  const local = isLoopback(info.url);
+  return [
+    `Show the person this link, exactly as it is:`,
+    info.url,
+    (local
+      ? `It opens only on this computer (no Unstuck Cloud key or relay is set up), so the person opens it here, taps Start, solves it and taps Done. `
+      : `They open it on any device (or forward it to the one person who will solve it), tap Start, solve it and tap Done. `) +
+      `Nothing connects until they tap Start; the link works on one device only and stops working when the takeover ends ` +
+      `(in about ${minutes(o.expiresInS * 1000)} min). Share it only with the person who will solve it.`,
+    ...(info.code
+      ? [`They will be asked for this 6-digit code: ${info.code}. Give it separately from the link (its own message), and if they forward the link, they should send the code another way.`]
+      : []),
+    ...(o.alerted ? ['Their paired phones were alerted too.'] : []),
+    o.next,
+  ].join('\n');
+}
+
+/** A takeover started with start_human_takeover (or a browsing tool's rescue, with `browse`). */
+export interface TwoStep {
   id: string;
   info: LinkInfo;
   control: TakeoverControl;
@@ -144,6 +170,13 @@ interface TwoStep {
   returned: boolean;
   byAgent: boolean;
   forget?: ReturnType<typeof setTimeout>;
+  browse?: BrowseRescue;
+}
+
+/** The two-step takeovers of one server, shared with the browsing tools. */
+export interface TwoStepRegistry {
+  add(t: TwoStep): void;
+  get(id: string): TwoStep | undefined;
 }
 
 /** MCP server exposing request_human_takeover and the two-step start/wait/cancel tools (spec §5). */
@@ -157,16 +190,33 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
   const twoSteps = new Map<string, TwoStep>();
   let starting = 0;
   const activeTwoSteps = () => [...twoSteps.values()].filter((t) => t.final === null).length;
+  const registry: TwoStepRegistry = {
+    add(t) {
+      twoSteps.set(t.id, t);
+      void t.result.then((r) => {
+        t.final = r;
+        t.forget = setTimeout(() => twoSteps.delete(t.id), opts.finishedKeepMs ?? FINISHED_KEEP_MS);
+        t.forget.unref?.();
+      });
+    },
+    get: (id) => twoSteps.get(id),
+  };
+  let session: BrowserSession | null = null;
 
   /** Checks the call, connects to the tab and claims it (one takeover per tab); otherwise the error result. */
   async function claimPage(a: TakeoverArgs): Promise<{ cdp: DirectCdp; release: () => void } | CallToolResult> {
+    // Unstuck Browser: without cdp_url the takeover is on the browsing tab (a connection of its own to it).
+    const browsing = !a.cdp_url && session !== null;
     const url = a.cdp_url ?? opts.env.UNSTUCK_CDP_URL;
-    if (!url) return text('No browser to take over: pass cdp_url or set UNSTUCK_CDP_URL', true);
+    if (!url && !browsing) return text('No browser to take over: pass cdp_url or set UNSTUCK_CDP_URL', true);
     if (a.alerts === 'required' && !opts.alerter)
       return text("alerts: 'required' needs Unstuck Cloud (UNSTUCK_API_KEY): the local viewer server and self-hosted relays send no phone alerts", true);
     let cdp: DirectCdp;
     try {
-      cdp = await connect(url, { targetId: a.target_id });
+      if (browsing) {
+        const ep = await session!.endpoint();
+        cdp = await connect(ep.url, { targetId: a.target_id ?? ep.targetId });
+      } else cdp = await connect(url!, { targetId: a.target_id });
     } catch (e) {
       return text((e as Error).message, true);
     }
@@ -294,13 +344,8 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
         if ('r' in first) return structured(resultOut(first.r), first.r.status === 'failed');
         const { info, control, alert } = first;
         const t: TwoStep = { id: info.sessionId, info, control, result, final: null, returned: false, byAgent: false };
-        twoSteps.set(t.id, t);
+        registry.add(t);
         pages.set(cdp.targetId, t.id);
-        void result.then((r) => {
-          t.final = r;
-          t.forget = setTimeout(() => twoSteps.delete(t.id), opts.finishedKeepMs ?? FINISHED_KEEP_MS);
-          t.forget.unref?.();
-        });
         let alerted: boolean | undefined;
         if (alert) {
           const outcome = await within(alert, ALERT_WAIT_MS, extra.signal);
@@ -326,21 +371,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           expires_in_s: expiresInS,
           ...(alerted !== undefined ? { alerted } : {}),
         };
-        const local = isLoopback(info.url);
-        const lead = [
-          `Show the person this link, exactly as it is:`,
-          info.url,
-          (local
-            ? `It opens only on this computer (no Unstuck Cloud key or relay is set up), so the person opens it here, taps Start, solves it and taps Done. `
-            : `They open it on any device (or forward it to the one person who will solve it), tap Start, solve it and tap Done. `) +
-            `Nothing connects until they tap Start; the link works on one device only and stops working when the takeover ends ` +
-            `(in about ${minutes(expiresInS * 1000)} min). Share it only with the person who will solve it.`,
-          ...(info.code
-            ? [`They will be asked for this 6-digit code: ${info.code}. Give it separately from the link (its own message), and if they forward the link, they should send the code another way.`]
-            : []),
-          ...(alerted ? ["Their paired phones were alerted too."] : []),
-          `Then call ${WAIT_TOOL} with takeover_id "${t.id}"; while it answers "waiting", call it again.`,
-        ].join('\n');
+        const lead = linkLead(info, { expiresInS, alerted, next: `Then call ${WAIT_TOOL} with takeover_id "${t.id}"; while it answers "waiting", call it again.` });
         return structured(out, false, lead);
       } finally {
         starting--;
@@ -424,6 +455,25 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
     },
   );
 
+  if (opts.browse) {
+    session = new BrowserSession(opts.browse, {
+      engine,
+      storeFs: opts.storeFs ?? nodeStoreFs(),
+      connect,
+      ...(opts.launch ? { launch: opts.launch } : {}),
+      runTakeover: (cdp, reason, onReady) => {
+        // The browsing tab is claimed while a person works on it: a takeover tool on it is refused meanwhile.
+        return run(cdp, { reason }, (info, control) => {
+          pages.set(cdp.targetId, info.sessionId);
+          onReady(info, control);
+        }).finally(() => {
+          if (pages.get(cdp.targetId) !== null) pages.delete(cdp.targetId);
+        });
+      },
+    });
+    registerBrowseTools(server, { session, twoSteps: registry, inToolWaitMs: opts.browse.inToolWaitMs ?? IN_TOOL_WAIT_MS, lookup });
+  }
+
   /** The client went away: no one can wait for these any more, so end them (their links stop working). */
   const endTwoSteps = () => {
     for (const t of twoSteps.values()) if (!t.final) t.control.cancel('client_closed');
@@ -437,6 +487,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
   const close = server.close.bind(server);
   server.close = async () => {
     endTwoSteps();
+    await session?.close();
     await engine.close();
     await close();
     for (const t of twoSteps.values()) clearTimeout(t.forget);
