@@ -50,4 +50,23 @@ describe('unstuck plugin', () => {
     for (const s of ['resolved', 'answered', 'cancelled', 'timed_out', 'failed']) expect(skill).toContain(`| \`${s}\``);
     expect(read('protocol/src/result.ts')).toContain("'resolved' | 'answered' | 'timed_out' | 'cancelled' | 'failed'");
   });
+
+  it('teaches shell agents the check → rescue → wait loop with the real exit codes', () => {
+    const start = skill.indexOf('## Shell agents and agent-browser');
+    expect(start).toBeGreaterThan(-1);
+    const section = skill.slice(start, skill.indexOf('\n## ', start + 1));
+    for (const s of ['unstuck check', 'unstuck rescue', 'unstuck wait', 'agent-browser get cdp-url', 'agent-browser tab list --json']) expect(section).toContain(s);
+    const loop = /```sh\n([\s\S]*?)```/.exec(section)[1];
+    expect(loop.indexOf('unstuck check')).toBeGreaterThan(-1);
+    expect(loop.indexOf('unstuck check')).toBeLessThan(loop.indexOf('unstuck rescue'));
+    expect(loop.indexOf('unstuck rescue')).toBeLessThan(loop.indexOf('unstuck wait'));
+    expect(section).toMatch(/never solve a check yourself/i);
+    expect(section).toMatch(/the link is for the person only/i);
+    const exit = read('engine/src/shell/output.ts');
+    const codes = Object.fromEntries([...exit.matchAll(/(\w+): (\d+)/g)].map((m) => [m[1], m[2]]));
+    expect(Object.keys(codes)).toEqual(['done', 'humanNeeded', 'waiting', 'checkFound', 'failed', 'usage']);
+    for (const [code, status] of [[codes.done, 'clear'], [codes.humanNeeded, 'human_needed'], [codes.waiting, 'waiting'], [codes.checkFound, 'check_found'], [codes.failed, 'failed'], [codes.usage, 'usage']]) {
+      expect(section).toMatch(new RegExp(`\\| \`${code}\` \\|[^\\n]*${status}`));
+    }
+  });
 });

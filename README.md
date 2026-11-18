@@ -281,6 +281,20 @@ Several agents on one account? Give each a name, and phone alerts and the questi
 `agentName` in TypeScript, `agent_name` in Python, `--agent-name` or `UNSTUCK_AGENT_NAME` for the engine and the MCP
 server. Up to 40 characters; without one, alerts use the name of the API key.
 
+## Shell agents (agent-browser)
+
+Agents that drive a browser one shell command at a time, like [agent-browser](https://github.com/vercel-labs/agent-browser), get the same rescue as shell commands. Each prints one JSON line and exits with a code to branch on (`0` carry on, `10` show the link, `11` still waiting, `20` check found, `30` not passed, `2` fix the command):
+
+```sh
+npm install -g @velmlabs/unstuck-engine
+CDP="$(agent-browser get cdp-url)"
+unstuck check  --cdp "$CDP" --tab "$TAB"   # after each navigation: 0 clear, 20 a human check is on the page
+unstuck rescue --cdp "$CDP" --tab "$TAB"   # 10: prints the link for the person and a request id
+unstuck wait   "$ID"                       # 11 while they're on it, 0 once they're done
+```
+
+`TAB` is the tab's `targetId` from `agent-browser tab list --json` (leave `--tab` out with a single tab). `unstuck takeover --reason "…"` hands the tab over for anything else, and `unstuck ask "…"` asks a question. A killed `wait` doesn't end the request; `unstuck cancel <id>` does. Walkthrough: [`examples/agent-browser`](examples/agent-browser).
+
 ## Works with
 
 | Stack | Guide | Example |
@@ -294,6 +308,7 @@ server. Up to 40 characters; without one, alerts use the name of the API key.
 | browser-use, Stagehand | [unstuck.sh/docs/ai-agents](https://unstuck.sh/docs/ai-agents) | [`examples/browser-use`](examples/browser-use), [`examples/stagehand`](examples/stagehand) |
 | Any Chromium over CDP, Selenium, hosted browsers | [unstuck.sh/docs/any-browser](https://unstuck.sh/docs/any-browser) | [`examples/cdp`](examples/cdp), [`examples/selenium`](examples/selenium) |
 | Cloudflare Workers: Durable Objects, Agents SDK, Browser Rendering | [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) | [`examples/cloudflare-worker`](examples/cloudflare-worker), [`examples/cloudflare-agent`](examples/cloudflare-agent) |
+| Shell agents: agent-browser, any CLI that drives Chrome over CDP | [unstuck.sh/docs/agent-browser](https://unstuck.sh/docs/agent-browser/) | [`examples/agent-browser`](examples/agent-browser) |
 | Questions without a page: `ask()`, MCP `ask_question` | [unstuck.sh/docs/questions](https://unstuck.sh/docs/questions/) | [`examples/ask-question`](examples/ask-question) |
 | Deno and Bun (binary mode, or opt in with `mode: 'in-process'`) | [unstuck.sh/docs/requirements](https://unstuck.sh/docs/requirements/) | |
 
