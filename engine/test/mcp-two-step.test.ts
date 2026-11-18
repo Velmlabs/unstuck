@@ -50,7 +50,7 @@ describe('two-step MCP tools', () => {
   it('lists start/wait/cancel next to request_human_takeover; start takes the same inputs as request_human_takeover', async () => {
     const { client, server } = await connect();
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual([TOOL_NAME, START_TOOL, WAIT_TOOL, CANCEL_TOOL]);
+    expect(tools.map((t) => t.name)).toEqual([TOOL_NAME, START_TOOL, WAIT_TOOL, CANCEL_TOOL, 'ask_question', 'resume_after_human']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName[START_TOOL]!.inputSchema).toEqual(byName[TOOL_NAME]!.inputSchema);
     expect(byName[WAIT_TOOL]!.inputSchema.required).toEqual(['takeover_id']);

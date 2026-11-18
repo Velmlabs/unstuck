@@ -1,6 +1,6 @@
 // The browser `--mcp --browser` (or `--tools browser`) drives: started on first use, one tab of our own, one guard on it.
 import os from 'node:os';
-import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import type { AlertKind, CheckKind, TakeoverResult } from '@velmlabs/unstuck-protocol';
 import {
   createFileSessionStore,
   createGuard,
@@ -29,18 +29,29 @@ export interface BrowseConfig {
   home: string;
   /** How long a browsing tool waits for a person before it returns human_needed (default 40 s). */
   inToolWaitMs?: number;
+  /** The kinds of human check a person is brought in for (default MCP_RESCUE; `--rescue`). */
+  rescue?: readonly CheckKind[];
   /** Let the browser open localhost, intranet and cloud-metadata addresses (off by default). */
   allowPrivateNetwork?: boolean;
 }
 
 export const IN_TOOL_WAIT_MS = 40_000;
+/** What the MCP server rescues unless `--rescue` says otherwise. */
+export const MCP_RESCUE: readonly CheckKind[] = ['challenge', 'approval', 'login', '2fa'];
 
 type ReadyHandler = (info: LinkInfo, control: TakeoverControl) => void;
+/** What the guard knows about the check a takeover is for. */
+export interface RescueDetails {
+  site?: string;
+  kind?: AlertKind;
+  mode?: 'approval';
+  timeoutS?: number;
+}
 
 export interface BrowserSessionDeps {
   engine: Engine;
   storeFs: StoreFs;
-  runTakeover: (cdp: DirectCdp, reason: string, onReady: ReadyHandler) => Promise<TakeoverResult>;
+  runTakeover: (cdp: DirectCdp, reason: string, onReady: ReadyHandler, rescue?: RescueDetails) => Promise<TakeoverResult>;
   launch?: { chrome?: typeof launchChrome; obscura?: typeof launchObscura; findChrome?: typeof findChrome };
   connect?: typeof connectCdp;
   /** Which URLs count as private (tests); default: the host is or resolves to a private address. */
@@ -181,18 +192,24 @@ export class BrowserSession {
         cdp,
         store: this.store,
         profile: this.c.profile,
+        rescue: this.c.rescue ?? MCP_RESCUE,
         remember: this.c.remember,
         maxRescuesPerHour: this.c.maxRescuesPerHour,
         canRenderCaptcha,
         onRescue: (o) => {
           if (o.status === 'resolved' && o.check.site) this.solved.add(siteOf(o.check.site));
         },
-        takeover: ({ reason }) =>
+        takeover: ({ reason, site, kind, mode, timeoutS }) =>
           this.d
-            .runTakeover(cdp, reason, (info, control) => {
-              this.setHolder(info.sessionId);
-              for (const cb of [...this.listeners]) cb(info, control);
-            })
+            .runTakeover(
+              cdp,
+              reason,
+              (info, control) => {
+                this.setHolder(info.sessionId);
+                for (const cb of [...this.listeners]) cb(info, control);
+              },
+              { site, kind, ...(mode ? { mode } : {}), ...(timeoutS ? { timeoutS } : {}) },
+            )
             .finally(() => this.setHolder(null)),
       });
       const live: Live = { url, cdp, guard, launched, pair: { cdp, guard } };

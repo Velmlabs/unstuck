@@ -25,6 +25,7 @@ import {
   type Transport,
 } from '@velmlabs/unstuck-core';
 import { createTunneledCdp } from './tunnel';
+import { sendAskAlert } from './ask-alert';
 import { registerGuardMethods, REQUIRED_WITHOUT_CLOUD } from './guard-host';
 import { nodeStoreFs } from './browser/node-store-fs';
 
@@ -144,8 +145,6 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
     const problem = checkAsk(p) ?? askTypeProblem(p);
     if (problem) throw Object.assign(new Error(problem), { code: 'bad_params' });
     if (p.alerts === 'required' && !opts.alerter) throw Object.assign(new Error(REQUIRED_WITHOUT_CLOUD), { code: 'config_error' });
-    // Quick answers are choice buttons only (Cloud rejects a readable question without choices).
-    const quick = p.private === false && p.choices ? { question: p.question, choices: p.choices } : undefined;
     return engine.ask({
       question: p.question,
       choices: p.choices,
@@ -155,8 +154,8 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
       timeoutS: p.timeoutS,
       agentName: opts.agentName,
       onLink: (info, takeover) => {
-        // Like linkFor: the alert starts first. A question has no page, so no site.
-        sendTakeoverAlert(opts.alerter, p.alerts, { ...info, kind: 'question' }, undefined, takeover, quick);
+        // Like linkFor: the alert starts first.
+        sendAskAlert(opts.alerter, p.alerts, info, takeover, p);
         const { sessionId, url, reason, expiresAt, code } = info;
         peer.notify(Methods.askLink, { sessionId, url, reason, expiresAt, ...(code ? { code } : {}) } satisfies AskLinkParams);
       },

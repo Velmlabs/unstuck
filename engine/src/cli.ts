@@ -45,7 +45,11 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
       The browser never opens localhost, intranet or cloud-metadata addresses
       (redirects included) unless --allow-private-network.
 --agent-name (or UNSTUCK_AGENT_NAME) is the name phone alerts show for this agent.
---rescue <kinds> is a comma list of challenge, approval, login, 2fa.
+--rescue <kinds> is a comma list of challenge, approval, login, 2fa: the human checks
+      the browsing tools bring a person in for (default: all four; --rescue
+      challenge is the old behaviour).
+      ask_question (every --mcp server) asks the person a question; resume_after_human
+      finishes any call that returned human_needed.
 doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
       in a tab of its own and prints whether Unstuck works fully with it.
 
@@ -146,14 +150,37 @@ export function browseConfig(argv: string[], env: Record<string, string | undefi
   if (!PROFILE_NAME.test(profile)) return { error: 'profile names are letters, digits, "-" and "_" (at most 64), e.g. "mcp"' };
   const max = values['max-rescues-per-hour'] === undefined ? 10 : Number(values['max-rescues-per-hour']);
   if (!Number.isInteger(max) || max < 1) return { error: '--max-rescues-per-hour is a whole number of at least 1' };
-  let inToolWaitMs: number | undefined;
-  if (env.UNSTUCK_IN_TOOL_WAIT_S !== undefined) {
-    const w = Number(env.UNSTUCK_IN_TOOL_WAIT_S);
-    // Under 120 s: the default MCP client tool timeout is 60 s, and some raise it to 120 s.
-    if (!Number.isInteger(w) || w < 1 || w > 110) return { error: 'UNSTUCK_IN_TOOL_WAIT_S is a whole number of seconds from 1 to 110' };
-    inToolWaitMs = w * 1000;
+  const wait = inToolWaitFor(env);
+  if (wait.error) return { error: wait.error };
+  let rescue: CheckKind[] | undefined;
+  if (values.rescue !== undefined) {
+    try {
+      rescue = parseRescueKinds(values.rescue);
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
   }
-  return { browse: { source, profile, remember: !values['no-remember'], maxRescuesPerHour: max, home: unstuckHome(env), ...(inToolWaitMs ? { inToolWaitMs } : {}), ...(values['allow-private-network'] ? { allowPrivateNetwork: true } : {}) } };
+  return {
+    browse: {
+      source,
+      profile,
+      remember: !values['no-remember'],
+      maxRescuesPerHour: max,
+      home: unstuckHome(env),
+      ...(wait.ms ? { inToolWaitMs: wait.ms } : {}),
+      ...(rescue ? { rescue } : {}),
+      ...(values['allow-private-network'] ? { allowPrivateNetwork: true } : {}),
+    },
+  };
+}
+
+/** UNSTUCK_IN_TOOL_WAIT_S: how long a tool waits for a person before it returns the link (the default when unset). */
+export function inToolWaitFor(env: Record<string, string | undefined>): { ms?: number; error?: string } {
+  if (env.UNSTUCK_IN_TOOL_WAIT_S === undefined) return {};
+  const w = Number(env.UNSTUCK_IN_TOOL_WAIT_S);
+  // Under 120 s: the default MCP client tool timeout is 60 s, and some raise it to 120 s.
+  if (!Number.isInteger(w) || w < 1 || w > 110) return { error: 'UNSTUCK_IN_TOOL_WAIT_S is a whole number of seconds from 1 to 110' };
+  return { ms: w * 1000 };
 }
 
 /** The Cloud alerter these flags and variables ask for (undefined without UNSTUCK_API_KEY). `--agent-name` beats UNSTUCK_AGENT_NAME. */
@@ -222,7 +249,7 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
     return 2;
   }
   if (values.rescue !== undefined) {
-    // Read by the MCP server's browsing tools once they use it; no effect yet.
+    // Only the MCP server's browsing tools use it; a bad kind is a usage error either way.
     try {
       parseRescueKinds(values.rescue);
     } catch (e) {
@@ -250,7 +277,23 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
   const agentName = cleanAgentName(values['agent-name'] ?? io.env.UNSTUCK_AGENT_NAME);
   const alerter = cloudAlerterFor({ relay: values.relay, agentKey: values['agent-key'], agentName: values['agent-name'] }, io.env, (l) => void io.stderr.write(l + '\n'));
   if (values.mcp) {
-    const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open, alerter, ...(browsing.browse ? { browse: browsing.browse } : {}) });
+    // ask_question waits like the browsing tools do, browser or not.
+    const wait = inToolWaitFor(io.env);
+    if (wait.error) {
+      io.stderr.write(`${wait.error}\n${USAGE}`);
+      return 2;
+    }
+    const server = createMcpServer({
+      transport,
+      log: new JsonlFileEventLog(defaultLogPath(io.env)),
+      env: io.env,
+      stderr: io.stderr,
+      open: values.open,
+      alerter,
+      ...(agentName ? { agentName } : {}),
+      ...(wait.ms ? { inToolWaitMs: wait.ms } : {}),
+      ...(browsing.browse ? { browse: browsing.browse } : {}),
+    });
     // stdin closing, or a signal (Ctrl-C, a client killing its server): both close the server, which stops a browser it
     // started (in its own process group, so it doesn't get the signal) and removes that browser's profile.
     const signals = io.signals ?? process;

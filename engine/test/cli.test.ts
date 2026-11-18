@@ -75,8 +75,8 @@ describe('main', () => {
     x.stdin.end();
     await expect(run).resolves.toBe(0);
     expect(lines.find((l) => l.id === 1).result.serverInfo).toMatchObject({ name: 'unstuck', version: VERSION });
-    expect(lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name)).toEqual(['request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover', 'cancel_human_takeover']);
-    expect(x.err()).toMatch(/MCP server ready \(tools: request_human_takeover, start_human_takeover, wait_for_human_takeover, cancel_human_takeover\)/);
+    expect(lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name)).toEqual(['request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover', 'cancel_human_takeover', 'ask_question', 'resume_after_human']);
+    expect(x.err()).toMatch(/MCP server ready \(tools: request_human_takeover, start_human_takeover, wait_for_human_takeover, cancel_human_takeover, ask_question, resume_after_human\)/);
   });
 
   it('relay mode: the startup line names the relay and never the key', async () => {
@@ -188,6 +188,12 @@ describe('browse flags', () => {
     for (const bad of ['0', '111', 'x']) expect(browseConfig(['--mcp', '--browser'], { ...env, UNSTUCK_IN_TOOL_WAIT_S: bad })).toEqual({ error: 'UNSTUCK_IN_TOOL_WAIT_S is a whole number of seconds from 1 to 110' });
   });
 
+  it('--rescue sets the browsing scope (absent: the MCP default applies in the session); a bad kind is an error', () => {
+    expect(browseConfig(['--mcp', '--browser', '--rescue', 'challenge, approval'], env)).toMatchObject({ browse: { rescue: ['challenge', 'approval'] } });
+    expect(browseConfig(['--mcp', '--browser'], env).browse).not.toHaveProperty('rescue');
+    expect(browseConfig(['--mcp', '--browser', '--rescue', 'soup'], env)).toEqual({ error: expect.stringContaining('unknown --rescue kind "soup"') });
+  });
+
   it('--tools takeover (or no flag) is the four takeover tools; usage errors for the rest', () => {
     expect(browseConfig(['--mcp', '--tools', 'takeover'], env)).toEqual({});
     expect(browseConfig(['--mcp'], env)).toEqual({});
@@ -223,8 +229,8 @@ describe('browse flags', () => {
     expect(x.err()).toContain('--tools browser wraps the browser at UNSTUCK_CDP_URL; set it, or use --browser to let Unstuck start its own');
   });
 
-  it('main: --mcp --browser lists the browse tools and starts no browser; --tools takeover lists four', async () => {
-    for (const [argv, count] of [[['--mcp', '--browser'], 18], [['--mcp', '--tools', 'takeover'], 4]] as const) {
+  it('main: --mcp --browser lists the browse tools and starts no browser; --tools takeover lists the takeover tools, ask_question and resume_after_human', async () => {
+    for (const [argv, count] of [[['--mcp', '--browser'], 19], [['--mcp', '--tools', 'takeover'], 6]] as const) {
       const x = io();
       const lines: any[] = [];
       readline.createInterface({ input: x.stdout }).on('line', (l) => lines.push(JSON.parse(l)));
@@ -239,7 +245,7 @@ describe('browse flags', () => {
       const names = lines.find((l) => l.id === 2).result.tools.map((t: { name: string }) => t.name);
       expect(names).toHaveLength(count);
       expect(x.err()).toContain(`MCP server ready (tools: ${names.join(', ')})`);
-      if (count === 18) expect(names).toEqual(expect.arrayContaining(['fetch_page', 'open', 'ask_human']));
+      if (count === 19) expect(names).toEqual(expect.arrayContaining(['fetch_page', 'open', 'ask_human']));
       expect(x.err()).not.toMatch(/DevTools/);
     }
   });
@@ -261,6 +267,15 @@ describe('--rescue', () => {
     expect(x.err()).toContain('unknown --rescue kind "soup" (use challenge, approval, login, 2fa)');
     const y = io('');
     await expect(main(['--stdio', '--rescue', 'challenge,approval'], y)).resolves.toBe(0);
+  });
+});
+
+describe('--mcp wiring', () => {
+  it('a bad UNSTUCK_IN_TOOL_WAIT_S is a usage error even without a browser (ask_question waits by it too)', async () => {
+    const bad = io();
+    (bad as { env: Record<string, string> }).env = { UNSTUCK_IN_TOOL_WAIT_S: '999' };
+    await expect(main(['--mcp'], bad)).resolves.toBe(2);
+    expect(bad.err()).toContain('UNSTUCK_IN_TOOL_WAIT_S is a whole number of seconds from 1 to 110');
   });
 });
 

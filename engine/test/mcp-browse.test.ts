@@ -15,6 +15,7 @@ import { CHROME_NOT_FOUND } from '../src/browser/launcher';
 import { startChromium, type DebugChromium } from './chromium';
 
 const INTERSTITIAL = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../core/test/fixtures/human-checks/cloudflare-interstitial.html'), 'utf8');
+const APPROVE = fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../core/test/fixtures/human-checks/approval-duo.html'), 'utf8');
 const FORM = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'actions', 'form.html'), 'utf8');
 const ARTICLE = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'extract', 'article.html'), 'utf8');
 // The challenge reloads itself once the person has solved it (as Cloudflare's does).
@@ -43,6 +44,8 @@ beforeAll(async () => {
       return void res.writeHead(200, { 'content-type': 'text/html' }).end(
         "<!doctype html><title>Pay</title><label>Card <input id=card autocomplete=cc-number></label><label>Code <input id=otp autocomplete=one-time-code></label><label>Verify <input id=pin2 name=pin></label><label>Note <input id=note></label><script>card.value='4111111111111111'; otp.value='123456'; pin2.value='9876'; note.value='hello';</script>",
       );
+    if (p === '/approve') return void res.writeHead(200, { 'content-type': 'text/html' }).end(APPROVE);
+    if (p === '/gate') return void res.writeHead(302, { location: '/login' }).end();
     if (p === '/redir') return void res.writeHead(302, { location: `http://localhost:${secretPort}/secret` }).end();
     if (p === '/links') return void res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><title>Links</title><a href="/cf">Checkout</a>');
     if (p === '/form') return void res.writeHead(200, { 'content-type': 'text/html' }).end(FORM);
@@ -82,7 +85,7 @@ beforeEach(() => {
 });
 afterEach(() => fs.rmSync(home, { recursive: true, force: true }));
 
-async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: number; env?: Record<string, string>; noChrome?: boolean; maxRescuesPerHour?: number; deliver?: boolean; privateBlocked?: (u: URL) => Promise<boolean> } = {}) {
+async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: number; env?: Record<string, string>; noChrome?: boolean; maxRescuesPerHour?: number; rescue?: string[]; deliver?: boolean; privateBlocked?: (u: URL) => Promise<boolean> } = {}) {
   const transport = new FakeTransport();
   let err = '';
   const srv = createMcpServer({
@@ -102,7 +105,7 @@ async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: nu
     ...(o.deliver === false ? {} : { open: true, openUrl: () => {} }),
     ...(o.browse === false
       ? {}
-      : { browse: { source: o.noChrome ? { kind: 'chrome' } : { kind: 'cdp', url: chrome.wsUrl }, profile: 'mcp', remember: o.remember ?? false, maxRescuesPerHour: o.maxRescuesPerHour ?? 10, home, inToolWaitMs: o.inToolWaitMs ?? 1500, allowPrivateNetwork: !o.privateBlocked } }),
+      : { browse: { source: o.noChrome ? { kind: 'chrome' } : { kind: 'cdp', url: chrome.wsUrl }, profile: 'mcp', remember: o.remember ?? false, maxRescuesPerHour: o.maxRescuesPerHour ?? 10, home, inToolWaitMs: o.inToolWaitMs ?? 1500, ...(o.rescue ? { rescue: o.rescue as never } : {}), allowPrivateNetwork: !o.privateBlocked } }),
     ...(o.privateBlocked ? { blockHost: o.privateBlocked } : {}),
   });
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
@@ -128,23 +131,67 @@ async function open(o: { browse?: boolean; remember?: boolean; inToolWaitMs?: nu
 }
 
 describe('MCP browse tools', { timeout: 30_000 }, () => {
-  it('without browse options the server lists exactly the four takeover tools', async () => {
+  it('without browse options the server lists exactly the takeover tools, ask_question and resume_after_human', async () => {
     const m = await open({ browse: false });
     expect((await m.client.listTools()).tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES].sort());
     await m.close();
   });
 
-  it('with browse options it adds fetch_page, the session tools, resume_after_human and the interaction tools', async () => {
+  it('with browse options it adds fetch_page, the session tools and the interaction tools', async () => {
     const m = await open();
     const tools = (await m.client.listTools()).tools;
     expect(BROWSE_TOOL_NAMES).toEqual([
-      'fetch_page', 'get_session', 'forget_site', 'remember_site', 'resume_after_human',
+      'fetch_page', 'get_session', 'forget_site', 'remember_site',
       'open', 'snapshot', 'click', 'type', 'select', 'scroll', 'wait_for', 'screenshot', 'ask_human',
     ]);
     expect(tools.map((t) => t.name).sort()).toEqual([...TOOL_NAMES, ...BROWSE_TOOL_NAMES].sort());
     const fetchPage = tools.find((t) => t.name === 'fetch_page')!;
     expect(fetchPage.description).toMatch(/a person solves/i);
     expect(fetchPage.description).toMatch(/terms/);
+    await m.close();
+  });
+
+  it('an approval page met by a browsing tool is rescued by default (a sign-in approval takeover)', async () => {
+    const m = await open({ inToolWaitMs: 300 });
+    const h = await m.call('fetch_page', { url: `${site}/approve` });
+    expect(h.structuredContent).toMatchObject({ status: 'human_needed', takeover_id: expect.any(String), reason: expect.stringMatching(/approve a sign-in/) });
+    await m.call('cancel_human_takeover', { takeover_id: h.structuredContent.takeover_id });
+    await m.close();
+  });
+
+  it('a login wall is rescued by default too (login and 2fa join the scope)', async () => {
+    const m = await open({ inToolWaitMs: 300 });
+    const h = await m.call('fetch_page', { url: `${site}/gate` });
+    expect(h.structuredContent).toMatchObject({ status: 'human_needed', reason: expect.stringMatching(/asks you to log in/) });
+    await m.call('cancel_human_takeover', { takeover_id: h.structuredContent.takeover_id });
+    await m.close();
+  });
+
+  it('--rescue approval leaves a login wall alone', async () => {
+    const m = await open({ inToolWaitMs: 300, rescue: ['approval'] });
+    expect((await m.call('fetch_page', { url: `${site}/gate` })).structuredContent).toMatchObject({ status: 200 });
+    await m.close();
+  });
+
+  it('--rescue challenge restores the old scope: the approval page comes back as an ordinary page', async () => {
+    const m = await open({ inToolWaitMs: 300, rescue: ['challenge'] });
+    const r = await m.call('fetch_page', { url: `${site}/approve` });
+    expect(r.structuredContent).toMatchObject({ status: 200 });
+    expect(r.structuredContent).not.toHaveProperty('rescued');
+    await m.close();
+  });
+
+  it('the browsing tools mention sign-in approvals in their descriptions', async () => {
+    const m = await open();
+    const tools = (await m.client.listTools()).tools;
+    expect(tools.find((t) => t.name === 'fetch_page')!.description).toMatch(/approves sign-in approval/);
+    expect(tools.find((t) => t.name === 'ask_human')!.description).toMatch(/approve a sign-in/);
+    await m.close();
+  });
+
+  it('resume_after_human finishes a browsing call and refuses unknown ids', async () => {
+    const m = await open({ browse: false });
+    expect((await m.call('resume_after_human', { takeover_id: 'nope' })).isError).toBe(true);
     await m.close();
   });
 
