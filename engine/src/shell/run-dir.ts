@@ -19,6 +19,8 @@ export interface RunFile {
   browser?: string;
   startedAt: number;
   expiresAt: number;
+  /** The start result (link and all), so a repeated start on the same tab can answer with it. */
+  start?: Record<string, unknown>;
 }
 
 const ID = /^[A-Za-z0-9_-]{16,64}$/;
@@ -77,6 +79,13 @@ export async function listRunning(dir: string): Promise<RunFile[]> {
   return out;
 }
 
+const lockPath = (dir: string, tabKey: string) => path.join(dir, `tab-${createHash('sha256').update(tabKey).digest('hex').slice(0, 32)}.lock`);
+
+/** Frees a tab's lock (the request on it has ended). */
+export async function releaseTab(dir: string, tabKey: string): Promise<void> {
+  await unlink(lockPath(dir, tabKey)).catch(() => {});
+}
+
 export type TabClaim = { claimed: true; setLockId(id: string): Promise<void>; release(): Promise<void> } | { claimed: false; id: string | null };
 
 /**
@@ -84,7 +93,7 @@ export type TabClaim = { claimed: true; setLockId(id: string): Promise<void>; re
  * no id after LOCK_START_GRACE_MS, is taken over. `id: null` means another start for this tab is still under way.
  */
 export async function claimTab(dir: string, tabKey: string): Promise<TabClaim> {
-  const lock = path.join(dir, `tab-${createHash('sha256').update(tabKey).digest('hex').slice(0, 32)}.lock`);
+  const lock = lockPath(dir, tabKey);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fh = await open(lock, 'wx', 0o600);

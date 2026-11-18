@@ -24,6 +24,14 @@ function io(stdinText?: string) {
 }
 
 describe('main', () => {
+  it('the shell commands dispatch before the MCP flags (usage problems are exit 2 with one JSON line)', async () => {
+    for (const argv of [['rescue'], ['takeover'], ['ask'], ['wait'], ['cancel']]) {
+      const x = { ...io(), env: { UNSTUCK_HOME: fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'unstuck-cli-')) } };
+      await expect(main(argv, x)).resolves.toBe(2);
+      expect(JSON.parse(x.out()).error).toMatch(/^(usage|no_cdp)$/);
+    }
+  });
+
   it('--version prints the version', async () => {
     const x = io();
     await expect(main(['--version'], x)).resolves.toBe(0);

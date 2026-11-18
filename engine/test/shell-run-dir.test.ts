@@ -97,3 +97,47 @@ describe('control endpoint', () => {
     }
   });
 });
+
+describe('tab claims and control failures', () => {
+  it('a claim names its request, and release frees the tab', async () => {
+    const c = await claimTab(dir, 'T9');
+    if (!c.claimed) throw new Error('not claimed');
+    await writeRunFile(dir, file({ id: 'idforthelockxxxxxxxxx', tab: 'T9' }));
+    await c.setLockId('idforthelockxxxxxxxxx');
+    expect(await claimTab(dir, 'T9')).toEqual({ claimed: false, id: 'idforthelockxxxxxxxxx' });
+    await c.release();
+    expect((await claimTab(dir, 'T9')).claimed).toBe(true);
+  });
+
+  it('a lock with no id older than the start grace is taken over', async () => {
+    const c = await claimTab(dir, 'T8');
+    expect(c.claimed).toBe(true);
+    const lock = fs.readdirSync(dir).find((n) => n.endsWith('.lock'))!;
+    const old = new Date(Date.now() - 120_000);
+    fs.utimesSync(path.join(dir, lock), old, old);
+    expect((await claimTab(dir, 'T8')).claimed).toBe(true);
+  });
+
+  it('a handler that throws answers 500 with status failed', async () => {
+    const srv = await startControlServer({
+      token: 'tok',
+      result: async () => {
+        throw new Error('boom');
+      },
+      cancel: async () => {
+        throw new Error('bang');
+      },
+      onRead: () => {},
+    });
+    try {
+      const h = { authorization: 'Bearer tok' };
+      const r = await fetch(`http://127.0.0.1:${srv.port}/result`, { headers: h });
+      expect([r.status, await r.json()]).toEqual([500, { status: 'failed', detail: 'boom' }]);
+      const c = await fetch(`http://127.0.0.1:${srv.port}/cancel`, { method: 'POST', headers: h });
+      expect([c.status, await c.json()]).toEqual([500, { status: 'failed', detail: 'bang' }]);
+      expect((await fetch(`http://127.0.0.1:${srv.port}/result`)).status).toBe(401);
+    } finally {
+      await srv.close();
+    }
+  });
+});

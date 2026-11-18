@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createRequire } from 'node:module';
 import { launchChrome } from '../src/browser/launcher';
+import { waitForFirstTab } from './chromium';
 import { connectBrowser } from '../src/direct-cdp';
 import { resolveTab, ShellError } from '../src/shell/tab';
 
@@ -10,6 +11,7 @@ let browser: Awaited<ReturnType<typeof launchChrome>>;
 let http: string;
 beforeAll(async () => {
   browser = await launchChrome({ path: chromium.executablePath(), isRoot: process.getuid?.() === 0 });
+  await waitForFirstTab(Number(new URL(browser.cdpUrl).port));
   http = browser.cdpUrl.replace(/^ws:\/\/([^/]+)\/.*$/, 'http://$1');
 });
 afterAll(async () => {
@@ -66,6 +68,8 @@ describe('resolveTab', () => {
   });
 
   it('page-level ws url selects that tab', async () => {
+    // The previous test's tab can still be listed for a moment after closing.
+    await expect.poll(async () => (await pages()).length, { timeout: 10_000 }).toBe(1);
     const [only] = await pages();
     const pageWs = browser.cdpUrl.replace(/\/devtools\/browser\/.*/, `/devtools/page/${only!.targetId}`);
     const t = await resolveTab(pageWs);

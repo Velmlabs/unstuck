@@ -7,6 +7,7 @@ import { PassThrough } from 'node:stream';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { launchChrome } from '../src/browser/launcher';
+import { waitForFirstTab } from './chromium';
 import { connectCdp } from '../src/direct-cdp';
 import { runCheck } from '../src/shell/check';
 
@@ -18,6 +19,7 @@ let server: http.Server;
 let site: string;
 beforeAll(async () => {
   browser = await launchChrome({ path: chromium.executablePath(), isRoot: process.getuid?.() === 0 });
+  await waitForFirstTab(Number(new URL(browser.cdpUrl).port));
   server = http.createServer((req, res) => {
     const name = (req.url ?? '/').split('?')[0]!.slice(1) || 'clear';
     const file = path.join(FIXTURES, `${name}.html`);

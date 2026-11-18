@@ -27,6 +27,7 @@
     "jsdom": "^25.0.1"
   },
   "bin": {
-    "unstuck-engine": "./dist/unstuck-engine"
+    "unstuck-engine": "./dist/unstuck-engine",
+    "unstuck": "./dist/unstuck-engine"
   }
 }

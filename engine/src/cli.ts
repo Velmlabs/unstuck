@@ -14,6 +14,7 @@ import { PROFILE_NAME, cleanAgentName } from '@velmlabs/unstuck-core';
 import type { CheckKind } from '@velmlabs/unstuck-protocol';
 import { formatReport, runDoctor } from './doctor';
 import { runCheck } from './shell/check';
+import { runCancel, runRequestChild, runStart, runWait } from './shell/start';
 import { buildTransport, cloudAlertsFor, selectTransport } from './transport-select';
 import { createCloudAlerter } from './cloud-alerts';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -25,7 +26,14 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
                      [--browser[=chrome|obscura] [--obscura-path <path>] | --tools takeover|browser]
                      [--profile <name>] [--no-remember] [--max-rescues-per-hour <n>] [--allow-private-network]
        unstuck-engine doctor --cdp <url>
-       unstuck-engine check --cdp <url> [--tab <targetId>] [--url <requested>] [--rescue <kinds>]
+       unstuck-engine check    --cdp <url> [--tab <targetId>] [--url <requested>] [--rescue <kinds>]
+       unstuck-engine rescue   --cdp <url> [--tab <targetId>] [--url <requested>] [--rescue <kinds>] [--reason <text>]
+                               [--timeout <s>] [--alerts true|false|required] [--agent-name <name>]
+       unstuck-engine takeover --cdp <url> [--tab <targetId>] --reason <text> [--timeout <s>] [--alerts …]
+       unstuck-engine ask      <question> [--choice <label>]… [--allow-text] [--public] [--details <text>]
+                               [--timeout <s>] [--alerts …]
+       unstuck-engine wait     <id> [--max-wait <s>]
+       unstuck-engine cancel   <id>
        unstuck-engine --version | --help
 
 --mcp runs an MCP server on stdin/stdout. Tools: request_human_takeover (one
@@ -206,6 +214,12 @@ const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 /** Shell commands for CLI browser agents (agent-browser and others): their own flags, JSON out, stable exit codes. */
 const SHELL_COMMANDS: Record<string, (argv: string[], io: CliIO, env: Record<string, string | undefined>) => Promise<number>> = {
   check: (argv, io, env) => runCheck(argv, io, env),
+  rescue: (argv, io, env) => runStart('rescue', argv, io, env),
+  takeover: (argv, io, env) => runStart('takeover', argv, io, env),
+  ask: (argv, io, env) => runStart('ask', argv, io, env),
+  wait: (argv, io, env) => runWait(argv, io, env),
+  cancel: (argv, io, env) => runCancel(argv, io, env),
+  __request: (_argv, io, env) => runRequestChild({ stdin: io.stdin, stdout: io.stdout, env, assets: io.assets }, () => process.exit(0)).then(() => new Promise<number>(() => {})),
 };
 
 /** Returns the process exit code. */
