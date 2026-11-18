@@ -129,6 +129,9 @@ describe('approval rules', () => {
     expect(APPROVAL_FAILED_RULES.every((r) => r.kind === 'approval')).toBe(true);
     for (const t of ['Request timed out', "We didn't hear from you", 'We didn\u2019t hear from you']) expect(failed(t)?.ruleId).toBe('approval_failed.timed_out');
     for (const t of ['Push was denied', 'Push rejected', 'Sign-in denied', 'Sign-in was denied']) expect(failed(t)?.ruleId).toBe('approval_failed.denied');
+    for (const t of ['Login timed out', 'Your push notification has expired', 'Push notification expired']) expect(failed(t)?.ruleId).toBe('approval_failed.timed_out');
+    for (const t of ['Login request denied', 'You have chosen to reject this login', 'Request declined', 'You declined the sign-in request']) expect(failed(t)?.ruleId).toBe('approval_failed.denied');
+    for (const t of ['We sent a login request to your phone', 'Accept or decline cookies', 'Your session will expire in 5 minutes']) expect(failed(t)).toBeNull();
     expect(failed('Try again')?.ruleId).toBe('approval_failed.retry');
     expect(failed('Welcome to the shop')).toBeNull();
     expect(failed('Try again', { bodyTextLength: 3001 })).toBeNull();

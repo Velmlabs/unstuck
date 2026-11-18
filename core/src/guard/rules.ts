@@ -66,8 +66,8 @@ export const RULES: readonly DetectionRule[] = [
 
 /** What a sign-in approval page says once the push timed out or was refused. Matched on its own, never part of RULES. */
 export const APPROVAL_FAILED_RULES: readonly DetectionRule[] = [
-  { id: 'approval_failed.timed_out', kind: 'approval', all: [{ text: /request timed out|we didn['\u2019]t hear from you/i, maxBodyText: 3000 }] },
-  { id: 'approval_failed.denied', kind: 'approval', all: [{ text: /push (was )?(rejected|denied)|sign-in (was )?denied/i, maxBodyText: 3000 }] },
+  { id: 'approval_failed.timed_out', kind: 'approval', all: [{ text: /request timed out|log ?in timed out|we didn['\u2019]t hear from you|push notification (has )?expired/i, maxBodyText: 3000 }] },
+  { id: 'approval_failed.denied', kind: 'approval', all: [{ text: /push (was )?(rejected|denied)|sign-in (was )?denied|log ?in request (was )?denied|chosen to reject this log ?in|\bdeclined\b/i, maxBodyText: 3000 }] },
   { id: 'approval_failed.retry', kind: 'approval', all: [{ text: /try again/i, maxBodyText: 3000 }] },
 ];
 
