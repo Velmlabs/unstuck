@@ -27,6 +27,7 @@ import { newSessionId } from './tokens';
 import { createViewerGate } from './gate';
 import { createResumeWatch, publishLink } from './link';
 import { watchApproval } from '../guard/approval-watch';
+import { STILL_BLOCKED_PREFIX, checkApproval } from '../guard/approval-verdict';
 import { CAPTURE_TIMEOUT_MS, within } from '../stream/within';
 
 export { HELLO_TIMEOUT_MS, MAX_CODE_ATTEMPTS } from './gate';
@@ -185,6 +186,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   /** Stops the approval watcher when the takeover ends. */
   const watch = new AbortController();
   let previewTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Approval mode: the page is being judged (the prompt went away, or the person said they approved). */
+  let checking = false;
   let offNavigated: () => void = () => {};
 
   const emit = (type: Parameters<EventLog['append']>[0]['type'], data?: Record<string, string | number | boolean>) =>
@@ -355,6 +358,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     // credit: 1 — this engine paces frames by the viewer's acks once the viewer opts in ({ t: 'credit', v: 1 }).
     sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey: gate.resumeKey()!, ...(vn ? { vn } : {}), credit: 1 });
     if (approvalSession) sendJson(conn, modeFrame());
+    if (checking) sendJson(conn, { t: 'state', status });
     sender = holderSender = createLatestSender(conn, { now });
     // The waiting page shows one still of the page, and nothing to type into.
     if (mode === 'approval') return sendPreview();
@@ -379,7 +383,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   /** The person asked to drive the page themselves: from now on this is a normal takeover. */
   async function switchToControl(conn: ViewerConnection): Promise<void> {
-    if (mode !== 'approval' || conn !== holder()) return;
+    if (mode !== 'approval' || checking || conn !== holder()) return;
     mode = 'control';
     if (previewTimer) clearTimeout(previewTimer);
     previewTimer = null;
@@ -482,8 +486,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (msg.t === 'hello' || msg.t === 'answer' || (!approvalSession && (msg.t === 'approved' || msg.t === 'switch_control'))) return gate.reject(conn, 'bad_message', false);
     switch (msg.t) {
       case 'approved':
-        // The person's word only: rescue checks the page before the agent is told it is through.
-        return finish('resolved', 'approved_by_person');
+        // The person's word only: the page must show the sign-in went through.
+        return void judgeApproval('approved_by_person');
       case 'switch_control':
         return void switchToControl(conn);
       case 'ping':
@@ -550,7 +554,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (approvalSession && opts.approvalSince !== undefined) {
       // Ends the takeover by itself once the prompt has gone; never rejects but for the abort in finish().
       watchApproval(cdp, { since: opts.approvalSince, signal: watch.signal }).then(
-        (v) => finish('resolved', v === 'navigated' ? 'approval_navigated' : 'approval_changed'),
+        (v) => judgeApproval(v === 'navigated' ? 'approval_navigated' : 'approval_changed'),
         () => {},
       );
     }
@@ -565,6 +569,20 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   function fail(detail: string): void {
     finish('failed', detail);
+  }
+  /**
+   * Approval mode: the prompt went away or the person says they approved. The person sees "Checking the page…" (a
+   * `state` frame of the running session) while the page is judged; the session is `resolved` (with `passed` as its
+   * detail) only on positive evidence, otherwise `failed` with `still_blocked:<detail>` (see checkApproval).
+   */
+  async function judgeApproval(passed: string): Promise<void> {
+    if (checking || isTerminal(status)) return;
+    checking = true;
+    const h = holder();
+    if (h) sendJson(h, { t: 'state', status });
+    const verdict = await checkApproval(cdp, { signal: watch.signal }).catch(() => 'approval_unreadable');
+    if (verdict === null) finish('resolved', passed);
+    else finish('failed', STILL_BLOCKED_PREFIX + verdict);
   }
   function cancel(detail: string): void {
     finish('cancelled', detail);

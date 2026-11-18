@@ -78,6 +78,8 @@ const FINAL_SCREENS: Partial<Record<SessionStatus, Screen>> = {
 };
 
 const APPROVED_SCREEN: Screen = { kind: 'message', title: 'Approved, thank you', body: 'The sign-in went through and your agent carried on. You can close this tab.', tone: 'ok' };
+/** An approval session that ended `failed`: the engine found no proof on the page that the sign-in went through. */
+const NOT_APPROVED_SCREEN: Screen = { kind: 'message', title: "The sign-in didn't go through", body: 'Your agent will try again or ask you. You can close this tab.', tone: 'warn' };
 
 /** The viewer's own controls: keys pressed on them are not sent to the agent's page. */
 const CHROME = 'button, .topbar, .bottombar, .stage-controls, .sheet';
@@ -224,6 +226,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   modeRef.current = modeFrame;
   const [errors, setErrors] = useState(0);
   const [answered, setAnswered] = useState<AskAnswer | null>(null);
+  /** Approval mode: the engine is checking the page before it ends the session. */
+  const [approvalChecking, setApprovalChecking] = useState(false);
   const approvalCanvas = useRef<HTMLCanvasElement>(null);
   /** A frame that came in before the preview canvas was on the page. */
   const previewWait = useRef<{ f: Frame; drawn: (f: Frame) => void } | null>(null);
@@ -363,7 +367,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         setModeFrame(m);
       },
       onState: (s, answer) => {
-        const final = s === 'resolved' && modeRef.current?.mode === 'approval' ? APPROVED_SCREEN : FINAL_SCREENS[s];
+        const approving = modeRef.current?.mode === 'approval';
+        // A running approval session says it is judging the page (the prompt went away, or the person tapped).
+        if (s === 'active' && approving) return setApprovalChecking(true);
+        const final = approving && s === 'resolved' ? APPROVED_SCREEN : approving && s === 'failed' ? NOT_APPROVED_SCREEN : FINAL_SCREENS[s];
         if (s === 'answered') setAnswered(answer ?? {});
         if (final || s === 'answered') {
           resumeStore.set(sessionId, null);
@@ -1099,7 +1106,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     return !modeFrame || modeFrame.mode === 'question' ? (
       <QuestionScreen question={modeFrame?.question} agentName={modeFrame?.agentName} answer={answered ?? undefined} answered={!!answered} remaining={left} embed={embed} errors={errors} onAnswer={(a) => send({ t: 'answer', ...a })} />
     ) : (
-      <ApprovalScreen reason={modeFrame.reason} site={modeFrame.site} canvasRef={approvalCanvas} remaining={left} embed={embed} onApproved={() => send({ t: 'approved' })} onShowPage={() => send({ t: 'switch_control' })} />
+      <ApprovalScreen reason={modeFrame.reason} site={modeFrame.site} canvasRef={approvalCanvas} remaining={left} embed={embed} checking={approvalChecking} onApproved={() => send({ t: 'approved' })} onShowPage={() => send({ t: 'switch_control' })} />
     );
   }
 

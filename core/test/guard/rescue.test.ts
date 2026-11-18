@@ -189,6 +189,16 @@ describe('rescue for approvals', () => {
     expect(await rescue(fakePage(state), approvalCheck, { takeover: run, limiter: limiter(), quietMs: 10, clearWaitMs: 2000 })).toMatchObject({ status: 'resolved' });
   });
 
+  it.each(['approval_still_showing', 'approval_unreadable', 'approval_failed.denied', '2fa.code'])(
+    'an approval session that judged the page not through (still_blocked:%s) is still_blocked with that detail, without looking again',
+    async (detail) => {
+      const cdp = fakePage({ facts: page({ url: 'https://accounts.example/home' }) });
+      const o = await rescue(cdp, approvalCheck, { takeover: runner('failed', `still_blocked:${detail}`), limiter: limiter(), quietMs: 10 });
+      expect(o).toMatchObject({ status: 'still_blocked', detail, takeover: { status: 'failed', detail: `still_blocked:${detail}` } });
+      expect(cdp.calls).toEqual([]);
+    },
+  );
+
   it('approval resolved when the page navigated and nothing matches', async () => {
     const o = await rescue(fakePage({ facts: page({ url: 'https://accounts.example/home', bodyTextHead: 'Welcome back' }) }), approvalCheck, { takeover: runner('resolved', 'approval_navigated'), limiter: limiter(), quietMs: 10 });
     expect(o).toMatchObject({ status: 'resolved', takeover: { status: 'resolved', detail: 'approval_navigated' } });

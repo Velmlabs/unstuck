@@ -1,16 +1,14 @@
 import { alertKindOf, type AlertKind, type CheckKind, type HumanCheck, type RescueOutcome, type TakeoverResult } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from '../cdp';
-import { APPROVAL_FAILED_RULES, detectHumanCheck, matchRules, readFacts } from './detect';
+import { CLEAR_POLL_MS, CLEAR_WAIT_MS, STILL_BLOCKED_PREFIX, checkApproval } from './approval-verdict';
+import { detectHumanCheck } from './detect';
 import type { RateLimiter } from './rate-limit';
 import { BROWSER_CANNOT_RENDER_HINT, type RenderCheck } from './render-check';
 import { waitForQuiet } from './settle';
 
-export const CLEAR_WAIT_MS = 6_000;
-const CLEAR_POLL_MS = 250;
+export { CLEAR_WAIT_MS };
 /** How long a person has to approve a sign-in on their phone (seconds). */
 export const APPROVAL_TIMEOUT_S = 300;
-/** After an approval, anything in here (even outside the guard's scope) means the agent is still not through. */
-const APPROVAL_POST_SCOPE: readonly CheckKind[] = ['challenge', 'approval', 'login', '2fa'];
 
 /** Runs one takeover for a check (the SDKs and the engine each bind their own). */
 export type TakeoverRunner = (o: { reason: string; site: string; kind: AlertKind; mode?: 'approval'; timeoutS?: number }) => Promise<TakeoverResult>;
@@ -44,23 +42,6 @@ export interface RescueOptions {
   approvalTimeoutS?: number;
 }
 
-/**
- * After an approval takeover: what the page shows now. `null` only for a readable page with nothing on it (positive
- * evidence); otherwise whether it may still clear by itself (`wait`) or is final.
- */
-async function approvalVerdict(cdp: CdpClient): Promise<{ detail: string; wait: boolean } | null> {
-  // detectHumanCheck gives a widget its grace but reads "can't read the page" as nothing found, so the verdict rests on
-  // a readable snapshot taken after it: an unreadable page is never evidence that the approval went through.
-  const seen = await detectHumanCheck(cdp, { scope: APPROVAL_POST_SCOPE });
-  const facts = await readFacts(cdp);
-  if (!facts) return { detail: 'approval_unreadable', wait: true };
-  const failed = matchRules(facts, null, { scope: ['approval'], rules: APPROVAL_FAILED_RULES });
-  if (failed) return { detail: failed.ruleId, wait: false };
-  const hit = seen ?? matchRules(facts, null, { scope: APPROVAL_POST_SCOPE });
-  if (!hit) return null;
-  return hit.ruleId === 'approval.prompt' ? { detail: 'approval_still_showing', wait: true } : { detail: hit.ruleId, wait: false };
-}
-
 /** Brings in a person for one check. Never rejects: every way it can end is an outcome. */
 export async function rescue(cdp: CdpClient, check: HumanCheck, o: RescueOptions): Promise<RescueOutcome> {
   const now = o.now ?? Date.now;
@@ -82,21 +63,20 @@ export async function rescue(cdp: CdpClient, check: HumanCheck, o: RescueOptions
     );
     if (takeover.status === 'timed_out') return out('timed_out', { takeover });
     if (takeover.status === 'cancelled') return out('cancelled', { takeover, ...(takeover.detail ? { detail: takeover.detail } : {}) });
+    // The approval session judged the page itself and found no proof the sign-in went through.
+    if (takeover.status === 'failed' && takeover.detail?.startsWith(STILL_BLOCKED_PREFIX)) return out('still_blocked', { takeover, detail: takeover.detail.slice(STILL_BLOCKED_PREFIX.length) });
     if (takeover.status === 'failed') return out(takeover.detail === 'alert_failed' ? 'alert_failed' : 'failed', { takeover, ...(takeover.detail ? { detail: takeover.detail } : {}) });
+    // An approval needs positive evidence (the session judged it already when it ended by itself or on "I've
+    // approved it"; a Done after switching to control is judged here): see checkApproval.
+    if (approval) {
+      const detail = await checkApproval(cdp, { quietMs: o.quietMs, maxSettleMs: o.maxSettleMs, clearWaitMs: o.clearWaitMs });
+      return detail === null ? out('resolved', { takeover }) : out('still_blocked', { takeover, detail });
+    }
     // Done: the page may still be redirecting (Cloudflare reloads about a second after it's solved).
     await waitForQuiet(cdp, o.quietMs, o.maxSettleMs);
     // The check may still be showing for a moment ("Verification successful", then the page's own reload), so it gets
     // a few seconds to clear, settling again after any navigation, before the answer is still_blocked.
     const until = Date.now() + (o.clearWaitMs ?? CLEAR_WAIT_MS);
-    // An approval needs positive evidence: a failure page or another check ends it at once; the prompt (or a page that
-    // can't be read) gets the same clear wait as a check after Done.
-    while (approval) {
-      const v = await approvalVerdict(cdp);
-      if (!v) return out('resolved', { takeover });
-      if (!v.wait || Date.now() >= until) return out('still_blocked', { takeover, detail: v.detail });
-      await new Promise((r) => setTimeout(r, CLEAR_POLL_MS));
-      await waitForQuiet(cdp, o.quietMs, o.maxSettleMs);
-    }
     for (;;) {
       const still = await detectHumanCheck(cdp, { scope: o.scope ?? ['challenge'] });
       if (!still) return out('resolved', { takeover });

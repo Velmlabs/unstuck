@@ -68,11 +68,14 @@ describe('sign-in approvals', () => {
     await human.getByRole('heading', { name: link.reason }).waitFor({ timeout: 15_000 });
     await expect(human.getByText('Watching the page for your approval').isVisible()).resolves.toBe(true);
     await human.getByRole('button', { name: "I've approved it" }).click(); // ...but they haven't: the prompt stays
+    await human.getByText('Checking the page…').waitFor({ timeout: 5_000 });
 
     const err = await going;
     expect(err).toBeInstanceOf(UnstuckRescueError);
     expect(err).toMatchObject({ status: 'still_blocked', detail: 'approval_still_showing', check: { kind: 'approval' } });
-    expect((err as UnstuckRescueError).event.takeover).toMatchObject({ status: 'resolved', detail: 'approved_by_person' });
+    // The session judged the page itself: the phone and the end report see it was not approved.
+    expect((err as UnstuckRescueError).event.takeover).toMatchObject({ status: 'failed', detail: 'still_blocked:approval_still_showing' });
+    await human.getByRole('heading', { name: "The sign-in didn't go through" }).waitFor({ timeout: 5_000 });
     expect(await page.title()).toBe('Sign in to Example Mail');
     expect(site.hits('/inbox')).toBe(0);
     await phone.close();

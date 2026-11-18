@@ -27,7 +27,11 @@ export interface TakeoverOptions {
    * seal failed, or notify answered non-2xx). Without Unstuck Cloud (a self-hosted relay) it throws UnstuckConfigError.
    */
   alerts?: boolean | 'required';
-  /** `approval`: the person only confirms a sign-in on their own device, without controlling the page (wrap() sets it). Default `control`. */
+  /**
+   * `approval`: the person only confirms a sign-in on their own device, without controlling the page (wrap() sets it).
+   * The session checks the page before it ends: `resolved` only when the prompt is gone with nothing else in the way,
+   * otherwise `failed` with detail `still_blocked:<why>`. Default `control`.
+   */
   mode?: 'control' | 'approval';
   /** What the phone alert says this is about (default `other`; wrap() sets it from the check). */
   kind?: AlertKind;

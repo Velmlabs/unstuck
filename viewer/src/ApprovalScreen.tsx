@@ -11,13 +11,16 @@ export interface ApprovalScreenProps {
   canvasRef: Ref<HTMLCanvasElement>;
   remaining?: string;
   embed?: boolean;
+  /** The engine is checking the page (the prompt went away, or the person said they approved). */
+  checking?: boolean;
   onApproved(): void;
   onShowPage(): void;
 }
 
 /** "Check your phone": a waiting page. The person approves on their own device; the agent carries on by itself. */
-export function ApprovalScreen({ reason, site, canvasRef, remaining, embed, onApproved, onShowPage }: ApprovalScreenProps) {
-  const [checking, setChecking] = useState(false);
+export function ApprovalScreen({ reason, site, canvasRef, remaining, embed, checking: judging, onApproved, onShowPage }: ApprovalScreenProps) {
+  const [tapped, setChecking] = useState(false);
+  const checking = tapped || !!judging;
   const shownSite = cleanLabel(site, 253);
   return (
     <main class="bridge approval">

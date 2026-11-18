@@ -10,6 +10,7 @@ import { page } from './guard/helpers';
 import { settle } from './settle';
 
 const SINCE = 'https://login.example/approve?req=1';
+const HOME = () => page({ url: 'https://app.example/home' });
 const prompt = () => page({ url: SINCE, bodyTextHead: 'Sign in to Example. Check your phone and tap Yes to approve this sign-in.', bodyTextLength: 90 });
 const shot = { data: 'AQID' };
 const metrics = { cssVisualViewport: { clientWidth: 800, clientHeight: 600, pageX: 0, pageY: 0 } };
@@ -46,8 +47,9 @@ function setup(call: Partial<TakeoverCallOptions> = {}, prepare: (cdp: FakeCdp, 
   };
   const finished = async () => {
     await settle();
-    await vi.advanceTimersByTimeAsync(3_000);
+    await vi.advanceTimersByTimeAsync(10_000); // the page settles, and the prompt gets its 6 s clear wait
     await done;
+    await settle(); // the viewer opens the last frames
     return result!;
   };
   const evaluations = () => cdp.calls.filter((c) => c.method === 'Runtime.evaluate').length;
@@ -112,19 +114,105 @@ describe('approval-mode takeover', () => {
     expect(await t.finished()).toMatchObject({ status: 'cancelled' });
   });
 
-  it('approved ends resolved with approved_by_person', async () => {
+  it('approved with the page through ends resolved with approved_by_person, after "Checking the page…"', async () => {
     const t = setup();
     await settle();
     const v = await t.join();
+    t.state.facts = HOME();
     v.push({ t: 'approved' });
+    await settle();
+    expect(v.json().at(-1)).toEqual({ t: 'state', status: 'active' }); // the viewer shows "Checking the page…"
+    v.push({ t: 'approved' }); // a second tap while checking changes nothing
+    v.push({ t: 'switch_control' }); // nor does switching while the page is judged
     const r = await t.finished();
     expect(r).toMatchObject({ status: 'resolved', detail: 'approved_by_person' });
+    expect(v.json().filter((m) => m.t === 'mode')).toHaveLength(1);
     expect(v.json().at(-1)).toEqual({ t: 'state', status: 'resolved' });
     expect(t.log.events.find((e) => e.type === 'finished')?.data).toMatchObject({ status: 'resolved', detail: 'approved_by_person' });
     // The watcher stopped with the session.
     const n = t.evaluations();
     await vi.advanceTimersByTimeAsync(30_000);
     expect(t.evaluations()).toBe(n);
+  });
+
+  // Review Focus 2, now judged by the session itself (the viewer and the end report see it too).
+  it('approved by person with the prompt still showing ends failed approval_still_showing after the clear wait', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'approved' });
+    await settle();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(t.result()).toBeUndefined(); // the prompt may still clear by itself
+    expect(await t.finished()).toMatchObject({ status: 'failed', detail: 'still_blocked:approval_still_showing' });
+    expect(v.json().at(-1)).toEqual({ t: 'state', status: 'failed' });
+  });
+
+  it('approved by person, the prompt clears within the clear wait: resolved', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'approved' });
+    await settle();
+    await vi.advanceTimersByTimeAsync(3_000);
+    t.state.facts = HOME();
+    expect(await t.finished()).toMatchObject({ status: 'resolved', detail: 'approved_by_person' });
+  });
+
+  it('a viewer that comes back while the page is judged is told so', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    const resumeKey = v.json()[0].resumeKey as string;
+    v.push({ t: 'approved' });
+    await settle();
+    v.close();
+    await settle();
+    const token = new URLSearchParams(new URL(t.links[0]!.url).hash.slice(1)).get('t')!;
+    const back = t.transport.connect(t.links[0]!.url);
+    back.push({ t: 'hello', token, resumeKey });
+    await settle();
+    expect(back.json().slice(1, 3)).toEqual([expect.objectContaining({ t: 'mode', mode: 'approval' }), { t: 'state', status: 'active' }]);
+    t.state.facts = HOME();
+    expect(await t.finished()).toMatchObject({ status: 'resolved', detail: 'approved_by_person' });
+  });
+
+  it('an unreadable page after the approval ends failed approval_unreadable', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    t.state.facts = null as unknown as PageFacts;
+    v.push({ t: 'approved' });
+    expect(await t.finished()).toMatchObject({ status: 'failed', detail: 'still_blocked:approval_unreadable' });
+  });
+
+  it('a page that errors while judged ends failed approval_unreadable', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    t.cdp.respond('Page.getFrameTree', () => Promise.reject(new Error('target crashed')));
+    t.cdp.respond('Runtime.evaluate', () => Promise.reject(new Error('target crashed')));
+    v.push({ t: 'approved' });
+    expect(await t.finished()).toMatchObject({ status: 'failed', detail: 'still_blocked:approval_unreadable' });
+  });
+
+  it('a check that throws is never taken for an approval', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    t.state.facts = {} as PageFacts; // nothing the rules can read
+    v.push({ t: 'approved' });
+    expect(await t.finished()).toMatchObject({ status: 'failed', detail: 'still_blocked:approval_unreadable' });
+  });
+
+  it('the agent cancelling while the page is judged ends it cancelled at once', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    v.push({ t: 'approved' });
+    await settle();
+    t.controls[0]!.cancel('cancelled_by_agent');
+    expect(await t.finished()).toMatchObject({ status: 'cancelled', detail: 'cancelled_by_agent' });
   });
 
   it('prompt gone and page navigated ends resolved with approval_navigated', async () => {
@@ -147,14 +235,24 @@ describe('approval-mode takeover', () => {
     expect(r.status).toBe('timed_out');
   });
 
-  it('prompt replaced by a failure message ends with approval_changed', async () => {
+  // Review Focus 1, now judged by the session itself.
+  it('prompt replaced by a failure message ends failed with its rule, at once', async () => {
     const t = setup();
     await settle();
     const v = await t.join();
     t.state.facts = page({ url: SINCE, bodyTextHead: "We didn't hear from you. Try again.", bodyTextLength: 40 });
-    await vi.advanceTimersByTimeAsync(15_000);
-    expect(await t.finished()).toMatchObject({ status: 'resolved', detail: 'approval_changed' });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await settle();
+    expect(t.result()).toMatchObject({ status: 'failed', detail: 'still_blocked:approval_failed.timed_out' });
+    expect(v.json().at(-1)).toEqual({ t: 'state', status: 'failed' });
     expect(v.closed).not.toBeNull();
+  });
+
+  it('prompt replaced by a 2FA page ends failed with 2fa.code', async () => {
+    const t = setup();
+    await settle();
+    t.state.facts = page({ url: 'https://login.example/2fa', otpVisible: true, bodyTextHead: 'Enter the verification code' });
+    expect(await t.finished()).toMatchObject({ status: 'failed', detail: 'still_blocked:2fa.code' });
   });
 
   it('switch_control starts the stream and accepts Done', async () => {
@@ -192,7 +290,7 @@ describe('approval-mode takeover', () => {
     const v = await t.join();
     v.push({ t: 'switch_control' });
     await settle();
-    t.state.facts = page({ url: 'https://app.example/home' });
+    t.state.facts = HOME();
     await vi.advanceTimersByTimeAsync(15_000);
     expect(await t.finished()).toMatchObject({ status: 'resolved', detail: 'approval_navigated' });
     expect(t.cdp.methods()).toContain('Page.stopScreencast');
@@ -225,6 +323,7 @@ describe('approval-mode takeover', () => {
     await settle();
     expect(v.json().at(-1)).toEqual({ t: 'error', code: 'bad_message', message: expect.any(String) });
     expect(v.closed).toBeNull();
+    t.state.facts = HOME();
     v.push({ t: 'approved' });
     expect(await t.finished()).toMatchObject({ status: 'resolved', detail: 'approved_by_person' });
   });
@@ -287,11 +386,12 @@ describe('approval-mode takeover', () => {
     await settle();
     const w = await u.join();
     u.cdp.emit('Page.frameNavigated', { frame: { id: 'MAIN', url: SINCE } });
-    w.push({ t: 'approved' });
+    u.controls[0]!.cancel('cancelled_by_agent');
     await settle();
     await vi.advanceTimersByTimeAsync(600);
     expect(u.cdp.calls.filter((c) => c.method === 'Page.captureScreenshot')).toHaveLength(1);
-    expect(await u.finished()).toMatchObject({ detail: 'approved_by_person' });
+    expect(await u.finished()).toMatchObject({ detail: 'cancelled_by_agent' });
+    expect(w.closed).not.toBeNull();
   });
 
   it('a location.href that is not a string starts no watcher', async () => {

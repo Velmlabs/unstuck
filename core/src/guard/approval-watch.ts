@@ -23,7 +23,7 @@ const abortError = () => new DOMException('The approval watch was aborted', 'Abo
 /**
  * Watches a sign-in approval prompt until it goes away. `'navigated'`: the page moved on to another host or path with
  * nothing in the way. `'changed'`: the prompt gave way to a failure message or another human check. Neither is proof of
- * an approval (rescue judges the final verdict). A CDP error in one poll is retried on the next one. Rejects with an
+ * an approval (the session judges the page with checkApproval). A CDP error in one poll is retried on the next one. Rejects with an
  * `AbortError` when `signal` aborts.
  */
 export function watchApproval(cdp: CdpClient, o: WatchApprovalOptions): Promise<'navigated' | 'changed'> {

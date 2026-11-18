@@ -109,6 +109,37 @@ describe('approval screen', () => {
     expect(screen.getByRole('heading', { name: 'Approved, thank you' })).toBeTruthy();
   });
 
+  it('the engine judging the page shows Checking the page…, before any tap', () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(approvalMode));
+    expect(screen.queryByText('Checking the page…')).toBeNull();
+    act(() => a.h().onState('active')); // the prompt went away: the engine checks the page
+    expect(screen.getByText('Checking the page…')).toBeTruthy();
+    expect(screen.getByRole('button', { name: "I've approved it" })).toBeTruthy(); // still the waiting page
+  });
+
+  it("a failed approval says the sign-in didn't go through", () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(approvalMode));
+    fireEvent.click(screen.getByRole('button', { name: "I've approved it" }));
+    act(() => a.h().onState('active'));
+    act(() => a.h().onState('failed'));
+    expect(screen.getByRole('heading', { name: "The sign-in didn't go through" })).toBeTruthy();
+    expect(screen.getByText(/Your agent will try again or ask you/)).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Approved, thank you' })).toBeNull();
+  });
+
+  it('a failed session after Show me the page shows the usual failed screen', () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(approvalMode));
+    act(() => a.h().onMode?.({ ...approvalMode, mode: 'control' }));
+    act(() => a.h().onState('failed'));
+    expect(screen.getByRole('heading', { name: 'The page closed or something went wrong' })).toBeTruthy();
+  });
+
   it('embed=1 hides the top bar and help', () => {
     const a = fakeApp('?embed=1');
     a.ready();
