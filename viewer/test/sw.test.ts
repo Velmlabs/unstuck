@@ -43,6 +43,35 @@ describe('notificationFor', () => {
     });
   });
 
+  it("takeover: Cloud's title (cleaned) is the notification title; the unsealed reason and site go in the body", async () => {
+    const { pub, store } = await paired();
+    const blob = await sealAlert(pub, 'dev1', 'SESSION', payload);
+    const link = `https://view.unstuck.sh/s/SESSION#x=dev1.${blob}`;
+    expect(await notificationFor({ kind: 'takeover', link, keyName: 'crawler-prod', title: 'Crawler\u202e: Verify you\u2019re human\n' }, store, O)).toEqual({
+      title: 'Crawler: Verify you\u2019re human',
+      options: { body: 'Solve the CAPTCHA · news.example.com\nSent by key: crawler-prod', data: { link } },
+    });
+    // Not unsealed here: Cloud's title alone, with the key.
+    const bad = 'https://view.unstuck.sh/s/SESSION#x=dev1.AAAA';
+    expect(await notificationFor({ kind: 'takeover', link: bad, keyName: 'k', title: 'Crawler: Approve a sign-in' }, store, O)).toEqual({
+      title: 'Crawler: Approve a sign-in',
+      options: { body: 'Sent by key: k', data: { link: bad } },
+    });
+    // A link to another site is no link, but the title stays.
+    expect(await notificationFor({ kind: 'takeover', link: 'https://evil.example/s/X', keyName: '', title: 'Crawler: Approve a sign-in' }, store, O)).toEqual({
+      title: 'Crawler: Approve a sign-in',
+      options: { body: '', data: {} },
+    });
+  });
+
+  it('takeover: a title that is empty once cleaned, or not a string, gives the usual title', async () => {
+    const { pub, store } = await paired();
+    const blob = await sealAlert(pub, 'dev1', 'SESSION', payload);
+    const link = `https://view.unstuck.sh/s/SESSION#x=dev1.${blob}`;
+    for (const title of [' \u200b ', 42, null])
+      expect((await notificationFor({ kind: 'takeover', link, keyName: 'k', title }, store, O)).title).toBe('Your agent needs you: Solve the CAPTCHA · news.example.com');
+  });
+
   it('test alert: plain text, no link', async () => {
     const { store } = await paired();
     expect(await notificationFor({ kind: 'test' }, store, O)).toEqual({ title: 'Test alert from Unstuck', options: { body: '', data: {} } });

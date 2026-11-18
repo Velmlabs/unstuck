@@ -1,4 +1,4 @@
-import { openAlertLink } from './alert-link';
+import { cleanLabel, openAlertLink } from './alert-link';
 import type { DeviceStore } from './device-store';
 
 export interface SwDeps {
@@ -13,6 +13,8 @@ export interface ShownNotification {
 }
 
 const GENERIC = 'Your agent needs you';
+/** Cloud's title ("<agent name>: <kind title>") is untrusted text: at most this many code points once cleaned. */
+const MAX_TITLE = 120;
 
 /** A link on this origin; push payloads are untrusted, so a link to another site is treated as no link. */
 function ownUrl(v: unknown, origin: string): URL | null {
@@ -26,26 +28,29 @@ function ownUrl(v: unknown, origin: string): URL | null {
 }
 
 /**
- * What a push payload (`{kind:'takeover', link, keyName}` or `{kind:'test'}`) shows. A takeover's reason and site are
- * unsealed on this phone from the link's own `#x=…`; when that fails the notification is still shown, without them.
+ * What a push payload (`{kind:'takeover', link, keyName, title?}` or `{kind:'test'}`) shows. A takeover's reason and
+ * site are unsealed on this phone from the link's own `#x=…`; when that fails the notification is still shown, without
+ * them. Cloud's `title` (cleaned) is the title when there is one, and the reason and site then go in the body.
  */
 export async function notificationFor(data: unknown, store: DeviceStore, origin: string): Promise<ShownNotification> {
-  const d = data as { kind?: unknown; link?: unknown; keyName?: unknown } | null;
+  const d = data as { kind?: unknown; link?: unknown; keyName?: unknown; title?: unknown } | null;
   if (!d || typeof d !== 'object') return { title: GENERIC, options: { body: '', data: {} } };
   if (d.kind === 'test') return { title: 'Test alert from Unstuck', options: { body: '', data: {} } };
   if (d.kind !== 'takeover') return { title: GENERIC, options: { body: '', data: {} } };
   const key = typeof d.keyName === 'string' ? d.keyName : '';
-  const body = key ? `Sent by key: ${key}` : '';
+  const keyLine = key ? `Sent by key: ${key}` : '';
+  const cloudTitle = typeof d.title === 'string' ? cleanLabel(d.title, MAX_TITLE) : '';
   const url = ownUrl(d.link, origin);
-  if (!url) return { title: GENERIC, options: { body, data: {} } };
-  let title = GENERIC;
+  if (!url) return { title: cloudTitle || GENERIC, options: { body: keyLine, data: {} } };
+  let about = '';
   try {
     const opened = await openAlertLink(url.hash, url.pathname, store);
-    if (!('error' in opened)) title = `${GENERIC}: ${opened.reason}${opened.site ? ` · ${opened.site}` : ''}`;
+    if (!('error' in opened)) about = `${opened.reason}${opened.site ? ` · ${opened.site}` : ''}`;
   } catch {
     // unreadable here: the generic title still tells the person to look
   }
-  return { title, options: { body, data: { link: url.href } } };
+  if (cloudTitle) return { title: cloudTitle, options: { body: [about, keyLine].filter(Boolean).join('\n'), data: { link: url.href } } };
+  return { title: about ? `${GENERIC}: ${about}` : GENERIC, options: { body: keyLine, data: { link: url.href } } };
 }
 
 /** Opens the notification's link; a test alert (no link) does nothing. */
