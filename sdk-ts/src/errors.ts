@@ -5,6 +5,8 @@ export class UnstuckEngineError extends Error {
   constructor(
     message: string,
     readonly enginePath?: string,
+    /** Set for failures a caller may act on: `engine_too_old` (the engine lacks a feature this call needs). */
+    readonly code?: string,
   ) {
     super(message);
     this.name = 'UnstuckEngineError';

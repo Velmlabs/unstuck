@@ -10,6 +10,7 @@ import { launch, type Browser } from './helpers';
 
 const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../core/test/fixtures/human-checks');
 const INTERSTITIAL = readFileSync(path.join(DIR, 'cloudflare-interstitial.html'), 'utf8');
+const APPROVAL = readFileSync(path.join(DIR, 'approval-generic.html'), 'utf8');
 const SHOP = '<!doctype html><title>Shop</title><h1>Shop</h1>';
 const HOME = '<!doctype html><title>Home</title><h1>Home</h1><a href="/shop">Checkout</a><ul><li><a href="/shop">Checkout</a></li></ul>';
 
@@ -182,7 +183,7 @@ describe('wrap (Playwright)', () => {
     const ctx = await shopContext();
     const page = wrap(await ctx.newPage(), { timeoutS: 90, allowedSites: ['accounts.example'], alerts: false, requireCode: true });
     await page.goto('https://shop.example/shop');
-    expect(takeover.mock.calls[0]![1]).toEqual({ reason: "Cloudflare asks to verify you're human on shop.example", timeoutS: 90, allowedSites: ['accounts.example'], alerts: false, requireCode: true });
+    expect(takeover.mock.calls[0]![1]).toEqual({ reason: "Cloudflare asks to verify you're human on shop.example", kind: 'challenge', timeoutS: 90, allowedSites: ['accounts.example'], alerts: false, requireCode: true });
     await ctx.close();
   });
 
@@ -213,6 +214,46 @@ describe('wrap (Playwright)', () => {
     await page.goto('https://shop.example/');
     await page.click('li a');
     expect(page.unstuck.lastRescue?.status).toBe('resolved');
+    await ctx.close();
+  });
+
+  it('an approval page is rescued with an approval-mode takeover (default 300 s, approvalTimeoutS overrides), forwarding mode, kind and timeoutS', async () => {
+    const ctx = await browser.newContext();
+    let approved = false;
+    await ctx.route('**/*', (route: any) => route.fulfill({ contentType: 'text/html', body: approved ? SHOP : APPROVAL }));
+    takeover.mockImplementation(async (page: any) => {
+      approved = true; // the person approved on their phone: the page moves on by itself
+      void page.evaluate(() => location.reload()).catch(() => {});
+      return result('resolved', 'approval_navigated');
+    });
+    const page = wrap(await ctx.newPage(), { onRescueFail: 'return', timeoutS: 900, requireCode: false });
+    await page.goto('https://shop.example/signin');
+    expect(takeover).toHaveBeenCalledWith(page, expect.objectContaining({ mode: 'approval', kind: 'approval', timeoutS: 300, reason: 'shop.example asks you to approve a sign-in' }));
+    expect(page.unstuck.lastRescue).toMatchObject({ check: { kind: 'approval' } });
+
+    takeover.mockClear();
+    approved = false;
+    const quick = wrap(await ctx.newPage(), { onRescueFail: 'return', approvalTimeoutS: 120 });
+    await quick.goto('https://shop.example/signin');
+    expect(takeover).toHaveBeenCalledWith(quick, expect.objectContaining({ mode: 'approval', kind: 'approval', timeoutS: 120 }));
+
+    // A challenge keeps today's takeover options: no mode, and the wrap's own timeout.
+    const withDefault = createWrap({ takeover: takeover as never, store: () => store, approvalTimeoutS: 60 });
+    takeover.mockClear();
+    approved = false;
+    const viaDeps = withDefault(await ctx.newPage(), { onRescueFail: 'return' });
+    await viaDeps.goto('https://shop.example/signin');
+    expect(takeover).toHaveBeenCalledWith(viaDeps, expect.objectContaining({ timeoutS: 60 }));
+    await ctx.close();
+  });
+
+  it('a challenge takeover carries no mode and the wrap timeoutS, with kind challenge', async () => {
+    const ctx = await shopContext();
+    const page = wrap(await ctx.newPage(), { timeoutS: 900 });
+    await page.goto('https://shop.example/shop');
+    const o = takeover.mock.calls[0]![1];
+    expect(o).toMatchObject({ kind: 'challenge', timeoutS: 900 });
+    expect(o).not.toHaveProperty('mode');
     await ctx.close();
   });
 

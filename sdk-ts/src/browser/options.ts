@@ -5,7 +5,7 @@ import type { SessionStore } from '@velmlabs/unstuck-core';
 export type RescueEvent = RescueOutcome;
 
 export interface WrapOptions {
-  /** What a person is brought in for (default ['challenge']; add 'login' and '2fa' to cover those too). */
+  /** What a person is brought in for (default ['challenge', 'approval']; add 'login' and '2fa' to cover those too). */
   rescue?: CheckKind[];
   /** Keep the cookies of a rescued site, and load them before the next visit (default false). */
   remember?: boolean;
@@ -19,6 +19,8 @@ export interface WrapOptions {
   onRescueFail?: 'throw' | 'return';
   onRescue?: (e: RescueEvent) => void;
   timeoutS?: number;
+  /** How long a person has to approve a sign-in, in seconds (default 300, or the client's approvalTimeoutS). */
+  approvalTimeoutS?: number;
   allowedSites?: string[];
   alerts?: boolean | 'required';
   requireCode?: boolean;

@@ -1,6 +1,6 @@
 // unstuck.wrap(page): the page's own methods, guarded. Shared by the Node and edge entries, so no Node built-ins here.
 import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
-import { createGuard, type Guard, type RenderCheck, type SessionStore } from '@velmlabs/unstuck-core';
+import { createGuard, type Guard, type RenderCheck, type SessionStore, type TakeoverRunner } from '@velmlabs/unstuck-core';
 import { attachPage } from '../attach';
 import { toCdpClient } from '../cdp-adapter';
 import { UnstuckRescueError } from '../errors';
@@ -40,6 +40,8 @@ export interface WrapDeps {
   takeover(page: unknown, o: TakeoverOptions): Promise<TakeoverResult>;
   store(profile: string): SessionStore;
   renderCheck?(page: unknown): RenderCheck | undefined;
+  /** The client's default for how long a person has to approve a sign-in. */
+  approvalTimeoutS?: number;
 }
 
 const WRAPPED = new WeakSet<object>();
@@ -50,11 +52,15 @@ export function createWrap(deps: WrapDeps): <P extends object>(page: P, o?: Wrap
     const adapter = adapterFor(page);
     const profile = o.profile ?? 'default';
     const store = o.store ?? deps.store(profile);
+    const approvalTimeoutS = o.approvalTimeoutS ?? deps.approvalTimeoutS;
     let guard: Promise<Guard> | null = null;
     let current: Guard | null = null;
-    const takeoverOptions = (reason: string): TakeoverOptions => ({
-      reason,
-      ...(o.timeoutS !== undefined ? { timeoutS: o.timeoutS } : {}),
+    const takeoverOptions = (run: Parameters<TakeoverRunner>[0]): TakeoverOptions => ({
+      reason: run.reason,
+      kind: run.kind,
+      ...(run.mode ? { mode: run.mode } : {}),
+      // An approval's own timeout beats the wrap's takeover timeout.
+      ...(run.timeoutS !== undefined ? { timeoutS: run.timeoutS } : o.timeoutS !== undefined ? { timeoutS: o.timeoutS } : {}),
       ...(o.allowedSites !== undefined ? { allowedSites: o.allowedSites } : {}),
       ...(o.alerts !== undefined ? { alerts: o.alerts } : {}),
       ...(o.requireCode !== undefined ? { requireCode: o.requireCode } : {}),
@@ -67,8 +73,9 @@ export function createWrap(deps: WrapDeps): <P extends object>(page: P, o?: Wrap
         const g = await createGuard({
           cdp,
           store,
-          takeover: ({ reason }) => deps.takeover(page, takeoverOptions(reason)),
+          takeover: (run) => deps.takeover(page, takeoverOptions(run)),
           profile,
+          ...(approvalTimeoutS !== undefined ? { approvalTimeoutS } : {}),
           ...(o.rescue ? { rescue: o.rescue } : {}),
           ...(o.remember !== undefined ? { remember: o.remember } : {}),
           ...(o.maxRescuesPerHour !== undefined ? { maxRescuesPerHour: o.maxRescuesPerHour } : {}),

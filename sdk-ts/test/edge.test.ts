@@ -28,6 +28,9 @@ describe('edge entry', () => {
     expectTypeOf<typeof edge.UnstuckEngineError>().toEqualTypeOf<typeof node.UnstuckEngineError>();
     expectTypeOf<typeof edge.PageClosedError>().toEqualTypeOf<typeof node.PageClosedError>();
     expectTypeOf<typeof edge.UnstuckRescueError>().toEqualTypeOf<typeof node.UnstuckRescueError>();
+    expectTypeOf<edge.Unstuck['ask']>().toEqualTypeOf<node.Unstuck['ask']>();
+    expectTypeOf<edge.AskOptions>().toEqualTypeOf<node.AskOptions>();
+    expectTypeOf<edge.AskResult>().toEqualTypeOf<node.AskResult>();
     expectTypeOf<edge.Unstuck['wrap']>().toEqualTypeOf<node.Unstuck['wrap']>();
     expectTypeOf<edge.WrapOptions>().toEqualTypeOf<node.WrapOptions>();
   });
@@ -38,7 +41,7 @@ describe('edge entry', () => {
         .flatMap((m) => m[1]!.split(',').map((n) => n.trim()))
         .sort();
     expect(typeNames('edge.ts')).toEqual(typeNames('index.ts'));
-    expect(typeNames('edge.ts')).toEqual(['HumanCheck', 'PageGuard', 'RescueEvent', 'RescueStatus', 'SessionStore', 'SiteRecord', 'SiteSession', 'StoredCookie', 'TakeoverLink', 'TakeoverOptions', 'TakeoverResult', 'TakeoverStatus', 'UnstuckOptions', 'WrapOptions', 'Wrapped']);
+    expect(typeNames('edge.ts')).toEqual(['AskAnswer', 'AskOptions', 'AskResult', 'HumanCheck', 'PageGuard', 'RescueEvent', 'RescueStatus', 'SessionStore', 'SiteRecord', 'SiteSession', 'StoredCookie', 'TakeoverLink', 'TakeoverOptions', 'TakeoverResult', 'TakeoverStatus', 'UnstuckOptions', 'WrapOptions', 'Wrapped']);
   });
 
   it('validates options in the constructor', () => {

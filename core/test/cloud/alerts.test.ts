@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { newDeviceKeyPair, exportDevicePublicKey, openAlert } from '@velmlabs/unstuck-protocol';
 import type { LinkInfo } from '../../src/engine';
-import { ALERT_TIMEOUT_MS, cleanAgentName, createCloudAlerter, sendTakeoverAlert, type CloudAlerter } from '../../src/cloud/alerts';
+import { ALERT_TIMEOUT_MS, cleanAgentName, createCloudAlerter, sendAskAlert, sendTakeoverAlert, type CloudAlerter } from '../../src/cloud/alerts';
 import { settle } from '../settle';
 
 const T = 'tok_SECRET_value';
@@ -548,5 +548,21 @@ describe('end report', () => {
     await settle();
     expect(seen[0]).toHaveLength(2);
     expect(seen[1]![2]).toEqual({ quick: { question: 'q', choices: ['a', 'b'] } });
+  });
+});
+
+describe('sendAskAlert', () => {
+  const control = () => ({ fail: vi.fn(), cancel: vi.fn(), ended: new Promise<never>(() => {}), joined: () => false });
+  const alerter = () => vi.fn(async () => ({ delivered: 1 as const }));
+
+  it('sends kind question with no site, and a quick answer only for a non-private question with choices', async () => {
+    const a = alerter();
+    await sendAskAlert(a, undefined, info, control(), { question: 'Which?', choices: ['A', 'B'], private: false });
+    expect(a).toHaveBeenLastCalledWith({ ...info, kind: 'question' }, undefined, { quick: { question: 'Which?', choices: ['A', 'B'] } });
+    for (const ask of [{ question: 'Which?', choices: ['A', 'B'] }, { question: 'Which?', private: false }]) {
+      await sendAskAlert(a, undefined, info, control(), ask);
+      expect(a).toHaveBeenLastCalledWith({ ...info, kind: 'question' }, undefined);
+    }
+    expect(sendAskAlert(null, undefined, info, control(), { question: 'Q' })).toBeNull();
   });
 });

@@ -1,3 +1,5 @@
+import type { AlertKind, AskParams } from '@velmlabs/unstuck-protocol';
+import { checkAsk } from '@velmlabs/unstuck-core';
 import { UnstuckConfigError } from './errors';
 
 export interface TakeoverLink {
@@ -25,6 +27,29 @@ export interface TakeoverOptions {
    * seal failed, or notify answered non-2xx). Without Unstuck Cloud (a self-hosted relay) it throws UnstuckConfigError.
    */
   alerts?: boolean | 'required';
+  /** `approval`: the person only confirms a sign-in on their own device, without controlling the page (wrap() sets it). Default `control`. */
+  mode?: 'control' | 'approval';
+  /** What the phone alert says this is about (default `other`; wrap() sets it from the check). */
+  kind?: AlertKind;
+}
+
+/** What `ask()` takes. Limits: 2-6 choices of at most 80 characters, a question of at most 300, details of at most 1000. */
+export interface AskOptions {
+  /** 2-6 labels to pick from. Without choices the person types an answer. */
+  choices?: string[];
+  /** Let the person type an answer (default true without choices, false with choices). */
+  allowText?: boolean;
+  /**
+   * Keep the question and the answer from Unstuck Cloud (default true). Only a question with `private: false` and choices
+   * may be answered with a button on the phone alert, and Cloud then sees the question, the choices and the chosen label.
+   */
+  private?: boolean;
+  /** More to read before answering (at most 1000 characters). */
+  details?: string;
+  /** Seconds to wait for an answer, 10-3600 (default 600). */
+  timeoutS?: number;
+  /** Called with the link to the question page; defaults to the `onLink` option, then to the default printer. */
+  onLink?: (link: TakeoverLink) => void;
 }
 
 export interface UnstuckOptions {
@@ -36,6 +61,10 @@ export interface UnstuckOptions {
   port?: number;
   /** Default takeover timeout in seconds (engine default: 600). */
   timeoutS?: number;
+  /** How long wrap() waits for a person to approve a sign-in, in seconds (default 300). */
+  approvalTimeoutS?: number;
+  /** The name phone alerts and the question page show for this agent (UNSTUCK_AGENT_NAME); at most 40 characters. */
+  agentName?: string;
   /**
    * Called when a human is needed. Default: binary mode prints the link to stderr. In-process mode uses console.log: with
    * Unstuck Cloud phone alerts on, it waits for the alert and logs the link only if no paired phone got it (otherwise one
@@ -102,6 +131,7 @@ export function optionEnv(o: UnstuckOptions): Record<string, string | undefined>
   if (o.viewerUrl) env.UNSTUCK_VIEWER_URL = o.viewerUrl;
   if (o.relay) env.UNSTUCK_RELAY_URL = o.relay;
   if (o.agentKey) env.UNSTUCK_AGENT_KEY = o.agentKey;
+  if (o.agentName) env.UNSTUCK_AGENT_NAME = o.agentName;
   return env;
 }
 
@@ -129,4 +159,26 @@ export function callUserOnLink(onLink: (l: TakeoverLink) => unknown, l: Takeover
   } catch (e) {
     report(e);
   }
+}
+
+/**
+ * The params for an ask, or the problem with them as an UnstuckConfigError: checked before any engine is started or asked.
+ * (checkAsk covers the ranges; the flags' types are checked here too since JavaScript callers can pass anything.)
+ */
+export function askParams(question: string, o: AskOptions): AskParams {
+  const params: AskParams = {
+    question,
+    ...(o.choices !== undefined ? { choices: o.choices } : {}),
+    ...(o.allowText !== undefined ? { allowText: o.allowText } : {}),
+    ...(o.private !== undefined ? { private: o.private } : {}),
+    ...(o.details !== undefined ? { details: o.details } : {}),
+    ...(o.timeoutS !== undefined ? { timeoutS: o.timeoutS } : {}),
+  };
+  const { allowText, private: priv } = params as { [k in keyof AskParams]?: unknown };
+  const problem =
+    checkAsk(params) ??
+    (allowText !== undefined && typeof allowText !== 'boolean' ? 'allowText must be true or false' : null) ??
+    (priv !== undefined && typeof priv !== 'boolean' ? 'private must be true or false' : null);
+  if (problem) throw new UnstuckConfigError(problem);
+  return params;
 }

@@ -2,6 +2,8 @@ import {
   Methods,
   RpcCallError,
   type CdpSendParams,
+  type AskLinkParams,
+  type AskResult,
   type CdpSubscribeParams,
   type PageCloseParams,
   type PageCreateParams,
@@ -18,9 +20,11 @@ import type { WrapOptions, Wrapped } from './browser/options';
 import { resolveEnginePath, spawnEngine, type EngineProcess } from './engine-process';
 import { UnstuckConfigError, UnstuckEngineError } from './errors';
 import { InProcessUnstuck } from './in-process';
-import { callUserOnLink, optionEnv, validateOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
+import { askParams, callUserOnLink, optionEnv, validateOptions, type AskOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
 
-export type { TakeoverLink, UnstuckOptions };
+export type { TakeoverLink, UnstuckOptions, AskOptions };
+
+export const ENGINE_TOO_OLD_FOR_ASK = "this engine can't ask questions (needs @velmlabs/unstuck-engine 0.4.0 or later)";
 
 // Never prints a 6-digit code: requireCode needs its own onLink, so the code travels apart from the link.
 const defaultOnLink = (l: TakeoverLink) => process.stderr.write(`Unstuck: a human is needed (${l.reason}) → ${l.url}\n`);
@@ -53,14 +57,18 @@ export class Unstuck {
   private readonly renderChecks = new WeakMap<object, RenderCheck>();
   private readonly browserIds = new WeakMap<object, string>();
   private nextOpener = 0;
-  private readonly wrapper = createWrap({
-    takeover: (page, o) => this.takeover(page, o),
-    store: (profile) => createFileSessionStore(nodeStoreFs(), profileFile(unstuckHome(), profile)),
-    renderCheck: (page) => (this.inProcess ? undefined : this.renderCheckFor(page)),
-  });
+  /** Questions waiting for their link, in the order asked: the engine's ask.link notification names no request. */
+  private readonly askLinks: { question: string; onLink: (l: TakeoverLink) => void; linked: boolean }[] = [];
+  private readonly wrapper: ReturnType<typeof createWrap>;
 
   constructor(private readonly opts: UnstuckOptions = {}) {
     validateOptions(opts);
+    this.wrapper = createWrap({
+      takeover: (page, o) => this.takeover(page, o),
+      store: (profile) => createFileSessionStore(nodeStoreFs(), profileFile(unstuckHome(), profile)),
+      renderCheck: (page) => (this.inProcess ? undefined : this.renderCheckFor(page)),
+      approvalTimeoutS: opts.approvalTimeoutS,
+    });
     // On Node, the environment is the fallback for options, exactly like binary mode.
     this.inProcess = opts.mode === 'in-process' ? new InProcessUnstuck(opts, process.env, 'in-process mode needs a relay: set apiKey or relay + agentKey') : null;
   }
@@ -129,6 +137,8 @@ export class Unstuck {
         ...(requireCode !== undefined ? { requireCode } : {}),
         ...(opts.allowedSites?.length ? { allowedSites: opts.allowedSites } : {}),
         ...(opts.alerts !== undefined ? { alerts: opts.alerts } : {}),
+        ...(opts.mode ? { mode: opts.mode } : {}),
+        ...(opts.kind ? { kind: opts.kind } : {}),
       };
       const died = engine.exited.then((code): never => {
         throw new UnstuckEngineError(`engine exited with code ${code}`);
@@ -152,6 +162,37 @@ export class Unstuck {
       this.pages.delete(attached.pageId);
       await attached.detach();
       if (engine && notifyClose) engine.setBusy(--this.inFlight > 0);
+    }
+  }
+
+  /**
+   * Asks the person a question (no browser page) and resolves with their answer; awaiting this IS the pause. The person
+   * gets the link by phone alert (Unstuck Cloud) and through `onLink`. Resolves with `status: 'answered'`, `'timed_out'`,
+   * `'cancelled'` or `'failed'`. Rejects with UnstuckConfigError for params out of range (nothing is started), and with
+   * UnstuckEngineError when the engine can't run or is too old to ask.
+   */
+  async ask(question: string, opts: AskOptions = {}): Promise<AskResult> {
+    if (this.inProcess) return this.inProcess.ask(question, opts);
+    const params = askParams(question, opts);
+    const engine = await this.ensureEngine();
+    if (!engine.capabilities.includes('ask')) throw new UnstuckEngineError(ENGINE_TOO_OLD_FOR_ASK, undefined, 'engine_too_old');
+    const pending = { question, onLink: opts.onLink ?? this.opts.onLink ?? defaultOnLink, linked: false };
+    this.askLinks.push(pending);
+    engine.setBusy(++this.inFlight > 0);
+    const died = engine.exited.then((code): never => {
+      throw new UnstuckEngineError(`engine exited with code ${code}`);
+    });
+    died.catch(() => {});
+    try {
+      return await Promise.race([engine.peer.request<AskResult>(Methods.ask, params), died]);
+    } catch (e) {
+      if (e instanceof RpcCallError && e.code === 'closed') throw new UnstuckEngineError(`engine exited with code ${await engine.exited}`);
+      // The engine refused the params (bad_params) or the options (config_error): the same error as a bad call.
+      if (e instanceof RpcCallError && (e.code === 'bad_params' || e.code === 'config_error')) throw new UnstuckConfigError(e.message);
+      throw e;
+    } finally {
+      this.askLinks.splice(this.askLinks.indexOf(pending), 1);
+      engine.setBusy(--this.inFlight > 0);
     }
   }
 
@@ -245,6 +286,16 @@ export class Unstuck {
         // A throwing handler would escape the engine's stdout reader and crash the process.
         if (this.opts.onLink) callUserOnLink(this.opts.onLink, link);
         else defaultOnLink(link);
+      });
+      engine.peer.onNotification(Methods.askLink, (raw) => {
+        const l = raw as AskLinkParams;
+        // The link of the question it names (its reason is the question), else of the oldest one still waiting for its link.
+        const waiting = this.askLinks.filter((a) => !a.linked);
+        const ask = waiting.find((a) => a.question === l.reason) ?? waiting[0];
+        if (!ask) return;
+        ask.linked = true;
+        const link: TakeoverLink = { url: l.url, reason: l.reason, sessionId: l.sessionId, expiresAt: l.expiresAt, ...(l.code ? { code: l.code } : {}) };
+        callUserOnLink(ask.onLink, link);
       });
       void engine.exited.then(() => {
         if (this.engine === started) this.engine = null;

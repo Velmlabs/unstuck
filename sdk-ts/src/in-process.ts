@@ -1,10 +1,12 @@
 import {
   buildRelayTransport,
+  cleanAgentName,
   cloudAlertsFor,
   createCloudAlerter,
   createEngine,
   hostnames,
   selectTransport,
+  sendAskAlert,
   sendTakeoverAlert,
   type AlertOutcome,
   type CdpClient,
@@ -13,11 +15,11 @@ import {
   type PopupSource,
   type TransportChoice,
 } from '@velmlabs/unstuck-core';
-import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import type { AskResult, TakeoverResult } from '@velmlabs/unstuck-protocol';
 import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { startKeepAlive, toCdpClient } from './cdp-adapter';
 import { UnstuckConfigError } from './errors';
-import { callUserOnLink, optionEnv, validateOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
+import { askParams, callUserOnLink, optionEnv, validateOptions, type AskOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
 import { VERSION } from './version';
 
 /** What the in-process entry says when no relay is configured (the Node entry passes its own wording). */
@@ -61,12 +63,14 @@ export class InProcessUnstuck {
   private readonly env: Record<string, string | undefined>;
   private readonly choice: TransportChoice;
   private readonly alerter: CloudAlerter | null;
+  /** Who is asking (cleaned): the option, else UNSTUCK_AGENT_NAME. */
+  private readonly agentName: string | undefined;
   private engine: Engine | null = null;
   /** Bumped by close(): a takeover that was still attaching when it ran must not start a new engine. */
   private generation = 0;
   /** Resolved by close(): a page still attaching (createCDPSession may never answer) must not hold close() up. */
   private closing = newSignal();
-  private readonly inFlight = new Set<Promise<TakeoverResult>>();
+  private readonly inFlight = new Set<Promise<unknown>>();
 
   constructor(
     private readonly opts: UnstuckOptions,
@@ -77,7 +81,32 @@ export class InProcessUnstuck {
     this.env = { ...env, ...optionEnv(opts) };
     this.choice = selectTransport({}, this.env);
     const cloud = cloudAlertsFor(this.choice, this.env);
-    this.alerter = cloud ? createCloudAlerter({ ...cloud, fetch: opts.fetch }) : null;
+    this.agentName = cleanAgentName(this.env.UNSTUCK_AGENT_NAME);
+    this.alerter = cloud ? createCloudAlerter({ ...cloud, fetch: opts.fetch, ...(this.agentName ? { agentName: this.agentName } : {}) }) : null;
+  }
+
+  /** Asks the person a question (no browser page) and resolves with their answer. */
+  async ask(question: string, o: AskOptions = {}): Promise<AskResult> {
+    const params = askParams(question, o);
+    if (this.choice.kind !== 'relay') throw new UnstuckConfigError(this.noRelay);
+    const userOnLink = o.onLink ?? this.opts.onLink;
+    const run = this.ensureEngine().ask({
+      ...params,
+      ...(this.agentName ? { agentName: this.agentName } : {}),
+      onLink: (info, takeover) => {
+        // The alert starts first: whatever the link handler does, the paired phones get the link.
+        const alert = sendAskAlert(this.alerter, undefined, info, takeover, params);
+        const link: TakeoverLink = { url: info.url, reason: info.reason, sessionId: info.sessionId, expiresAt: info.expiresAt, ...(info.code ? { code: info.code } : {}) };
+        if (userOnLink) callUserOnLink(userOnLink, link);
+        else defaultOnLink(link, alert, undefined);
+      },
+    });
+    this.inFlight.add(run);
+    try {
+      return await run;
+    } finally {
+      this.inFlight.delete(run);
+    }
   }
 
   async takeover(page: unknown, o: TakeoverOptions): Promise<TakeoverResult> {
@@ -154,6 +183,9 @@ export class InProcessUnstuck {
         site,
         requireCode,
         allowedSites: hostnames(o.allowedSites),
+        ...(o.mode ? { mode: o.mode } : {}),
+        kind: o.kind ?? 'other',
+        ...(this.agentName ? { agentName: this.agentName } : {}),
         popups: source,
         onLink: (info, takeover) => {
           // The alert starts first: whatever the link handler does, the paired phones get the link.
