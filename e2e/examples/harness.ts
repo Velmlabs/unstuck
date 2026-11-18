@@ -18,6 +18,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(here, '../..');
 export const ENGINE = path.join(REPO, 'engine/dist/unstuck-engine');
 export const example = (name: string) => path.join(REPO, 'examples', name);
+/** Pre-installed Playwright (not a workspace dependency, see sdk-ts/test/helpers.ts). */
+export const { chromium, devices } = createRequire(import.meta.url)('playwright');
 /** The pre-installed Chromium, for libraries that would otherwise download their own (Puppeteer, Selenium). */
 export const CHROMIUM: string = (() => {
   const root = '/opt/pw-browsers';
@@ -25,8 +27,6 @@ export const CHROMIUM: string = (() => {
   const bin = dir && ['chrome-linux64/chrome', 'chrome-linux/chrome'].map((p) => path.join(root, dir, p)).find((p) => fs.existsSync(p));
   return process.env.CHROMIUM_PATH ?? bin ?? chromium.executablePath();
 })();
-/** Pre-installed Playwright (not a workspace dependency, see sdk-ts/test/helpers.ts). */
-export const { chromium, devices } = createRequire(import.meta.url)('playwright');
 
 /** CHROMIUM plus --no-sandbox (needed when tests run as root), so the examples themselves stay free of container flags. */
 export function chromiumNoSandbox(): string {

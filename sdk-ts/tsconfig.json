@@ -1,1 +1,11 @@
-{ "extends": "../tsconfig.base.json", "compilerOptions": { "noEmit": true, "types": ["node"] }, "include": ["src", "test"] }
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    // The standalone examples the tests import use the published name; in this repo it is this package's own source
+    // (as vitest.config.ts aliases it).
+    "paths": { "@velmlabs/unstuck": ["./src/index.ts"] }
+  },
+  "include": ["src", "test"]
+}
