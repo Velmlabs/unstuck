@@ -178,6 +178,13 @@ describe('InProcessUnstuck', () => {
     await expect(new InProcessUnstuck({ relay: 'wss://own.example' }, { UNSTUCK_REQUIRE_CODE: '1' }).takeover(new FakePage(), { reason: 'x' })).rejects.toThrow(/requireCode needs an onLink/);
   });
 
+  it('an unknown kind or mode is refused before anything starts, like the engine does', async () => {
+    const u = new InProcessUnstuck({ relay: 'wss://own.example', onLink: () => {} }, {});
+    await expect(u.takeover(new FakePage(), { reason: 'x', kind: 'captcha' as never })).rejects.toThrow(new TypeError('kind must be one of challenge, approval, login, question, other'));
+    await expect(u.takeover(new FakePage(), { reason: 'x', mode: 'watch' as never })).rejects.toThrow(new TypeError('mode must be control or approval'));
+    await u.close();
+  });
+
   it('requireCode hands the code to onLink, apart from the url', async () => {
     const links: TakeoverLink[] = [];
     const u = new InProcessUnstuck({ relay: 'wss://own.example', onLink: (l) => links.push(l) }, { UNSTUCK_REQUIRE_CODE: '1' });

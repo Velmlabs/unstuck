@@ -121,6 +121,15 @@ export function validateOptions(o: UnstuckOptions): void {
   checkUrl('viewerUrl', o.viewerUrl, 'https', 'http');
 }
 
+const KINDS: readonly unknown[] = ['challenge', 'approval', 'login', 'question', 'other'];
+const MODES: readonly unknown[] = ['control', 'approval'];
+
+/** What the engine's takeover call refuses (`bad_params`), checked here for the in-process engine. `kind` is readable by Cloud: only the known words. */
+export function validateTakeoverOptions(o: TakeoverOptions): void {
+  if (o.mode !== undefined && !MODES.includes(o.mode)) throw new TypeError('mode must be control or approval');
+  if (o.kind !== undefined && !KINDS.includes(o.kind)) throw new TypeError(`kind must be one of ${KINDS.join(', ')}`);
+}
+
 /** Engine environment for the options. A value of undefined means "remove this variable". */
 export function optionEnv(o: UnstuckOptions): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = {};

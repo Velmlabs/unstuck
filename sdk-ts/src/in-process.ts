@@ -19,7 +19,7 @@ import type { AskResult, TakeoverResult } from '@velmlabs/unstuck-protocol';
 import { attachPage, PageClosedError, type AttachedPage } from './attach';
 import { startKeepAlive, toCdpClient } from './cdp-adapter';
 import { UnstuckConfigError } from './errors';
-import { askParams, callUserOnLink, optionEnv, validateOptions, type AskOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
+import { askParams, callUserOnLink, optionEnv, validateOptions, validateTakeoverOptions, type AskOptions, type TakeoverLink, type TakeoverOptions, type UnstuckOptions } from './options';
 import { VERSION } from './version';
 
 /** What the in-process entry says when no relay is configured (the Node entry passes its own wording). */
@@ -121,6 +121,7 @@ export class InProcessUnstuck {
 
   private async run(page: unknown, o: TakeoverOptions): Promise<TakeoverResult> {
     if (this.choice.kind !== 'relay') throw new UnstuckConfigError(this.noRelay);
+    validateTakeoverOptions(o);
     // The choice is a relay here, so no alerter means the relay is not Unstuck Cloud's (relay, or UNSTUCK_RELAY_URL).
     if (o.alerts === 'required' && !this.alerter)
       throw new UnstuckConfigError("alerts: 'required' needs Unstuck Cloud (apiKey): a self-hosted relay sends no phone alerts");
