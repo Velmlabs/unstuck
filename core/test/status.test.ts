@@ -8,6 +8,9 @@ describe('nextStatus', () => {
     ['waiting', 'viewer_joined', 'active'],
     ['active', 'viewer_left', 'waiting'],
     ['active', 'done', 'resolved'],
+    ['waiting', 'done', 'resolved'],
+    ['active', 'answer', 'answered'],
+    ['waiting', 'answer', 'answered'],
     ['active', 'cant_solve', 'cancelled'],
     ['waiting', 'timeout', 'timed_out'],
     ['active', 'timeout', 'timed_out'],
@@ -22,14 +25,16 @@ describe('nextStatus', () => {
     ['resolved', 'done'],
     ['timed_out', 'cancel'],
     ['failed', 'error'],
-    ['waiting', 'done'],
+    ['created', 'done'],
+    ['notifying', 'answer'],
+    ['answered', 'done'],
     ['created', 'viewer_joined'],
   ] as const)('%s does not accept %s', (from, ev) => {
     expect(() => nextStatus(from, ev)).toThrow(InvalidTransitionError);
   });
 
-  it('isTerminal identifies the four end states', () => {
-    expect(['resolved', 'timed_out', 'cancelled', 'failed'].every((s) => isTerminal(s as never))).toBe(true);
+  it('isTerminal identifies the five end states', () => {
+    expect(['resolved', 'answered', 'timed_out', 'cancelled', 'failed'].every((s) => isTerminal(s as never))).toBe(true);
     expect(['created', 'notifying', 'waiting', 'active'].some((s) => isTerminal(s as never))).toBe(false);
   });
 });

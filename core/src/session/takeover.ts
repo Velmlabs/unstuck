@@ -4,7 +4,9 @@ import {
   importE2eKey,
   newE2eKey,
   encodeFrame,
+  type AlertKind,
   type EngineToViewer,
+  type SessionMode,
   type SessionStatus,
   type TakeoverResult,
   type TakeoverStatus,
@@ -27,6 +29,8 @@ import { nextStatus, isTerminal, type SessionEvent } from './status';
 import { newSessionId, signToken } from './tokens';
 import { sealConnection } from './sealed';
 import { createViewerGate } from './gate';
+import { watchApproval } from '../guard/approval-watch';
+import { CAPTURE_TIMEOUT_MS, within } from '../stream/within';
 
 export { HELLO_TIMEOUT_MS, MAX_CODE_ATTEMPTS } from './gate';
 export { RESUME_WINDOW_MS };
@@ -35,6 +39,9 @@ export const DRAIN_INTERVAL_MS = 50;
 export const STOP_TIMEOUT_MS = 2_000;
 /** Viewer input waiting to be replayed into the page; beyond this, pointer moves and wheels go first, then new input. */
 export const MAX_PENDING_INPUT = 256;
+/** In approval mode, the still preview is taken again this long after the page's last main-frame navigation. */
+export const PREVIEW_DEBOUNCE_MS = 500;
+const PREVIEW_QUALITY = 50;
 
 /** Rejects a CDP call that a takeover's input queue may no longer make (the takeover ended, or the sender lost hold). */
 const DROPPED = new Error('input dropped');
@@ -46,6 +53,10 @@ export interface LinkInfo {
   expiresAt: number;
   /** The 6-digit code the human must enter, when required. Never part of the URL. */
   code?: string;
+  /** What the alert is about, when the caller said. */
+  kind?: AlertKind;
+  /** How the session starts: `control` (the person drives the page) or `approval` (a waiting page). */
+  mode?: SessionMode;
 }
 
 /** What a link handler can do to the takeover it got the link for. */
@@ -56,6 +67,8 @@ export interface TakeoverControl {
   cancel(detail: string): void;
   /** Someone has opened the link and joined (true from the first accepted hello on, also after they left). */
   joined(): boolean;
+  /** Settles with the takeover's result once it has ended (never rejects). */
+  ended: Promise<TakeoverResult>;
 }
 
 export interface TakeoverDeps {
@@ -91,6 +104,19 @@ export interface TakeoverOptions {
   requireCode?: boolean;
   /** Sites besides the page's own that the human may navigate the page to. */
   allowedSites?: string[];
+  /**
+   * `approval`: the person gets a waiting page (one still preview, no input) while the page is watched for the sign-in
+   * approval prompt to go away; they can switch to control. Default `control`.
+   */
+  mode?: 'control' | 'approval';
+  kind?: AlertKind;
+  /** Shown to the person in approval mode. */
+  agentName?: string;
+  /**
+   * Approval mode: the page's URL when the prompt was found. The watcher runs only when it is given (it reports
+   * `navigated` once the page has left this host and path).
+   */
+  approvalSince?: string;
 }
 
 export interface RunningTakeover extends TakeoverControl {
@@ -99,7 +125,7 @@ export interface RunningTakeover extends TakeoverControl {
 
 const FINAL_EVENT: Record<TakeoverStatus, SessionEvent> = {
   resolved: 'done',
-  answered: 'done',
+  answered: 'answer',
   cancelled: 'cancel',
   timed_out: 'timeout',
   failed: 'error',
@@ -155,10 +181,19 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   let pressed: { target: Target; x: number; y: number; button: string; clickCount: number } | null = null;
   let resolveResult!: (r: TakeoverResult) => void;
   const result = new Promise<TakeoverResult>((r) => (resolveResult = r));
+  /** The session started in approval mode (it sends `mode` frames; a control session never does). */
+  const approvalSession = opts.mode === 'approval';
+  /** What the person gets now: the waiting page (`approval`) until they switch to `control`. */
+  let mode: 'control' | 'approval' = approvalSession ? 'approval' : 'control';
+  /** Stops the approval watcher when the takeover ends. */
+  const watch = new AbortController();
+  let previewTimer: ReturnType<typeof setTimeout> | null = null;
+  let offNavigated: () => void = () => {};
 
   const emit = (type: Parameters<EventLog['append']>[0]['type'], data?: Record<string, string | number | boolean>) =>
     log?.append({ ts: now(), sessionId, type, ...(data ? { data } : {}) });
   const sendJson = (c: ViewerConnection, m: EngineToViewer) => c.send(JSON.stringify(m));
+  const modeFrame = (): EngineToViewer => ({ t: 'mode', mode, reason: opts.reason, site: opts.site ?? '', ...(opts.agentName ? { agentName: opts.agentName } : {}) });
   /** Admission (hello, code, one device, resume key) and who holds the session; see gate.ts. */
   const gate = createViewerGate({
     key,
@@ -211,6 +246,9 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (leftTimer) clearTimeout(leftTimer);
     offClose();
     offPopups();
+    offNavigated();
+    watch.abort();
+    if (previewTimer) clearTimeout(previewTimer);
     fieldFeed.stop();
     for (const t of targets) t.off();
     const locks = targets.map((t) => t.lock);
@@ -318,10 +356,37 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     emit('viewer_joined');
     // credit: 1 — this engine paces frames by the viewer's acks once the viewer opts in ({ t: 'credit', v: 1 }).
     sendJson(conn, { t: 'ready', reason: opts.reason, site: opts.site ?? '', expiresAt, resumeKey: gate.resumeKey()!, ...(vn ? { vn } : {}), credit: 1 });
+    if (approvalSession) sendJson(conn, modeFrame());
     sender = holderSender = createLatestSender(conn, { now });
+    // The waiting page shows one still of the page, and nothing to type into.
+    if (mode === 'approval') return sendPreview();
     // Chrome only sends frames when the page repaints; a static CAPTCHA would leave a new viewer black.
     if (lastFrame) sender.push(lastFrame);
     fieldFeed.onTargetChanged(); // the new viewer needs the current map even if it hasn't changed
+    if (!stopScreencast) await startStream();
+  }
+
+  /** Approval mode: one still of the shown page to the holder (skipped when the page doesn't answer). */
+  async function sendPreview(): Promise<void> {
+    let f: Uint8Array;
+    try {
+      f = await capturePreview(active().cdp);
+    } catch {
+      return;
+    }
+    if (mode !== 'approval' || isTerminal(status) || !holder()) return;
+    holderSender?.push(f);
+    holderSender?.drain();
+  }
+
+  /** The person asked to drive the page themselves: from now on this is a normal takeover. */
+  async function switchToControl(conn: ViewerConnection): Promise<void> {
+    if (mode !== 'approval' || conn !== holder()) return;
+    mode = 'control';
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = null;
+    sendJson(conn, modeFrame());
+    fieldFeed.onTargetChanged();
     if (!stopScreencast) await startStream();
   }
 
@@ -356,7 +421,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   /** The active target changed: move the stream to it. */
   async function switchStream(): Promise<void> {
-    if (!holder() || isTerminal(status)) return;
+    if (!holder() || isTerminal(status) || mode === 'approval') return;
     await stopStream();
     lastFrame = null;
     if (!holder() || isTerminal(status)) return;
@@ -431,10 +496,15 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   }
 
   function handleInput(conn: ViewerConnection, msg: ViewerToEngine): void {
-    // approved, switch_control and answer belong to approval and question sessions, which this session isn't.
+    // approved and switch_control belong to approval sessions, answer to question sessions.
     // (The gate answers an unparsable message or a second hello itself; hello is listed here for the type.)
-    if (msg.t === 'hello' || msg.t === 'approved' || msg.t === 'switch_control' || msg.t === 'answer') return gate.reject(conn, 'bad_message', false);
+    if (msg.t === 'hello' || msg.t === 'answer' || (!approvalSession && (msg.t === 'approved' || msg.t === 'switch_control'))) return gate.reject(conn, 'bad_message', false);
     switch (msg.t) {
+      case 'approved':
+        // The person's word only: rescue checks the page before the agent is told it is through.
+        return finish('resolved', 'approved_by_person');
+      case 'switch_control':
+        return void switchToControl(conn);
       case 'ping':
         return sendJson(conn, { t: 'pong' });
       case 'credit':
@@ -449,6 +519,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
         return finish('cancelled', reason || 'cant_solve', reason ? { detail: 'cant_solve', reasonLength: reason.length } : undefined);
       }
       default: {
+        if (mode === 'approval') return; // the waiting page takes no input
         const safe = safeInput(msg);
         if (safe) enqueueInput(conn, safe);
       }
@@ -470,6 +541,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       if (isTerminal(status)) return void lock.stop();
       pageSites = lock.sites;
       targets.push({ cdp, caps, off: () => {}, lock });
+      if (approvalSession) offNavigated = cdp.on('Page.frameNavigated', onNavigated);
     } catch {
       return finish('failed', 'page_lock_unavailable'); // never hand out a page that isn't locked
     }
@@ -477,7 +549,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     try {
       const rawE2e = newE2eKey();
       const e2eKey = await importE2eKey(rawE2e);
-      const { baseUrl } = await transport.publish(sessionId, { expiresAt });
+      const { baseUrl } = await transport.publish(sessionId, { expiresAt, mode: opts.mode ?? 'control' });
       published = true;
       if (isTerminal(status)) return void transport.unpublish(sessionId).catch(() => {});
       transport.onConnection(sessionId, (conn) => gate.onConnection(sealConnection(conn, e2eKey, sessionId)));
@@ -496,8 +568,16 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     // design, section 4.2 (docs/specs/2026-11-14-notifications-design.md in the unstuck-cloud repo). "notifying" completes immediately.
     go('notified');
     emit('link', { expiresAt });
+    if (approvalSession && opts.approvalSince !== undefined) {
+      // Ends the takeover by itself once the prompt has gone; never rejects but for the abort in finish().
+      watchApproval(cdp, { since: opts.approvalSince, signal: watch.signal }).then(
+        (v) => finish('resolved', v === 'navigated' ? 'approval_navigated' : 'approval_changed'),
+        () => {},
+      );
+    }
     try {
-      opts.onLink?.({ sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}) }, { fail, cancel, joined: gate.joined });
+      const info: LinkInfo = { sessionId, url, reason: opts.reason, expiresAt, ...(code !== undefined ? { code } : {}), ...(opts.kind ? { kind: opts.kind } : {}), mode: opts.mode ?? 'control' };
+      opts.onLink?.(info, { fail, cancel, joined: gate.joined, ended: result });
     } catch {
       // A link handler that throws is the caller's bug: the takeover keeps running (an alert may already be on its way).
     }
@@ -510,7 +590,33 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   function cancel(detail: string): void {
     finish('cancelled', detail);
   }
-  return { result, cancel, fail, joined: gate.joined };
+  /** Approval mode: a main-frame navigation retakes the preview, once the page has stopped navigating for a moment. */
+  function onNavigated(e: { frame?: { parentId?: string } }): void {
+    if (e.frame?.parentId || mode !== 'approval') return;
+    if (previewTimer) clearTimeout(previewTimer);
+    previewTimer = setTimeout(() => {
+      previewTimer = null;
+      if (holder()) void sendPreview();
+    }, PREVIEW_DEBOUNCE_MS);
+  }
+
+  return { result, ended: result, cancel, fail, joined: gate.joined };
+}
+
+/** One JPEG of the page as an encoded type-1 frame, like the screenshot fallback stream (stream/poll.ts). */
+async function capturePreview(cdp: CdpClient): Promise<Uint8Array> {
+  const metrics = await within(
+    cdp.send<{ cssVisualViewport: { clientWidth: number; clientHeight: number } }>('Page.getLayoutMetrics'),
+    CAPTURE_TIMEOUT_MS,
+    'Page.getLayoutMetrics',
+  );
+  const shot = await within(cdp.send<{ data: string }>('Page.captureScreenshot', { format: 'jpeg', quality: PREVIEW_QUALITY }), CAPTURE_TIMEOUT_MS, 'Page.captureScreenshot');
+  const bin = atob(shot.data);
+  return encodeFrame({
+    width: Math.round(metrics.cssVisualViewport.clientWidth),
+    height: Math.round(metrics.cssVisualViewport.clientHeight),
+    jpeg: Uint8Array.from(bin, (c) => c.charCodeAt(0)),
+  });
 }
 
 function isRelease(m: ViewerInput): boolean {

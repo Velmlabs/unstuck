@@ -1,4 +1,4 @@
-import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg } from '@velmlabs/unstuck-protocol';
+import { b64urlDecode, importE2eKey, isJsonPlaintext, openMsg, sealMsg, type SessionMode } from '@velmlabs/unstuck-protocol';
 import type { Transport, ViewerConnection } from '../transport';
 
 /** A fake human's browser tab connected to the session. */
@@ -96,14 +96,17 @@ export class SealedFakeViewer extends FakeViewer {
 export class FakeTransport implements Transport {
   readonly published = new Set<string>();
   readonly expiries = new Map<string, number>();
+  /** The mode each session was published with (when the session gave one). */
+  readonly modes = new Map<string, SessionMode>();
   private readonly statusHandlers = new Map<string, (s: 'up' | 'down') => void>();
   readonly unpublished: string[] = [];
   closed = false;
   private readonly handlers = new Map<string, (c: ViewerConnection) => void>();
 
-  async publish(sessionId: string, opts: { expiresAt: number }): Promise<{ baseUrl: string }> {
+  async publish(sessionId: string, opts: { expiresAt: number; mode?: SessionMode }): Promise<{ baseUrl: string }> {
     this.published.add(sessionId);
     this.expiries.set(sessionId, opts.expiresAt);
+    if (opts.mode) this.modes.set(sessionId, opts.mode);
     return { baseUrl: `http://fake.test/s/${sessionId}` };
   }
   onConnection(sessionId: string, h: (c: ViewerConnection) => void): void {

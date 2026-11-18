@@ -6,6 +6,7 @@ export type SessionEvent =
   | 'viewer_joined'
   | 'viewer_left'
   | 'done'
+  | 'answer'
   | 'cant_solve'
   | 'timeout'
   | 'cancel'
@@ -21,13 +22,14 @@ export class InvalidTransitionError extends Error {
   }
 }
 
-const TERMINAL = new Set<SessionStatus>(['resolved', 'timed_out', 'cancelled', 'failed']);
+const TERMINAL = new Set<SessionStatus>(['resolved', 'answered', 'timed_out', 'cancelled', 'failed']);
 
 const TABLE: Partial<Record<SessionStatus, Partial<Record<SessionEvent, SessionStatus>>>> = {
   created: { published: 'notifying' },
   notifying: { notified: 'waiting' },
-  waiting: { viewer_joined: 'active' },
-  active: { viewer_left: 'waiting', done: 'resolved', cant_solve: 'cancelled' },
+  // From waiting too: an approval can finish with nobody on the link (the page moved on), a question with a quick answer.
+  waiting: { viewer_joined: 'active', done: 'resolved', answer: 'answered' },
+  active: { viewer_left: 'waiting', done: 'resolved', answer: 'answered', cant_solve: 'cancelled' },
 };
 
 /** Valid from any non-terminal state. */

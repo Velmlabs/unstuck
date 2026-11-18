@@ -1,8 +1,9 @@
-import type { TakeoverResult } from '@velmlabs/unstuck-protocol';
+import type { AlertKind, TakeoverResult } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from './cdp';
 import type { EventLog } from './events';
 import type { Transport } from './transport';
 import { importSecret, newSecret } from './session/tokens';
+import { CAPTURE_TIMEOUT_MS, within } from './stream/within';
 import { runTakeover, type LinkInfo, type PopupSource, type RunningTakeover, type TakeoverControl } from './session/takeover';
 
 export type { LinkInfo, PopupSource, TakeoverControl } from './session/takeover';
@@ -31,6 +32,15 @@ export interface TakeoverCallOptions {
   requireCode?: boolean;
   /** Sites besides the page's own the human may navigate to (e.g. an SSO or 3-D Secure provider). */
   allowedSites?: string[];
+  /**
+   * `approval`: the page shows a sign-in approval prompt; the person gets a waiting page, and the takeover ends by
+   * itself once the prompt goes away (they can still switch to control). Default `control`.
+   */
+  mode?: 'control' | 'approval';
+  /** What the alert is about (passed on in the link info). */
+  kind?: AlertKind;
+  /** The agent's name, shown to the person in approval mode. */
+  agentName?: string;
 }
 
 export interface Engine {
@@ -54,6 +64,8 @@ export function createEngine(opts: EngineOptions): Engine {
       let closedBefore: string | undefined;
       const off = cdp.onClose((reason) => (closedBefore ??= reason));
       const k = await key;
+      // Where the approval prompt is: the watcher reports `navigated` only once the page has left this URL.
+      const approvalSince = call.mode === 'approval' && closedBefore === undefined ? await pageUrl(cdp) : undefined;
       off();
       // close() ran while this takeover was starting (or before it): it never publishes.
       if (closed) return { status: 'cancelled', sessionId: '', url: '', durationS: 0, detail: 'engine_closed' };
@@ -66,6 +78,10 @@ export function createEngine(opts: EngineOptions): Engine {
         popups: call.popups,
         requireCode: call.requireCode ?? opts.requireCode,
         ...(call.allowedSites ? { allowedSites: call.allowedSites } : {}),
+        ...(call.mode ? { mode: call.mode } : {}),
+        ...(call.kind ? { kind: call.kind } : {}),
+        ...(call.agentName ? { agentName: call.agentName } : {}),
+        ...(approvalSince !== undefined ? { approvalSince } : {}),
       });
       running.add(session);
       try {
@@ -84,4 +100,18 @@ export function createEngine(opts: EngineOptions): Engine {
       await opts.transport.close();
     },
   };
+}
+
+/** The page's URL, or undefined when it can't be read. */
+async function pageUrl(cdp: CdpClient): Promise<string | undefined> {
+  try {
+    const r = await within(
+      cdp.send<{ result?: { value?: unknown } }>('Runtime.evaluate', { expression: 'location.href', returnByValue: true }),
+      CAPTURE_TIMEOUT_MS,
+      'location.href',
+    );
+    return typeof r.result?.value === 'string' ? r.result.value : undefined;
+  } catch {
+    return undefined;
+  }
 }
