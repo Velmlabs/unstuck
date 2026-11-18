@@ -102,15 +102,19 @@ export function registerGuardMethods(d: GuardHostDeps): { closeAll(): Promise<vo
       rescue: p.rescue,
       remember: p.remember,
       maxRescuesPerHour: p.maxRescuesPerHour,
+      approvalTimeoutS: p.approvalTimeoutS,
       allowedSites: p.allowedSites,
       canRenderCaptcha: renderCheckFor(p.pageId, p.browserKey),
-      takeover: async ({ reason, site }) => {
+      takeover: async ({ reason, site, kind, mode, timeoutS }) => {
         note(true);
         try {
           return await d.engine.takeover(cdp, {
             reason,
             site,
-            timeoutS: p.timeoutS,
+            // An approval waits as long as the guard's approval timeout; a control takeover as long as `timeoutS`.
+            timeoutS: mode === 'approval' ? (timeoutS ?? p.timeoutS) : p.timeoutS,
+            kind,
+            mode,
             requireCode: p.requireCode,
             allowedSites: hostnames(p.allowedSites),
             onLink: d.linkFor(p.pageId, site, p.alerts),

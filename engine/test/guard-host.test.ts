@@ -123,6 +123,24 @@ describe('registerGuardMethods', () => {
     await h.engine.close();
   });
 
+  it('guard approval rescue passes mode, kind and timeoutS (approvalTimeoutS), and the control rescue its kind', async () => {
+    const h = harness(home);
+    const calls: any[] = [];
+    const real = h.engine.takeover.bind(h.engine);
+    h.engine.takeover = (cdp, o) => (calls.push(o), real(cdp, o));
+    h.state.facts = facts({ url: 'https://bank.example/approve', bodyTextHead: 'Approve this sign-in on your phone. Open the app and tap yes' });
+    const { guardId } = await h.sdk.request<{ guardId: string }>(Methods.guardOpen, { pageId: 'p1', browserKey: 'b1', approvalTimeoutS: 77, timeoutS: 500, rescue: ['approval'] });
+    await h.sdk.request(Methods.guardAfter, { guardId, requestedUrl: 'https://bank.example/approve' }).catch(() => {});
+    expect(calls[0]).toMatchObject({ mode: 'approval', kind: 'approval', timeoutS: 77 });
+    h.state.facts = cloudflare();
+    const g2 = await h.sdk.request<{ guardId: string }>(Methods.guardOpen, { pageId: 'p1', browserKey: 'b1', timeoutS: 500 });
+    await h.sdk.request(Methods.guardAfter, { guardId: g2.guardId });
+    expect(calls[1]).toMatchObject({ kind: 'challenge', timeoutS: 500 });
+    expect(calls[1].mode).not.toBe('approval');
+    await h.host.closeAll();
+    await h.engine.close();
+  });
+
   it('guard.after with nothing detected returns null and opens no takeover', async () => {
     const h = harness(home);
     h.state.facts = facts();

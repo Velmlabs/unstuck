@@ -7,7 +7,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-import { browseConfig, main, USAGE } from '../src/cli';
+import { newDeviceKeyPair, exportDevicePublicKey } from '@velmlabs/unstuck-protocol';
+import { browseConfig, cloudAlerterFor, main, parseRescueKinds, USAGE } from '../src/cli';
 import { VERSION } from '../src/version';
 import type { AssetMap } from '../src/embedded';
 
@@ -51,7 +52,7 @@ describe('main', () => {
     await vi.waitFor(() => expect(lines).toHaveLength(1), { timeout: 4_000 });
     x.stdin.end();
     await expect(run).resolves.toBe(0);
-    expect(lines.map((l) => JSON.parse(l))).toEqual([{ id: 1, result: { engineVersion: VERSION, protocolVersion: 1, protocolMinor: 2, capabilities: ['guard', 'paintCheck'] } }]);
+    expect(lines.map((l) => JSON.parse(l))).toEqual([{ id: 1, result: { engineVersion: VERSION, protocolVersion: 1, protocolMinor: 2, capabilities: ['guard', 'paintCheck', 'ask'] } }]);
     expect(x.err()).toMatch(/viewer server listening on http:\/\/127\.0\.0\.1:\d+/);
   });
 
@@ -244,3 +245,53 @@ describe('browse flags', () => {
   });
 });
 
+describe('--rescue', () => {
+  it('parseRescueKinds reads a comma list', () => {
+    expect(parseRescueKinds('challenge')).toEqual(['challenge']);
+    expect(parseRescueKinds('challenge, approval,login,2fa,login')).toEqual(['challenge', 'approval', 'login', '2fa']);
+  });
+
+  it.each(['bogus', 'challenge,nope', ''])('rejects %j with the usage message', (v) => {
+    expect(() => parseRescueKinds(v)).toThrow(/^unknown --rescue kind ".*" \(use challenge, approval, login, 2fa\)$/);
+  });
+
+  it('--rescue rejects an unknown kind (exit 2) and accepts a good list', async () => {
+    const x = io('');
+    await expect(main(['--stdio', '--rescue', 'challenge,soup'], x)).resolves.toBe(2);
+    expect(x.err()).toContain('unknown --rescue kind "soup" (use challenge, approval, login, 2fa)');
+    const y = io('');
+    await expect(main(['--stdio', '--rescue', 'challenge,approval'], y)).resolves.toBe(0);
+  });
+});
+
+describe('--agent-name', () => {
+  async function notifyBody(flags: { agentName?: string }, env: Record<string, string>) {
+    const pair = await newDeviceKeyPair();
+    const publicKey = await exportDevicePublicKey(pair.publicKey);
+    const bodies: any[] = [];
+    const stub = vi.spyOn(globalThis, 'fetch').mockImplementation((async (url: string, init?: any) => {
+      if (String(url).endsWith('/devices')) return new Response(JSON.stringify({ devices: [{ id: 'd1', publicKey }] }), { status: 200 });
+      bodies.push(JSON.parse(init.body));
+      return new Response('{}', { status: 200 });
+    }) as never);
+    try {
+      const alerter = cloudAlerterFor(flags, { UNSTUCK_API_KEY: 'k', ...env }, () => {});
+      const out = await alerter!({ sessionId: 's1', url: 'https://v.example/#t=a&k=b', reason: 'r', expiresAt: 1, kind: 'approval' }, undefined);
+      expect(out).toEqual({ delivered: 1 });
+      return bodies[0];
+    } finally {
+      stub.mockRestore();
+    }
+  }
+  it('--agent-name beats UNSTUCK_AGENT_NAME and reaches the notify body (cleaned), with the kind', async () => {
+    const body = await notifyBody({ agentName: ' Flag\u200b Bot ' }, { UNSTUCK_AGENT_NAME: 'Env Bot' });
+    expect(body).toMatchObject({ agentName: 'Flag Bot', kind: 'approval' });
+  });
+  it('UNSTUCK_AGENT_NAME is used without the flag; neither means no name', async () => {
+    expect(await notifyBody({}, { UNSTUCK_AGENT_NAME: 'Env Bot' })).toMatchObject({ agentName: 'Env Bot' });
+    expect(await notifyBody({}, {})).not.toHaveProperty('agentName');
+  });
+  it('no UNSTUCK_API_KEY, no alerter', () => {
+    expect(cloudAlerterFor({ agentName: 'x' }, {}, () => {})).toBeUndefined();
+  });
+});

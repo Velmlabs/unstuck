@@ -143,7 +143,7 @@ describe('runStdioHost', () => {
       engineVersion: '9.9.9',
       protocolVersion: 1,
       protocolMinor: 2,
-      capabilities: ['guard', 'paintCheck'],
+      capabilities: ['guard', 'paintCheck', 'ask'],
     });
     // A newer SDK with a higher minor is still served.
     await expect(h.sdk.request(Methods.hello, { sdk: 'py', sdkVersion: '0', protocolVersion: PROTOCOL_VERSION, protocolMinor: 7 })).resolves.toMatchObject({ protocolMinor: 2 });
@@ -269,5 +269,118 @@ describe('runStdioHost', () => {
     await h.sdk.request(Methods.shutdown, {});
     await h.done;
     for (const l of h.raw) expect(() => JSON.parse(l)).not.toThrow();
+  });
+});
+
+describe('runStdioHost ask and approval takeovers', () => {
+  const tokenOf = (url: string) => new URLSearchParams(new URL(url).hash.slice(1)).get('t');
+
+  it('ask over RPC: link notification, then the answer', async () => {
+    const alerter = vi.fn(async (_info: any, _site: string | undefined, _extra?: any) => ({ delivered: 1 }));
+    const h = start(alerter as any);
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.askLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.ask, { question: 'Which account?', choices: ['Work', 'Home'], private: false, timeoutS: 30, alerts: true });
+    await vi.waitFor(() => expect(links).toHaveLength(1));
+    expect(links[0]).toMatchObject({ reason: 'Which account?' });
+    expect(Object.keys(links[0]).sort()).toEqual(['expiresAt', 'reason', 'sessionId', 'url']);
+    expect(alerter).toHaveBeenCalledTimes(1);
+    expect(alerter.mock.calls[0]![0]).toMatchObject({ kind: 'question', sessionId: links[0].sessionId });
+    expect(alerter.mock.calls[0]![1]).toBeUndefined();
+    expect(alerter.mock.calls[0]![2]).toEqual({ quick: { question: 'Which account?', choices: ['Work', 'Home'] } });
+    const viewer = h.transport.connect(links[0].url);
+    viewer.push({ t: 'hello', token: tokenOf(links[0].url) });
+    await new Promise((r) => setTimeout(r, 30));
+    viewer.push({ t: 'answer', choice: 1 });
+    await expect(result).resolves.toMatchObject({ status: 'answered', answer: { label: 'Home' } });
+    h.input.end();
+    await h.done;
+  });
+
+  it('a private question sends no quick text to the alerter', async () => {
+    const alerter = vi.fn(async (_info: any, _site: string | undefined, _extra?: any) => ({ delivered: 1 }));
+    const h = start(alerter as any);
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.askLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.ask, { question: 'Code?', timeoutS: 30 });
+    await vi.waitFor(() => expect(links).toHaveLength(1));
+    expect(alerter.mock.calls[0]).toHaveLength(2);
+    h.input.end();
+    await h.done;
+    await expect(result).resolves.toMatchObject({ status: 'cancelled' });
+  });
+
+  it.each([
+    [{ question: 'q', choices: ['1', '2', '3', '4', '5', '6', '7'] }, 'choices must be 2-6 labels of at most 80 characters'],
+    [{ question: 'q', allowText: false }, 'a question needs choices or allowText'],
+    [{ question: 'q', choices: 'yes' }, 'choices must be 2-6 labels of at most 80 characters'],
+    [{ question: 'q', choices: ['a', 3] }, 'choices must be 2-6 labels of at most 80 characters'],
+    [{ question: 'q', allowText: 'yes' }, 'allowText must be true or false'],
+    [{ question: 'q', private: 'no' }, 'private must be true or false'],
+    [{ question: 'q', alerts: 'sometimes' }, "alerts must be true, false or 'required'"],
+    [undefined, 'question must be 1-300 characters'],
+  ])('ask with bad params %j is bad_params', async (params, message) => {
+    const h = start();
+    await expect(h.sdk.request(Methods.ask, params as any)).rejects.toMatchObject({ code: 'bad_params', message });
+    h.input.end();
+    await h.done;
+  });
+
+  it("ask alerts: 'required' without Cloud is config_error", async () => {
+    const h = start();
+    await expect(h.sdk.request(Methods.ask, { question: 'q', alerts: 'required' })).rejects.toMatchObject({ code: 'config_error', message: REQUIRED_WITHOUT_CLOUD });
+    expect(h.transport.published.size).toBe(0);
+    h.input.end();
+    await h.done;
+  });
+
+  it('takeover with mode approval runs an approval session, and kind reaches the alert (default other)', async () => {
+    const alerter = vi.fn(async (_info: any, _site: string | undefined) => ({ delivered: 1 }));
+    const h = start(alerter as any);
+    const cdp = new FakeCdp();
+    let prompt = true;
+    cdp.respond('Runtime.evaluate', () => ({ result: { value: prompt ? 'https://bank.example/approve' : 'https://bank.example/home' } }));
+    h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
+    h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'Approve the sign-in', timeoutS: 30, mode: 'approval', kind: 'approval' });
+    await vi.waitFor(() => expect(links).toHaveLength(1));
+    expect(links[0]).toMatchObject({ kind: 'approval', mode: 'approval' });
+    expect(alerter.mock.calls[0]![0]).toMatchObject({ kind: 'approval', mode: 'approval' });
+    const viewer = h.transport.connect(links[0].url);
+    expect(viewer).toBeDefined();
+    prompt = false;
+    h.input.end();
+    await h.done;
+    await result;
+  });
+
+  it('a plain takeover alert has kind other', async () => {
+    const alerter = vi.fn(async (_info: any, _site: string | undefined) => ({ delivered: 1 }));
+    const h = start(alerter as any);
+    const cdp = new FakeCdp();
+    h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
+    h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.takeoverLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'x', timeoutS: 30 });
+    await vi.waitFor(() => expect(links).toHaveLength(1));
+    expect(alerter.mock.calls[0]![0]).toMatchObject({ kind: 'other' });
+    h.input.end();
+    await h.done;
+    await result;
+  });
+
+  it.each([
+    [{ mode: 'question' }, 'mode must be control or approval'],
+    [{ mode: 'x' }, 'mode must be control or approval'],
+    [{ kind: 'my secret reason' }, 'kind must be one of challenge, approval, login, question, other'],
+  ])('takeover with %j is bad_params', async (extra, message) => {
+    const h = start();
+    await expect(h.sdk.request(Methods.takeover, { pageId: 'p1', reason: 'r', ...extra })).rejects.toMatchObject({ code: 'bad_params', message });
+    expect(h.transport.published.size).toBe(0);
+    h.input.end();
+    await h.done;
   });
 });

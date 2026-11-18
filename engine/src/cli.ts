@@ -10,7 +10,8 @@ import { BROWSE_TOOL_NAMES } from './mcp-browse';
 import type { BrowseConfig } from './browser/session';
 import { OBSCURA_NOT_FOUND } from './browser/launcher';
 import { unstuckHome } from './browser/node-store-fs';
-import { PROFILE_NAME } from '@velmlabs/unstuck-core';
+import { PROFILE_NAME, cleanAgentName } from '@velmlabs/unstuck-core';
+import type { CheckKind } from '@velmlabs/unstuck-protocol';
 import { formatReport, runDoctor } from './doctor';
 import { buildTransport, cloudAlertsFor, selectTransport } from './transport-select';
 import { createCloudAlerter } from './cloud-alerts';
@@ -19,6 +20,7 @@ import type { Readable, Writable } from 'node:stream';
 
 export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <port>] [--relay <wss://…> [--agent-key <key>]]
        unstuck-engine --mcp [--open] [--host <host>] [--port <port>] [--relay <wss://…> [--agent-key <key>]]
+                     [--agent-name <name>] [--rescue <kinds>]
                      [--browser[=chrome|obscura] [--obscura-path <path>] | --tools takeover|browser]
                      [--profile <name>] [--no-remember] [--max-rescues-per-hour <n>] [--allow-private-network]
        unstuck-engine doctor --cdp <url>
@@ -42,6 +44,8 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
       With no --open and no Cloud alerts it returns the link at once.
       The browser never opens localhost, intranet or cloud-metadata addresses
       (redirects included) unless --allow-private-network.
+--agent-name (or UNSTUCK_AGENT_NAME) is the name phone alerts show for this agent.
+--rescue <kinds> is a comma list of challenge, approval, login, 2fa.
 doctor checks a browser (live view, input, paste, cross-origin iframes, popups)
       in a tab of its own and prints whether Unstuck works fully with it.
 
@@ -72,6 +76,8 @@ const OPTIONS = {
   'no-remember': { type: 'boolean' },
   'max-rescues-per-hour': { type: 'string' },
   'allow-private-network': { type: 'boolean' },
+  'agent-name': { type: 'string' },
+  rescue: { type: 'string' },
 } as const;
 
 /** parseArgs, with a bare `--browser` read as `--browser=chrome`. */
@@ -80,6 +86,19 @@ function parse(argv: string[]) {
 }
 
 const BROWSE_FLAGS = ['browser', 'obscura-path', 'tools', 'profile', 'no-remember', 'max-rescues-per-hour', 'allow-private-network'] as const;
+
+const RESCUE_KINDS: readonly CheckKind[] = ['challenge', 'approval', 'login', '2fa'];
+
+/** `--rescue challenge,approval,…`: the kinds of human check the MCP server brings a person in for. Throws the usage error. */
+export function parseRescueKinds(value: string): CheckKind[] {
+  const kinds: CheckKind[] = [];
+  for (const raw of value.split(',')) {
+    const k = raw.trim();
+    if (!(RESCUE_KINDS as readonly string[]).includes(k)) throw new Error(`unknown --rescue kind "${k}" (use challenge, approval, login, 2fa)`);
+    if (!kinds.includes(k as CheckKind)) kinds.push(k as CheckKind);
+  }
+  return kinds;
+}
 
 /** `obscura` on PATH, if there is one. */
 function onPath(name: string, env: Record<string, string | undefined>): string | undefined {
@@ -135,6 +154,12 @@ export function browseConfig(argv: string[], env: Record<string, string | undefi
     inToolWaitMs = w * 1000;
   }
   return { browse: { source, profile, remember: !values['no-remember'], maxRescuesPerHour: max, home: unstuckHome(env), ...(inToolWaitMs ? { inToolWaitMs } : {}), ...(values['allow-private-network'] ? { allowPrivateNetwork: true } : {}) } };
+}
+
+/** The Cloud alerter these flags and variables ask for (undefined without UNSTUCK_API_KEY). `--agent-name` beats UNSTUCK_AGENT_NAME. */
+export function cloudAlerterFor(flags: { relay?: string; agentKey?: string; agentName?: string }, env: Record<string, string | undefined>, log: (line: string) => void) {
+  const cloud = cloudAlertsFor(selectTransport({ relay: flags.relay, agentKey: flags.agentKey }, env), env);
+  return cloud ? createCloudAlerter({ ...cloud, agentName: cleanAgentName(flags.agentName ?? env.UNSTUCK_AGENT_NAME), log }) : undefined;
 }
 
 export interface CliIO {
@@ -196,6 +221,15 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
     io.stderr.write(`${browsing.error}\n${USAGE}`);
     return 2;
   }
+  if (values.rescue !== undefined) {
+    // Read by the MCP server's browsing tools once they use it; no effect yet.
+    try {
+      parseRescueKinds(values.rescue);
+    } catch (e) {
+      io.stderr.write(`${(e as Error).message}\n${USAGE}`);
+      return 2;
+    }
+  }
   const warn = (m: string) => io.stderr.write(`[unstuck] ${m}\n`);
   const requireCode = io.env.UNSTUCK_REQUIRE_CODE === '1';
   let transport;
@@ -213,8 +247,7 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
       return 1;
     }
   }
-  const cloud = cloudAlertsFor(selectTransport({ relay: values.relay, agentKey: values['agent-key'] }, io.env), io.env);
-  const alerter = cloud ? createCloudAlerter({ ...cloud, log: (l) => void io.stderr.write(l + '\n') }) : undefined;
+  const alerter = cloudAlerterFor({ relay: values.relay, agentKey: values['agent-key'], agentName: values['agent-name'] }, io.env, (l) => void io.stderr.write(l + '\n'));
   if (values.mcp) {
     const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open, alerter, ...(browsing.browse ? { browse: browsing.browse } : {}) });
     // stdin closing, or a signal (Ctrl-C, a client killing its server): both close the server, which stops a browser it
