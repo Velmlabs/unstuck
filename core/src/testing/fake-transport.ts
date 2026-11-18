@@ -99,6 +99,7 @@ export class FakeTransport implements Transport {
   /** The mode each session was published with (when the session gave one). */
   readonly modes = new Map<string, SessionMode>();
   private readonly statusHandlers = new Map<string, (s: 'up' | 'down') => void>();
+  private readonly quickAnswerHandlers = new Map<string, (choice: number) => void>();
   readonly unpublished: string[] = [];
   closed = false;
   private readonly handlers = new Map<string, (c: ViewerConnection) => void>();
@@ -126,6 +127,16 @@ export class FakeTransport implements Transport {
   /** Simulate the relay connection going down or coming back. */
   setStatus(sessionId: string, s: 'up' | 'down'): void {
     this.statusHandlers.get(sessionId)?.(s);
+  }
+  onQuickAnswer(sessionId: string, h: (choice: number) => void): void {
+    this.quickAnswerHandlers.set(sessionId, h);
+  }
+  /** Simulate a person tapping a quick-answer button (the handler stays registered, like the relay's). */
+  quickAnswer(sessionId: string, choice: number): void {
+    this.quickAnswerHandlers.get(sessionId)?.(choice);
+  }
+  hasQuickAnswerHandler(sessionId: string): boolean {
+    return this.quickAnswerHandlers.has(sessionId);
   }
   /** Open a human's tab from a takeover link (`…/s/<id>#t=…&k=…`); the key in the link seals everything. */
   connect(link: string): SealedFakeViewer {

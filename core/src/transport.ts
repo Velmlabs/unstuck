@@ -18,6 +18,11 @@ export interface Transport {
   publish(sessionId: string, opts: { expiresAt: number; mode?: SessionMode }): Promise<{ baseUrl: string }>;
   /** Optional: reports when the path to humans goes down or comes back (a relay connection). */
   onStatus?(sessionId: string, h: (s: 'up' | 'down') => void): void;
+  /**
+   * Optional: a person answered a non-private question outside the page (e.g. a Telegram button), with the index of
+   * the choice. There is no way to unregister: the session ignores taps once it has ended.
+   */
+  onQuickAnswer?(sessionId: string, h: (choice: number) => void): void;
   onConnection(sessionId: string, h: (conn: ViewerConnection) => void): void;
   unpublish(sessionId: string): Promise<void>;
   close(): Promise<void>;

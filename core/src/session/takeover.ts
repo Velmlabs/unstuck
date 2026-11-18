@@ -1,8 +1,5 @@
 import {
   RESUME_WINDOW_MS,
-  b64urlEncode,
-  importE2eKey,
-  newE2eKey,
   encodeFrame,
   type AlertKind,
   type EngineToViewer,
@@ -26,9 +23,9 @@ import { createFieldFeed } from './field-feed';
 import { lockPage, safeInput, type PageLock } from './page-lock';
 import { createLatestSender, type LatestSender } from '../stream/latest';
 import { nextStatus, isTerminal, type SessionEvent } from './status';
-import { newSessionId, signToken } from './tokens';
-import { sealConnection } from './sealed';
+import { newSessionId } from './tokens';
 import { createViewerGate } from './gate';
+import { createResumeWatch, publishLink } from './link';
 import { watchApproval } from '../guard/approval-watch';
 import { CAPTURE_TIMEOUT_MS, within } from '../stream/within';
 
@@ -70,6 +67,9 @@ export interface TakeoverControl {
   /** Settles with the takeover's result once it has ended (never rejects). */
   ended: Promise<TakeoverResult>;
 }
+
+/** Gets a session's link; `takeover.fail(detail)` ends that session as failed (e.g. when the link can't be delivered). */
+export type LinkHandler = (info: LinkInfo, takeover: TakeoverControl) => void;
 
 export interface TakeoverDeps {
   transport: Transport;
@@ -123,7 +123,7 @@ export interface RunningTakeover extends TakeoverControl {
   result: Promise<TakeoverResult>;
 }
 
-const FINAL_EVENT: Record<TakeoverStatus, SessionEvent> = {
+export const FINAL_EVENT: Record<TakeoverStatus, SessionEvent> = {
   resolved: 'done',
   answered: 'answer',
   cancelled: 'cancel',
@@ -149,9 +149,6 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
   /** The holder's sender, kept across popup switches so frame numbering and credit carry on. */
   let holderSender: LatestSender | null = null;
   let drainTimer: ReturnType<typeof setInterval> | null = null;
-  let leftTimer: ReturnType<typeof setTimeout> | null = null;
-  /** The path to humans (e.g. the relay) is down: the viewer-left timer is paused meanwhile. */
-  let transportDown = false;
   const code = opts.requireCode ? newCode() : undefined;
   let lastFrame: Uint8Array | null = null;
   let caps: Capabilities = { screencast: true, insertText: true, input: true };
@@ -207,6 +204,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     onMessage: handleInput,
   });
   const holder = gate.holder;
+  /** The viewer-left deadline, paused while the path to humans (e.g. the relay) is down. */
+  const resume = createResumeWatch({ gate, isEnded: () => isTerminal(status), onLapse: () => finish('failed', 'viewer_left') });
   /** Native typing: where the fields are on the shown page, and what took focus (never their values). */
   const fieldFeed = createFieldFeed({
     scan: () => scanFields(active().cdp),
@@ -243,7 +242,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     if (isTerminal(status)) return;
     status = nextStatus(status, FINAL_EVENT[final]);
     clearTimeout(expiryTimer);
-    if (leftTimer) clearTimeout(leftTimer);
+    resume.stop();
     offClose();
     offPopups();
     offNavigated();
@@ -350,8 +349,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
 
   /** The gate has made `conn` the holder (closing any previous one) and minted its resume key. */
   async function attachViewer(conn: ViewerConnection, vn?: string): Promise<void> {
-    if (leftTimer) clearTimeout(leftTimer);
-    leftTimer = null;
+    resume.attached();
     if (status === 'waiting') go('viewer_joined');
     emit('viewer_joined');
     // credit: 1 — this engine paces frames by the viewer's acks once the viewer opts in ({ t: 'credit', v: 1 }).
@@ -475,24 +473,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     go('viewer_left');
     emit('viewer_left');
     void stopStream();
-    if (!transportDown) startLeftTimer();
-  }
-
-  function startLeftTimer(): void {
-    if (leftTimer) clearTimeout(leftTimer);
-    // If nobody resumes in time, nobody can ever rejoin (the token is spent): free the agent now.
-    leftTimer = setTimeout(() => finish('failed', 'viewer_left'), RESUME_WINDOW_MS);
-  }
-
-  function onTransportStatus(s: 'up' | 'down'): void {
-    if (isTerminal(status)) return;
-    transportDown = s === 'down';
-    if (transportDown) {
-      if (leftTimer) clearTimeout(leftTimer);
-      leftTimer = null;
-    } else if (gate.renewResumeWindow()) {
-      startLeftTimer(); // the resume window restarts in full once humans can reach us again
-    }
+    resume.left();
   }
 
   function handleInput(conn: ViewerConnection, msg: ViewerToEngine): void {
@@ -546,22 +527,20 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       return finish('failed', 'page_lock_unavailable'); // never hand out a page that isn't locked
     }
     if (opts.popups) offPopups = opts.popups.onPopup((popup) => void addPopup(popup));
-    try {
-      const rawE2e = newE2eKey();
-      const e2eKey = await importE2eKey(rawE2e);
-      const { baseUrl } = await transport.publish(sessionId, { expiresAt, mode: opts.mode ?? 'control' });
-      published = true;
-      if (isTerminal(status)) return void transport.unpublish(sessionId).catch(() => {});
-      transport.onConnection(sessionId, (conn) => gate.onConnection(sealConnection(conn, e2eKey, sessionId)));
-      transport.onStatus?.(sessionId, onTransportStatus);
-      const token = await signToken(key, sessionId, expiresAt);
-      url = `${baseUrl}#t=${token}&k=${b64urlEncode(rawE2e)}`;
-    } catch (e) {
-      // A relay says why it refused (relay_unauthorized, relay_quota_exceeded, ...): pass that through.
-      const detail = (e as { detail?: unknown }).detail;
-      return finish('failed', typeof detail === 'string' ? detail : `publish_error: ${(e as Error).message}`);
-    }
-    if (isTerminal(status)) return;
+    const link = await publishLink({
+      transport,
+      key,
+      sessionId,
+      expiresAt,
+      mode: opts.mode ?? 'control',
+      gate,
+      isEnded: () => isTerminal(status),
+      onPublished: () => (published = true),
+      onStatus: resume.onStatus,
+    });
+    if ('failed' in link) return finish('failed', link.failed);
+    if (!('url' in link)) return;
+    url = link.url;
     go('published');
     emit('published');
     // Notifications are Unstuck Cloud alerts sent by the engine from onLink (sealed to paired phones); see the notifications
@@ -624,7 +603,7 @@ function isRelease(m: ViewerInput): boolean {
 }
 
 /** Uniform 000000–999999 from the CSPRNG (rejection sampling avoids modulo bias). */
-function newCode(): string {
+export function newCode(): string {
   const buf = new Uint32Array(1);
   do crypto.getRandomValues(buf);
   while (buf[0]! >= 4_294_000_000);
@@ -633,9 +612,14 @@ function newCode(): string {
 
 /** The human's "Can't solve" text as one plain line: no control, format or bidi characters, spaces collapsed. */
 export function cleanReason(text: string): string {
+  return cleanLine(text, 200);
+}
+
+/** Text a person typed for the agent as one plain line of at most `max` characters (the rules of cleanReason). */
+export function cleanLine(text: string, max: number): string {
   return text
     .replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 200);
+    .slice(0, max);
 }

@@ -1,14 +1,13 @@
-import type { AlertKind, TakeoverResult } from '@velmlabs/unstuck-protocol';
+import type { AlertKind, AskParams, AskResult, TakeoverResult } from '@velmlabs/unstuck-protocol';
 import type { CdpClient } from './cdp';
 import type { EventLog } from './events';
 import type { Transport } from './transport';
 import { importSecret, newSecret } from './session/tokens';
 import { CAPTURE_TIMEOUT_MS, within } from './stream/within';
-import { runTakeover, type LinkInfo, type PopupSource, type RunningTakeover, type TakeoverControl } from './session/takeover';
+import { runTakeover, type LinkHandler, type PopupSource, type RunningTakeover } from './session/takeover';
+import { ASK_TIMEOUT_S, checkAsk, runAsk } from './session/ask';
 
-export type { LinkInfo, PopupSource, TakeoverControl } from './session/takeover';
-/** Gets each takeover's link; `takeover.fail(detail)` ends that takeover as failed (e.g. when the link can't be delivered). */
-export type LinkHandler = (info: LinkInfo, takeover: TakeoverControl) => void;
+export type { LinkHandler, LinkInfo, PopupSource, TakeoverControl } from './session/takeover';
 
 export interface EngineOptions {
   transport: Transport;
@@ -43,10 +42,22 @@ export interface TakeoverCallOptions {
   agentName?: string;
 }
 
+export type AskCallOptions = AskParams & {
+  onLink?: LinkHandler;
+  /** Shown to the person with the question. */
+  agentName?: string;
+};
+
 export interface Engine {
   /** Never rejects: every failure becomes a TakeoverResult. */
   takeover(cdp: CdpClient, opts: TakeoverCallOptions): Promise<TakeoverResult>;
-  /** Cancels in-flight takeovers (detail `engine_closed`) and closes the transport; later takeovers end the same way. */
+  /**
+   * Asks the person a question (no browser page). Rejects only with a TypeError (the checkAsk message) when the params
+   * are out of range, always asynchronously; otherwise never rejects: every failure becomes an AskResult. `alerts` is
+   * for the link handler: the engine itself ignores it.
+   */
+  ask(opts: AskCallOptions): Promise<AskResult>;
+  /** Cancels in-flight takeovers and questions (detail `engine_closed`) and closes the transport; later takeovers end the same way. */
   close(): Promise<void>;
 }
 
@@ -86,6 +97,41 @@ export function createEngine(opts: EngineOptions): Engine {
       running.add(session);
       try {
         return await session.result;
+      } finally {
+        running.delete(session);
+      }
+    },
+    async ask(call) {
+      const problem = checkAsk(call);
+      if (problem) throw new TypeError(problem);
+      const k = await key;
+      if (closed) return { status: 'cancelled', sessionId: '', durationS: 0, detail: 'engine_closed' };
+      const session = runAsk(
+        { transport: opts.transport, key: k, log: opts.log, now },
+        {
+          question: call.question,
+          ...(call.choices ? { choices: call.choices } : {}),
+          allowText: call.allowText ?? !call.choices,
+          ...(call.details !== undefined ? { details: call.details } : {}),
+          timeoutS: call.timeoutS ?? ASK_TIMEOUT_S,
+          ...(call.agentName ? { agentName: call.agentName } : {}),
+          quickAnswers: call.private === false,
+          onLink: call.onLink ?? opts.onLink,
+          requireCode: opts.requireCode,
+        },
+      );
+      running.add(session);
+      try {
+        const r = await session.result;
+        // A question session never ends `resolved` (it has no Done), so the status is an AskResult one.
+        return {
+          status: r.status as AskResult['status'],
+          ...(r.answer ? { answer: r.answer } : {}),
+          ...(r.via ? { via: r.via } : {}),
+          durationS: r.durationS,
+          sessionId: r.sessionId,
+          ...(r.detail ? { detail: r.detail } : {}),
+        };
       } finally {
         running.delete(session);
       }

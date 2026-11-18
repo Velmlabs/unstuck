@@ -2,6 +2,7 @@ export * from './cdp';
 export * from './transport';
 export * from './events';
 export * from './engine';
+export { checkAsk, ASK_LIMITS, ASK_TIMEOUT_S, MAX_ANSWER_TEXT, type AskSessionOptions } from './session/ask';
 export { startScreencast, type ScreencastOptions } from './stream/screencast';
 export { startScreenshotPolling } from './stream/poll';
 export { probeCapabilities, type Capabilities } from './capabilities';
