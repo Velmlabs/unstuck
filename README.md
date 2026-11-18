@@ -389,6 +389,8 @@ export UNSTUCK_RELAY_URL=wss://relay.example.com
 export UNSTUCK_AGENT_KEY=<the agent key>
 ```
 
+When you upgrade, update your relay before your engines: approvals and questions need a relay at least as new as the engine.
+
 It also runs on plain Node (`relay-node/`) and on Cloudflare Workers (`relay-cloudflare/`). Full guide, settings and a comparison with Unstuck Cloud: **[unstuck.sh/docs/self-host](https://unstuck.sh/docs/self-host/)**. Unstuck Cloud is the hosted relay, plus phone alerts and a dashboard, for when you'd rather not run a server.
 
 ## Security

@@ -16,6 +16,8 @@ Put it behind HTTPS (any reverse proxy; with Caddy, `reverse_proxy 127.0.0.1:878
 UNSTUCK_RELAY_URL=wss://relay.example.com UNSTUCK_AGENT_KEY=change-me python my_agent.py
 ```
 
+When you upgrade, update your relay before your engines: approvals and questions need a relay at least as new as the engine.
+
 ## Run with Node
 
 Node.js 22 or later, from the repository root:
