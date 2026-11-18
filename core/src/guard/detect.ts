@@ -130,7 +130,8 @@ async function shadowFrames(cdp: CdpClient): Promise<PageFacts['iframes']> {
   return frames;
 }
 
-async function facts(cdp: CdpClient): Promise<PageFacts | null> {
+/** One read of the page's facts (with widget frames in closed shadow roots); null when the page can't be read. */
+export async function readFacts(cdp: CdpClient): Promise<PageFacts | null> {
   const f = await collectFacts(cdp, MARKERS);
   if (f && WIDGET_TOKENS.some((t) => f.tokenFields[t] === '')) f.iframes.push(...(await shadowFrames(cdp)));
   return f;
@@ -138,11 +139,11 @@ async function facts(cdp: CdpClient): Promise<PageFacts | null> {
 
 export async function detectHumanCheck(cdp: CdpClient, o: DetectOptions = {}): Promise<HumanCheck | null> {
   const opts = { scope: o.scope ?? (['challenge'] as const), requestedUrl: o.requestedUrl, rules: o.rules };
-  const facts0 = await facts(cdp);
+  const facts0 = await readFacts(cdp);
   if (!facts0) return null;
   const found = matchRules(facts0, o.document ?? null, opts);
   if (!found || !WIDGET_RULES.has(found.ruleId)) return found;
   await new Promise((r) => setTimeout(r, o.widgetGraceMs ?? WIDGET_GRACE_MS));
-  const again = await facts(cdp);
+  const again = await readFacts(cdp);
   return again ? matchRules(again, o.document ?? null, opts) : null;
 }

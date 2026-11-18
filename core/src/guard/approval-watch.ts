@@ -1,5 +1,5 @@
 import type { CdpClient } from '../cdp';
-import { detectHumanCheck } from './detect';
+import { detectHumanCheck, matchRules, readFacts } from './detect';
 import { APPROVAL_FAILED_RULES, RULES } from './rules';
 import { SETTLE_MAX_MS, SETTLE_QUIET_MS, waitForQuiet } from './settle';
 
@@ -53,11 +53,14 @@ export function watchApproval(cdp: CdpClient, o: WatchApprovalOptions): Promise<
     if (await detectHumanCheck(cdp, { scope: ['approval'], rules: PROMPT })) return null;
     await waitForQuiet(cdp, o.quietMs ?? SETTLE_QUIET_MS, o.maxSettleMs ?? SETTLE_MAX_MS);
     if (signal.aborted) return null;
-    const approval = await detectHumanCheck(cdp, { scope: ['approval'], rules: FAILED_OR_PROMPT });
+    // One snapshot judges it all: a page that can't be read (mid-navigation) is never taken for a page that moved on.
+    const facts = await readFacts(cdp);
+    if (!facts) return null;
+    const approval = matchRules(facts, null, { scope: ['approval'], rules: FAILED_OR_PROMPT });
     if (approval) return approval.ruleId === 'approval.prompt' ? null : 'changed';
-    if (await detectHumanCheck(cdp, { scope: ['challenge', 'login', '2fa'], requestedUrl: o.since })) return 'changed';
-    const { frameTree } = await cdp.send<{ frameTree: { frame: { url: string } } }>('Page.getFrameTree');
-    return moved(o.since, frameTree.frame.url) ? 'navigated' : null;
+    // No widget grace here: a CAPTCHA that has just appeared counts as changed at once (rescue judges the rest).
+    if (matchRules(facts, null, { scope: ['challenge', 'login', '2fa'], requestedUrl: o.since })) return 'changed';
+    return moved(o.since, facts.url) ? 'navigated' : null;
   };
 
   const loop = async (): Promise<'navigated' | 'changed'> => {

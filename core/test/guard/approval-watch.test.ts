@@ -8,12 +8,9 @@ const prompt = (url = 'https://login.example/approve?x=1') =>
   page({ url, bodyTextHead: 'Sign in to Example. Check your phone and tap Yes to approve this sign-in.', bodyTextLength: 90 });
 
 /** A page whose facts (and main-frame URL) the test changes between polls. */
-function approvalPage(state: { facts: PageFacts; frameError?: boolean }) {
+function approvalPage(state: { facts: PageFacts }) {
   const cdp = new FakeCdp();
-  cdp.respond('Page.getFrameTree', () => {
-    if (state.frameError) throw new Error('target crashed');
-    return { frameTree: { frame: { id: 'MAIN', url: state.facts.url } } };
-  });
+  cdp.respond('Page.getFrameTree', () => ({ frameTree: { frame: { id: 'MAIN', url: state.facts.url } } }));
   cdp.respond('Runtime.evaluate', () => ({ result: { value: state.facts } }));
   return cdp;
 }
@@ -106,12 +103,42 @@ describe('watchApproval', () => {
     expect(s).toEqual({ value: 'navigated' });
   });
 
-  it('a CDP error in a poll is retried on the next poll', async () => {
-    const state = { facts: page({ url: 'https://login.example/home' }), frameError: true };
+  it('facts that cannot be read after the prompt went never count as navigated; a later readable poll decides', async () => {
+    const state = { facts: prompt() };
+    const cdp = approvalPage(state);
+    let unreadable = false;
+    cdp.respond('Runtime.evaluate', () => {
+      if (unreadable) throw new Error('Execution context was destroyed');
+      return { result: { value: state.facts } };
+    });
+    const s = track(watchApproval(cdp, opts(new AbortController().signal)));
+    await vi.advanceTimersByTimeAsync(2_000);
+    unreadable = true;
+    state.facts = page({ url: 'https://login.example/home' }); // the frame tree already says the page moved
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(s).toEqual({});
+    // Readable again: it is a failure page after all.
+    state.facts = page({ url: 'https://login.example/home', bodyTextHead: "We didn't hear from you.", bodyTextLength: 30 });
+    unreadable = false;
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(s).toEqual({ value: 'changed' });
+  });
+
+  it('a page that returns no facts keeps it watching too', async () => {
+    const state = { facts: page({ url: 'https://login.example/home' }) };
+    const cdp = approvalPage(state);
+    cdp.respond('Runtime.evaluate', () => ({ exceptionDetails: { text: 'boom' } }));
+    const s = track(watchApproval(cdp, opts(new AbortController().signal)));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(s).toEqual({});
+  });
+
+  it('an error thrown in a poll (a malformed facts result) is retried on the next poll', async () => {
+    const state = { facts: { ...page({ url: 'https://login.example/home' }), headings: undefined } as unknown as PageFacts };
     const s = track(watchApproval(approvalPage(state), opts(new AbortController().signal)));
     await vi.advanceTimersByTimeAsync(3_000);
     expect(s).toEqual({});
-    state.frameError = false;
+    state.facts = page({ url: 'https://login.example/home' });
     await vi.advanceTimersByTimeAsync(2_000);
     expect(s).toEqual({ value: 'navigated' });
   });
