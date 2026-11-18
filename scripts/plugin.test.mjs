@@ -38,7 +38,7 @@ describe('unstuck plugin', () => {
     expect(real.length).toBeGreaterThan(3);
     expect(documented).toEqual(real);
     expect(real).toEqual(expect.arrayContaining(['reason', 'alerts', 'takeover_id', 'max_wait_s']));
-    for (const tool of ['request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover', 'cancel_human_takeover']) {
+    for (const tool of ['request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover', 'cancel_human_takeover', 'ask_question', 'resume_after_human']) {
       expect(skill).toContain(`\`${tool}\``);
       expect(mcp).toContain(`'${tool}'`);
     }
@@ -47,7 +47,7 @@ describe('unstuck plugin', () => {
   it('names the published packages and every result status', () => {
     expect(skill).toContain("npm install @velmlabs/unstuck");
     expect(skill).toContain('pip install unstuck');
-    for (const s of ['resolved', 'cancelled', 'timed_out', 'failed']) expect(skill).toContain(`| \`${s}\``);
-    expect(read('protocol/src/result.ts')).toContain("'resolved' | 'timed_out' | 'cancelled' | 'failed'");
+    for (const s of ['resolved', 'answered', 'cancelled', 'timed_out', 'failed']) expect(skill).toContain(`| \`${s}\``);
+    expect(read('protocol/src/result.ts')).toContain("'resolved' | 'answered' | 'timed_out' | 'cancelled' | 'failed'");
   });
 });

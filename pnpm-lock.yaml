@@ -107,6 +107,12 @@ importers:
         specifier: ^25.0.1
         version: 25.0.1
 
+  examples/ask-question:
+    dependencies:
+      '@velmlabs/unstuck':
+        specifier: workspace:*
+        version: link:../../sdk-ts
+
   examples/browser-playwright-ts:
     dependencies:
       '@velmlabs/unstuck':

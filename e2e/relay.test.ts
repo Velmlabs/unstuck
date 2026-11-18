@@ -9,6 +9,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { Unstuck, type TakeoverLink } from '@velmlabs/unstuck';
 import { createEngine, createRelayTransport, type LinkInfo } from '@velmlabs/unstuck-core';
+import type { RelayEvent } from '@velmlabs/unstuck-relay-core';
 import { cdpFor, launchWithCdpPort, RELAY_KEY, startRelay, tapStart } from './relay-harness';
 import { waitFramed } from './framed';
 
@@ -22,6 +23,8 @@ let site: string;
 let agentBrowser: any;
 let humanBrowser: any;
 const relays: Record<string, { url: string; stop(): Promise<void> }> = {};
+/** What the Node relay reported (billing among it). */
+const nodeEvents: RelayEvent[] = [];
 
 beforeAll(async () => {
   server = http.createServer((_req, res) => res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end(CAPTCHA));
@@ -29,7 +32,7 @@ beforeAll(async () => {
   site = `http://127.0.0.1:${(server.address() as AddressInfo).port}/`;
   agentBrowser = await chromium.launch();
   humanBrowser = await chromium.launch();
-  relays.node = await startRelay('node');
+  relays.node = await startRelay('node', { onEvent: (e) => void nodeEvents.push(e) });
   relays.cloudflare = await startRelay('cloudflare');
 }, 120_000);
 afterAll(async () => {
@@ -208,6 +211,34 @@ describe('takeover through a relay, end to end', () => {
     expect(lines[1]).toMatchObject({ status: 'resolved' });
     await ctx.close();
   }, 90_000);
+
+  it('relay bills a question on viewer confirmation', async () => {
+    let link!: TakeoverLink;
+    let arrived!: () => void;
+    const got = new Promise<void>((r) => (arrived = r));
+    const unstuck = new Unstuck({ enginePath: ENGINE, relay: relays.node!.url, agentKey: RELAY_KEY });
+    const asked = unstuck.ask('Ship the order to the office address?', { choices: ['Yes', 'No'], onLink: (l) => ((link = l), arrived()) });
+    await got;
+    const billed = () => nodeEvents.filter((e) => e.name === 'takeover_opened' && e.sessionId === link.sessionId);
+    expect(billed()).toEqual([]); // a link nobody opened costs nothing
+
+    const ctx = await humanBrowser.newContext({ ...devices['iPhone 13'] });
+    const human = await ctx.newPage();
+    await human.goto(link.url);
+    await tapStart(human);
+    await human.getByRole('heading', { name: 'Ship the order to the office address?' }).waitFor({ timeout: 15_000 });
+    // Charged once the relay confirms the viewer (no screen frame in a question), before any answer.
+    await expect.poll(() => billed().length, { timeout: 10_000 }).toBe(1);
+    expect(billed()[0]).toMatchObject({ mode: 'question' });
+
+    await human.getByRole('button', { name: 'Yes' }).click();
+    await human.getByRole('button', { name: 'Send answer' }).click();
+    await expect(asked).resolves.toMatchObject({ status: 'answered', answer: { choice: 0, label: 'Yes' }, via: 'page' });
+    await expect.poll(() => nodeEvents.find((e) => e.name === 'session_closed' && e.sessionId === link.sessionId), { timeout: 10_000 }).toMatchObject({ mode: 'question', viewers: 1 });
+    expect(billed()).toHaveLength(1);
+    await ctx.close();
+    await unstuck.close();
+  }, 60_000);
 
   it('MCP server × Node relay', async () => {
     const { browser, port } = await launchWithCdpPort(chromium);

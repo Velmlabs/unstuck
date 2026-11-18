@@ -45,3 +45,12 @@ you, and `wait_for_human_takeover`, which waits in short rounds (45 s by default
 each tool call under the client's timeout. Ask your agent: *"If you hit a CAPTCHA or a login, call
 start_human_takeover and show me the link."* The link opens on any device only with Unstuck Cloud (`UNSTUCK_API_KEY`)
 or your own relay; otherwise it is a `127.0.0.1` link for this computer.
+
+## Ask a question
+
+Since 0.4.0 every Unstuck MCP server also has `ask_question`: the agent asks you something (pick one of a few `choices`,
+or type an answer) and gets the answer, with no page taken over. If you don't answer within the call it returns
+`status: "human_needed"` with the link, and the agent calls `resume_after_human` until you do. Questions are private by
+default: `private: false` makes the question, the choices and the chosen answer readable to Unstuck Cloud, so the
+Telegram alert can show the choices as buttons. `--agent-name <name>` (or `UNSTUCK_AGENT_NAME`) names the agent on the
+alert and the question page.

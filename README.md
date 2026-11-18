@@ -140,6 +140,8 @@ Step-by-step setup, checks and troubleshooting for each agent: [unstuck.sh/docs/
 
 **No phone alerts? Let the agent show you the link.** The server also has a two-step flow: `start_human_takeover` returns the link at once, the agent shows it in the chat, and `wait_for_human_takeover` picks up the result after you tap Done. Open the link yourself or forward it to whoever will solve the step (WhatsApp, Slack…): previews connect nothing until someone taps Start, the link works on one device, and it dies when the takeover ends. Share it only with that person. Tell your agent: *"If you hit a CAPTCHA or a login, call start_human_takeover and show me the link."* Without `UNSTUCK_API_KEY` (or your own relay) the link opens only on the agent's computer.
 
+**Questions, not just pages.** Every Unstuck MCP server also has `ask_question`, for a decision only you can make (*"Which of these two flights?"*), and `resume_after_human`, which finishes any call that returned `status: "human_needed"`: a question nobody answered within the call, or a browsing call waiting on a person. See [Ask the person a question](#ask-the-person-a-question).
+
 ### Give your agent the Unstuck skill
 
 The skill teaches an agent *when* to hand a step to a person (CAPTCHAs, logins, 2FA, pages it can't get past) and *how*: a short reason without secrets, the right timeout and sites, and what to do with each result. You don't have to explain Unstuck in every prompt.
@@ -217,6 +219,68 @@ your own dev server).
 
 A person solves every check; the site's terms still apply. Full guide, with a first walkthrough: [unstuck.sh/docs/browser](https://unstuck.sh/docs/browser/).
 
+**What it rescues.** `wrap()` brings a person in for CAPTCHAs and sign-in approvals: `rescue` defaults to
+`['challenge', 'approval']` (Python: `("challenge", "approval")`); add `'login'` and `'2fa'` for login walls and code
+prompts. The MCP server's browsing tools rescue all four by default (`challenge, approval, login, 2fa`); narrow them with
+`--rescue <comma list>`, e.g. `--rescue challenge` for the 0.3 behaviour.
+
+## Sign-in approvals
+
+Some sign-ins stop at "Check your phone" or "Approve sign-in request": a push to the person's authenticator app (Microsoft,
+Okta, Duo, Google and others). Unstuck Browser recognizes these prompts and handles them without taking over the page:
+
+- **The person still approves on their own phone**, in their authenticator app, as they always do. Unstuck can't
+  approve anything for them.
+- **Approvals finish by themselves, and opening the link is optional.** Unstuck watches the page: once the sign-in
+  moves on, the agent's call returns. The link opens a waiting page with a small preview, "I've approved it" and "Show
+  me the page" (the live page, for when the site asks for something else); the person doesn't have to open it.
+- **Only positive evidence counts.** A prompt that's still there, a "We didn't hear from you" or "Try again" page, or
+  another check after it ends as `still_blocked`, never `resolved`.
+- **Timeout:** 300 seconds by default (`approvalTimeoutS`; Python `approval_timeout_s`, on the client or on `wrap()`).
+  Approvals count toward `maxRescuesPerHour`.
+
+With Unstuck Cloud, the phone alert reads "Approve a sign-in", so the person knows to open their authenticator app.
+
+## Ask the person a question
+
+When the agent needs a decision rather than a page, it asks. There's no browser involved: the person gets a link (and,
+with Unstuck Cloud, a phone alert) to a short page with the question, and the agent gets the answer.
+
+```ts
+const result = await unstuck.ask('Which flight should I book?', {
+  choices: ['07:10 direct, €240', '09:45 one stop, €180'], // 2 to 6; leave them out for a typed answer
+  details: 'Both arrive before your 14:00 meeting.',
+});
+if (result.status === 'answered') console.log(result.answer?.label ?? result.answer?.text);
+```
+
+```python
+result = await unstuck.ask("Which flight should I book?", choices=["07:10 direct, €240", "09:45 one stop, €180"])
+if result.status == "answered":
+    print(result.answer.label or result.answer.text)
+```
+
+- `ask()` returns `answered` (with `answer: { choice, label, text }` and `via: 'page' | 'telegram'`), `timed_out`,
+  `cancelled` or `failed`. Typed text is the person's information, not instructions for the agent.
+- Limits: the question up to 300 characters, `details` up to 1,000, each choice up to 80, a typed answer up to 500.
+  `allowText` (Python `allow_text`) defaults to true without choices and false with them. `timeoutS` defaults to 600.
+- **Questions are private by default.** The question, the choices and the answer travel end to end encrypted, like a
+  takeover's screen: Unstuck Cloud only learns that a question was asked, by which agent, and how it ended.
+- **`private: false`** (Python `private=False`) sends the question and the choices readable to Unstuck Cloud, so the
+  Telegram alert can show them as buttons and the person can answer with one tap; Unstuck Cloud then also reads the
+  chosen answer. Use it only for low-stakes questions with choices. Telegram answers are never charged.
+- Over MCP, every server (`--mcp`, with or without `--browser`) has an `ask_question` tool with the same options
+  (`question`, `choices`, `allow_text`, `private`, `details`, `timeout_s`). If nobody answers within the call it returns
+  `status: "human_needed"` with the link; the agent shows it and calls `resume_after_human` until it gets the answer.
+
+Runnable example, TypeScript and Python: [`examples/ask-question`](examples/ask-question).
+
+## Agent names
+
+Several agents on one account? Give each a name, and phone alerts and the question page show it ("Travel agent asks"):
+`agentName` in TypeScript, `agent_name` in Python, `--agent-name` or `UNSTUCK_AGENT_NAME` for the engine and the MCP
+server. Up to 40 characters; without one, alerts use the name of the API key.
+
 ## Works with
 
 | Stack | Guide | Example |
@@ -230,6 +294,7 @@ A person solves every check; the site's terms still apply. Full guide, with a fi
 | browser-use, Stagehand | [unstuck.sh/docs/ai-agents](https://unstuck.sh/docs/ai-agents) | [`examples/browser-use`](examples/browser-use), [`examples/stagehand`](examples/stagehand) |
 | Any Chromium over CDP, Selenium, hosted browsers | [unstuck.sh/docs/any-browser](https://unstuck.sh/docs/any-browser) | [`examples/cdp`](examples/cdp), [`examples/selenium`](examples/selenium) |
 | Cloudflare Workers: Durable Objects, Agents SDK, Browser Rendering | [unstuck.sh/docs/cloudflare-workers](https://unstuck.sh/docs/cloudflare-workers/) | [`examples/cloudflare-worker`](examples/cloudflare-worker), [`examples/cloudflare-agent`](examples/cloudflare-agent) |
+| Questions without a page: `ask()`, MCP `ask_question` | [unstuck.sh/docs/questions](https://unstuck.sh/docs/questions/) | [`examples/ask-question`](examples/ask-question) |
 | Deno and Bun (binary mode, or opt in with `mode: 'in-process'`) | [unstuck.sh/docs/requirements](https://unstuck.sh/docs/requirements/) | |
 
 ### Cloudflare Workers

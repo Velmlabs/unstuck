@@ -78,9 +78,16 @@ describe('Unstuck Browser over MCP', () => {
     await m.close();
   });
 
-  it('--tools takeover lists only the four tools', async () => {
+  it('--tools takeover lists the four takeover tools, ask_question and resume_after_human (no browsing tools)', async () => {
     const m = await mcp(['--mcp', '--tools', 'takeover']);
-    expect((await m.client.listTools()).tools.map((t: { name: string }) => t.name).sort()).toEqual(['cancel_human_takeover', 'request_human_takeover', 'start_human_takeover', 'wait_for_human_takeover']);
+    expect((await m.client.listTools()).tools.map((t: { name: string }) => t.name).sort()).toEqual([
+      'ask_question',
+      'cancel_human_takeover',
+      'request_human_takeover',
+      'resume_after_human',
+      'start_human_takeover',
+      'wait_for_human_takeover',
+    ]);
     await m.close();
   });
 

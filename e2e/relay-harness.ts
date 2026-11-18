@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { createNodeRelay } from '@velmlabs/unstuck-relay';
-import { createKeyAuthorizer } from '@velmlabs/unstuck-relay-core';
+import { createKeyAuthorizer, type OnEvent } from '@velmlabs/unstuck-relay-core';
 import type { CdpClient } from '@velmlabs/unstuck-core';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -168,11 +168,14 @@ export async function tapStart(p: { getByRole: (role: 'button', o: { name: strin
   await b.click();
 }
 
-/** Starts a relay that accepts RELAY_KEY: the Node relay in-process, or the Cloudflare relay under `wrangler dev`. */
-export async function startRelay(kind: 'node' | 'cloudflare'): Promise<{ url: string; stop(): Promise<void> }> {
+/**
+ * Starts a relay that accepts RELAY_KEY: the Node relay in-process, or the Cloudflare relay under `wrangler dev`. The Node
+ * relay reports its events (billing among them) to `onEvent`.
+ */
+export async function startRelay(kind: 'node' | 'cloudflare', o: { onEvent?: OnEvent } = {}): Promise<{ url: string; stop(): Promise<void> }> {
   if (kind === 'node') {
     const viewerDir = path.join(path.dirname(createRequire(import.meta.url).resolve('@velmlabs/unstuck-viewer/package.json')), 'dist');
-    const r = await createNodeRelay({ port: 0, host: '127.0.0.1', viewerDir, authorize: createKeyAuthorizer({ keys: [RELAY_KEY] }) });
+    const r = await createNodeRelay({ port: 0, host: '127.0.0.1', viewerDir, authorize: createKeyAuthorizer({ keys: [RELAY_KEY] }), ...(o.onEvent ? { onEvent: o.onEvent } : {}) });
     return { url: `ws://127.0.0.1:${r.port}`, stop: () => r.close() };
   }
   const dir = path.join(here, '../relay-cloudflare');

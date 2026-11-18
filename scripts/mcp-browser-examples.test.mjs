@@ -30,7 +30,7 @@ describe('examples/mcp-browser', () => {
 
   it('the README names every tool and says a person solves the checks', () => {
     const md = read('README.md');
-    for (const tool of ['fetch_page', 'get_session', 'forget_site', 'remember_site', 'resume_after_human', 'open', 'snapshot', 'click', 'type', 'select', 'scroll', 'wait_for', 'screenshot', 'ask_human'])
+    for (const tool of ['fetch_page', 'get_session', 'forget_site', 'remember_site', 'resume_after_human', 'open', 'snapshot', 'click', 'type', 'select', 'scroll', 'wait_for', 'screenshot', 'ask_human', 'ask_question'])
       expect(md).toContain(`\`${tool}\``);
     expect(md).toContain("A person solves every check; the site's terms still apply.");
   });

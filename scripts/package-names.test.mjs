@@ -1,4 +1,4 @@
-// Publishing 0.3.0: every package and import uses the published names (@velmlabs/unstuck, @velmlabs/unstuck-*).
+// Publishing 0.4.0: every package and import uses the published names (@velmlabs/unstuck, @velmlabs/unstuck-*).
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
