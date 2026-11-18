@@ -1,0 +1,45 @@
+{
+  "devicePrivateKeyPkcs8": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgl7zweX-stSbiQLNBfjk_lKgTSNUgS4bPmEXpf2ifGD6hRANCAARFEXlAHfmGcPTab3xnz4zDx4xi93w1kiExKrXdPQIS5PEUlNAj6BJpm4uji7D0m_ij3HoVI1H9nyV410NyBoEC",
+  "devicePublicKey": "BEUReUAd-YZw9NpvfGfPjMPHjGL3fDWSITEqtd09AhLk8RSU0CPoEmmbi6OLsPSb-KPcehUjUf2fJXjXQ3IGgQI",
+  "vectors": [
+    {
+      "deviceId": "dev_test_android_0001",
+      "sessionId": "sess_takeover_0000001",
+      "blob": "BC-SkdxDtC76ASpN79p-zhOS9LvqnvbaEn6PDgJ6Fo7n3XjnamCZYbXx4bCydUMgFU9EijQ6chWWcYqFJSUPnM8t4HjFuvp0GPN38PJAdAN2lFD321hDJepHZP2yxvqkEnq4ZT8eRTrXvlwbpEALpSTe1COxFbJqvxZgZZhTH7ZU3IDeik6NhOPO0RWSHKs061m5LzzAqZhIvWCC4zCspIUuMc3i_TBlVj5oJohGaNYGiBWQDVbfF2a8eYSHCHpJ9JzC5AZwz0h0a3LZTBdfT5E",
+      "payload": {
+        "t": "tok-takeover",
+        "k": "key-takeover",
+        "reason": "Solve the CAPTCHA",
+        "site": "shop.example",
+        "expiresAt": 4102444800000
+      }
+    },
+    {
+      "deviceId": "dev_test_android_0001",
+      "sessionId": "sess_approval_0000001",
+      "blob": "BNRSnIljbd4Zg76YxHShQwupqdmDHLgL0ovnzNoZSjQwQ0MNbaHWyFQIG7Li1WX4433EJdw-QowGHfAl8JiI8BS6KjcA5X1jGY6ZpQw3mLY9LPLoAfOjO5uOI4gwkb2lKluQ4IJ-7MgfW6rBMzRSUlyCfTrGHdmJ-mdSsDHR8skCIEcRyQ-2RoMSEuHzio3RboS9WcG3Ibg5FX91yqx0Cg-0CmKxtFVmB-n9fjkxkvi1qup4WccVcyJO18OgoAAJ9Fi4S5uj12sOtcwWpe-MoAExXgXtyJI1HzAMm5znROq0-Iqr8_UsaTyKYxYp0lDzvlNngHxgo7UMMe-g",
+      "payload": {
+        "t": "tok-approval",
+        "k": "key-approval",
+        "reason": "mail.example asks you to approve a sign-in",
+        "site": "mail.example",
+        "expiresAt": 4102444800000,
+        "mode": "approval"
+      }
+    },
+    {
+      "deviceId": "dev_test_android_0001",
+      "sessionId": "sess_question_0000001",
+      "blob": "BAvqQxOn_vNZcYZtT0lX1K_nmEXCUQ4q_5tMSUHyEXQixmd1Myx272cYDqk3RWSrqRtlPPc2QnMUzTvn1dRutxua39sbHQ7MO1RRMqIQmIFW8HA7JTcdPnQVEMRk9rbb_5r4fZxHH-4rq7_bHrhf3IO-bC5v4bBujM1nYORa496PEVAkwOdqn5LWXxnHwHiRPIyTT9nfqvwkhbcpBhB36PKn1Vn-Hf34pxOEMU-8u3yWvgXlTdf2__dVuWLkKYNQh8BPa8FxAne3bHy7zIPrISR4W0WirKJcU_JGAVuz6yVp2o_bxA5TrHdzVIAEC4htwsrAsBOmsnasuaJ2JhjR0fP60FPDUlBi",
+      "payload": {
+        "t": "tok-question",
+        "k": "key-question",
+        "reason": "Your agent has a question",
+        "site": "",
+        "expiresAt": 4102444800000,
+        "mode": "question",
+        "question": "Which flight should I book?"
+      }
+    }
+  ]
+}
