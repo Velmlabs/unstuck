@@ -127,3 +127,18 @@ export const HoldDragIcon = () => (
     <path d="M13 12h7.5M17.5 9l3 3-3 3" />
   </Icon>
 );
+
+/** Approval: a phone, "look at your phone". */
+export const PhoneIcon = () => (
+  <Icon size={28}>
+    <rect x="6.5" y="2.5" width="11" height="19" rx="2.5" />
+    <path d="M11 18.5h2" />
+  </Icon>
+);
+
+export const QuestionIcon = () => (
+  <Icon size={16}>
+    <circle cx="12" cy="12" r="9.5" />
+    <path d="M9.5 9.5a2.5 2.5 0 1 1 3.6 2.2c-.7.4-1.1.9-1.1 1.8M12 16.5h.01" />
+  </Icon>
+);

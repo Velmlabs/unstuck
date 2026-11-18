@@ -983,3 +983,222 @@ input:focus-visible {
   background: var(--color-accent);
   vertical-align: 0.1em;
 }
+
+/* Embedded in the inbox (?embed=1): no top bar, no tips; the live view and the bottom bar fill the frame. */
+.app.embed {
+  grid-template-rows: 1fr auto;
+}
+.app.embed .tip,
+.app.embed .first-hint {
+  display: none;
+}
+
+/* Approval waiting page and question page (ApprovalScreen.tsx, QuestionScreen.tsx). */
+.bridge {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) 0 env(safe-area-inset-left);
+}
+.bridge-form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+.bridge-body {
+  flex: 1;
+}
+.bridge-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--pad) 16px;
+  border-bottom: 1px solid var(--color-hairline);
+}
+.bridge-brand {
+  font-weight: 700;
+}
+.bridge-bar .countdown {
+  font-variant-numeric: tabular-nums;
+  background: var(--color-muted);
+  border-radius: 99px;
+  padding: 3px 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.bridge-body {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding: 22px 18px;
+}
+.bridge-body h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.25;
+  text-wrap: balance;
+}
+.bridge-lede {
+  margin: 0;
+  color: var(--color-muted-foreground);
+}
+.bridge-details {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bridge-icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--color-card);
+  color: var(--color-accent);
+}
+.bridge-site {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--color-muted);
+  border-radius: var(--radius);
+  background: var(--color-card);
+  color: var(--color-muted-foreground);
+  overflow-wrap: anywhere;
+}
+.approval-preview {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: var(--radius);
+  border: 1px solid var(--color-muted);
+  background: var(--color-card);
+}
+.bridge-watch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 14px;
+  color: var(--color-muted-foreground);
+}
+.pulse {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 99px;
+  background: var(--color-accent);
+  box-shadow: 0 0 0 0 rgb(34 197 94 / 0.6);
+  animation: bridge-pulse 1.6s infinite;
+}
+@keyframes bridge-pulse {
+  70% {
+    box-shadow: 0 0 0 10px rgb(34 197 94 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(34 197 94 / 0);
+  }
+}
+.bridge-foot {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--color-hairline);
+  background: var(--color-surface-raised);
+}
+.btn-go {
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+}
+.btn-go:hover:not(:disabled) {
+  background: var(--color-accent-pressed);
+}
+.btn-go:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.bridge-foot .btn {
+  width: 100%;
+}
+.bridge-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-muted-foreground);
+}
+.bridge-quote {
+  border-left: 3px solid var(--color-border);
+  padding-left: 12px;
+}
+.bridge-choices {
+  display: grid;
+  gap: 8px;
+}
+.bridge-choice {
+  min-height: var(--touch);
+  padding: 10px 14px;
+  border: 1.5px solid var(--color-border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--color-foreground);
+  font: 500 15px/1.3 var(--font);
+  text-align: left;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.bridge-choice[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: rgb(34 197 94 / 0.1);
+}
+.bridge-choice:focus-visible,
+.bridge-text:focus-visible {
+  outline: 2px solid var(--color-ring);
+  outline-offset: 2px;
+}
+.bridge-choice:disabled {
+  opacity: 0.6;
+}
+.bridge-free {
+  display: grid;
+  gap: 6px;
+}
+.bridge-free label {
+  font-size: 14px;
+  color: var(--color-muted-foreground);
+}
+.bridge-text {
+  min-height: var(--touch);
+  padding: 0 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  background: var(--color-background);
+  color: inherit;
+  font: 16px var(--font);
+}
+.bridge-ok {
+  justify-items: center;
+  text-align: center;
+  padding-top: 50px;
+}
+.bridge-tick {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 99px;
+  background: rgb(34 197 94 / 0.15);
+  color: var(--color-accent);
+}
+.bridge-tick .icon {
+  width: 34px;
+  height: 34px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .pulse {
+    animation: none;
+  }
+}

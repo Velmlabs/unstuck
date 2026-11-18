@@ -267,6 +267,45 @@ describe('connect', () => {
     expect(FakeWs.all).toHaveLength(1);
   });
 
+  it('reports a mode frame', async () => {
+    const onMode = vi.fn();
+    const { h } = make({ ...handlers(), onMode } as never);
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    const mode = { t: 'mode', mode: 'approval', reason: 'r', site: 's' };
+    FakeWs.all[0]!.msg(mode);
+    await flush();
+    expect(onMode).toHaveBeenCalledWith(mode);
+    expect(h.onFrame).not.toHaveBeenCalled();
+  });
+
+  it('ignores a mode frame when the handler is absent', async () => {
+    make();
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    FakeWs.all[0]!.msg({ t: 'mode', mode: 'control', reason: 'r', site: 's' });
+    await flush();
+    expect(FakeWs.all).toHaveLength(1);
+  });
+
+  it('an answered state carries the echoed answer and stops reconnecting', async () => {
+    const { h } = make();
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    FakeWs.all[0]!.msg({ t: 'state', status: 'answered', answer: { choice: 1, label: 'No' } });
+    await flush();
+    FakeWs.all[0]!.drop();
+    vi.advanceTimersByTime(10_000);
+    expect(h.onState).toHaveBeenCalledWith('answered', { choice: 1, label: 'No' });
+    expect(FakeWs.all).toHaveLength(1);
+  });
+
   it('ignores pong and malformed JSON', async () => {
     const { h } = make();
     FakeWs.all[0]!.open();

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'preact/hooks';
-import type { Field, FieldKind, Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@velmlabs/unstuck-protocol';
+import type { AskAnswer, EngineToViewer, Field, FieldKind, Frame, SessionStatus, ViewerErrorCode, ViewerToEngine } from '@velmlabs/unstuck-protocol';
 import { connect as defaultConnect, e2eCodec, type Codec, type ConnectionHandlers, type Phase, type ViewerSocket } from './connection';
 import { importE2eKey } from '@velmlabs/unstuck-protocol';
 import { drawFrameOnCanvas } from './draw';
@@ -12,6 +12,8 @@ import { cleanLabel, type Sender } from './alert-link';
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon, DragIcon, FitIcon, FlagIcon, HelpIcon, KeyboardIcon, ZoomInIcon, ZoomOutIcon } from './icons';
 import { HelpSheet } from './help';
 import { TipButton, useFirstTimeHint, useTips } from './tips';
+import { ApprovalScreen } from './ApprovalScreen';
+import { QuestionScreen } from './QuestionScreen';
 
 export interface AppProps {
   location: { hash: string; pathname: string; origin: string; search?: string };
@@ -74,6 +76,8 @@ const FINAL_SCREENS: Partial<Record<SessionStatus, Screen>> = {
   timed_out: { kind: 'message', title: 'Time ran out', body: 'The takeover window closed. The agent will decide what to do next.', tone: 'warn' },
   failed: { kind: 'message', title: 'The page closed or something went wrong', body: 'The agent will be told. You can close this tab.', tone: 'error' },
 };
+
+const APPROVED_SCREEN: Screen = { kind: 'message', title: 'Approved, thank you', body: 'The sign-in went through and your agent carried on. You can close this tab.', tone: 'ok' };
 
 /** The viewer's own controls: keys pressed on them are not sent to the agent's page. */
 const CHROME = 'button, .topbar, .bottombar, .stage-controls, .sheet';
@@ -214,6 +218,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const dragModeRef = useRef(false);
   dragModeRef.current = dragMode;
   const [reason, setReason] = useState('');
+  /** Approval and question sessions: the last mode frame (an older engine never sends one: the live view stays). */
+  const [modeFrame, setModeFrame] = useState<Extract<EngineToViewer, { t: 'mode' }> | null>(null);
+  const modeRef = useRef(modeFrame);
+  modeRef.current = modeFrame;
+  const [answered, setAnswered] = useState<AskAnswer | null>(null);
+  const approvalCanvas = useRef<HTMLCanvasElement>(null);
+  const embed = new URLSearchParams(location.search ?? '').get('embed') === '1';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bridgeRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -319,15 +330,18 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         }
         // Frame credit: the engine sends the next frame once this one is on screen (a slow phone never builds a backlog).
         const drawn = (d: Frame) => sockRef.current?.ack(d);
-        if (canvasRef.current) drawFrame(canvasRef.current, f, drawn);
+        const target = modeRef.current?.mode === 'approval' ? approvalCanvas.current : modeRef.current?.mode === 'question' ? null : canvasRef.current;
+        if (target) drawFrame(target, f, drawn);
         else drawn(f);
         if (!framedRef.current) {
           framedRef.current = true;
           setFramed(true);
         }
       },
-      onState: (s) => {
-        const final = FINAL_SCREENS[s];
+      onMode: setModeFrame,
+      onState: (s, answer) => {
+        if (s === 'answered') return void setAnswered(answer ?? {});
+        const final = s === 'resolved' && modeRef.current?.mode === 'approval' ? APPROVED_SCREEN : FINAL_SCREENS[s];
         if (final) {
           resumeStore.set(sessionId, null);
           setScreen(final);
@@ -1056,9 +1070,19 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
     );
   }
 
+  if (answered || modeFrame?.mode === 'question' || modeFrame?.mode === 'approval') {
+    const left = info ? remaining : undefined;
+    return !modeFrame || modeFrame.mode === 'question' ? (
+      <QuestionScreen question={modeFrame?.question} agentName={modeFrame?.agentName} answer={answered ?? undefined} answered={!!answered} remaining={left} embed={embed} onAnswer={(a) => send({ t: 'answer', ...a })} />
+    ) : (
+      <ApprovalScreen reason={modeFrame.reason} site={modeFrame.site} canvasRef={approvalCanvas} remaining={left} embed={embed} onApproved={() => send({ t: 'approved' })} onShowPage={() => send({ t: 'switch_control' })} />
+    );
+  }
+
   return (
-    <div class="app">
+    <div class={embed ? 'app embed' : 'app'}>
       {/* While Help is open everything behind it is inert: no taps, no focus, nothing for a screen reader. */}
+      {embed ? null : (
       <header class="topbar" inert={helping}>
         <div class="topbar-text">
           <p class="reason">{info?.reason ?? alert?.reason ?? 'Connecting to the agent…'}</p>
@@ -1079,6 +1103,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
           <HelpIcon />
         </TipButton>
       </header>
+      )}
 
       <div class="stage" ref={stageRef} inert={helping}>
         <div class="viewport" ref={viewportRef}>
@@ -1132,7 +1157,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         <p class="sr-only" aria-live="polite" data-testid="announce">
           {announce}
         </p>
-        {hint ? (
+        {hint && !embed ? (
           <p class="first-hint" role="note">
             {hint}
           </p>

@@ -1,4 +1,4 @@
-import { RESUME_WINDOW_MS, b64urlEncode, decodeFrame, padPlaintext, isJsonPlaintext, openMsg, sealMsg, type EngineToViewer, type Field, type FieldKind, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
+import { RESUME_WINDOW_MS, b64urlEncode, decodeFrame, padPlaintext, isJsonPlaintext, openMsg, sealMsg, type AskAnswer, type EngineToViewer, type Field, type FieldKind, type Frame, type SessionStatus, type ViewerErrorCode, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
 
 /** `closed`: gave up retrying; `ended`: the relay says the session no longer exists (no point retrying). */
 export type Phase = 'connecting' | 'live' | 'reconnecting' | 'closed' | 'ended';
@@ -7,7 +7,7 @@ type Ready = Extract<EngineToViewer, { t: 'ready' }>;
 export interface ConnectionHandlers {
   onReady(r: Ready): void;
   onFrame(f: Frame): void;
-  onState(s: SessionStatus): void;
+  onState(s: SessionStatus, answer?: AskAnswer): void;
   onError(code: ViewerErrorCode, message: string): void;
   onPhase(p: Phase): void;
   /** The engine wants the 6-digit code (`invalid` after a wrong one). */
@@ -16,6 +16,8 @@ export interface ConnectionHandlers {
   onFields?(fields: Field[]): void;
   /** Native typing: what has focus after a tap or a key, and where it is (engine 0.1.3+). */
   onFocus?(kind: FieldKind | null, field?: Field): void;
+  /** Approval and question sessions: which screen to show (never sent by older engines, so the live view stays). */
+  onMode?(m: Extract<EngineToViewer, { t: 'mode' }>): void;
 }
 
 /**
@@ -58,7 +60,7 @@ function chunks(text: string): string[] {
 }
 const PING_MS = 20_000;
 const FATAL: ReadonlySet<ViewerErrorCode> = new Set(['token_invalid', 'token_used', 'expired', 'session_closed']);
-const TERMINAL: ReadonlySet<SessionStatus> = new Set(['resolved', 'timed_out', 'cancelled', 'failed']);
+const TERMINAL: ReadonlySet<SessionStatus> = new Set(['resolved', 'answered', 'timed_out', 'cancelled', 'failed']);
 
 export function connect(
   url: string,
@@ -129,13 +131,15 @@ export function connect(
       h.onPhase('live');
     } else if (m.t === 'state') {
       if (TERMINAL.has(m.status)) stopped = true;
-      h.onState(m.status);
+      if (m.answer) h.onState(m.status, m.answer);
+      else h.onState(m.status);
     } else if (m.t === 'error') {
       if (m.code === 'code_required' || m.code === 'code_invalid') return h.onCodeRequest?.(m.code === 'code_invalid');
       if (FATAL.has(m.code)) stopped = true;
       h.onError(m.code, m.message);
     } else if (m.t === 'fields') h.onFields?.(m.fields);
     else if (m.t === 'focus') h.onFocus?.(m.kind, m.field);
+    else if (m.t === 'mode') h.onMode?.(m);
   };
 
   const open = () => {
