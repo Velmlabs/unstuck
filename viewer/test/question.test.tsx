@@ -79,6 +79,20 @@ describe('question screen', () => {
     expect(screen.queryByRole('button', { name: 'Send answer' })).toBeNull();
   });
 
+  it('Answer sent stays once the state arrived, whatever the closing socket reports after it', () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(ask({ text: 'Go?', choices: ['Yes', 'No'], allowText: false })));
+    act(() => a.h().onState('answered', { choice: 0, label: 'Yes' }));
+    // The relay closes the socket and drops the session right behind the state frame.
+    act(() => a.h().onPhase('ended'));
+    act(() => a.h().onPhase('closed'));
+    act(() => a.h().onError('session_closed', 'This takeover has ended.'));
+    expect(screen.getByRole('heading', { name: 'Answer sent' })).toBeTruthy();
+    expect(screen.queryByText('This check has ended')).toBeNull();
+    expect(screen.queryByText('Connection lost')).toBeNull();
+  });
+
   it('an answered state clears the saved key and closes the socket', () => {
     const a = fakeApp();
     a.ready();

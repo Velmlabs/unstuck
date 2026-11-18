@@ -93,9 +93,11 @@ export function runAsk(deps: TakeoverDeps, o: AskSessionOptions): RunningTakeove
     status = nextStatus(status, FINAL_EVENT[final]);
     clearTimeout(expiryTimer);
     resume.stop();
-    gate.end(status, answer);
+    const delivered = gate.end(status, answer);
     const durationS = Math.round(now() - startedAt) / 1000;
     void (async () => {
+      // The person sees the result before the link goes (a relay closes the viewer on unpublish).
+      await delivered;
       if (published) await transport.unpublish(sessionId).catch(() => {});
       emit('finished', { status: final, durationS, ...(detail ? { detail } : {}), ...(via ? { via } : {}) });
       resolveResult({ status: final, sessionId, url, durationS, ...(detail ? { detail } : {}), ...(answer ? { answer, via } : {}) });

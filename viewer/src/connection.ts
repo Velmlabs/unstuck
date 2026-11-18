@@ -154,9 +154,12 @@ export function connect(
     ws.onopen = () => {
       ping = setInterval(() => socket.readyState === 1 && write(socket, { t: 'ping' }), PING_MS);
     };
+    /** Messages from this socket still being opened: a close waits for them (the last one may be the final state). */
+    let opening = 0;
     ws.onmessage = (e: MessageEvent) => {
       if (typeof e.data === 'string') return; // everything from the engine is sealed binary (binaryType arraybuffer)
       const bytes = new Uint8Array(e.data as ArrayBuffer);
+      opening++;
       inChain = inChain.then(async () => {
         if (socket !== ws) return; // from a socket we've replaced
         if (nonce === null) {
@@ -195,10 +198,16 @@ export function connect(
           return;
         }
         handle(m, socket);
-      });
+      }).finally(() => void opening--);
     };
     ws.onclose = () => {
       clearInterval(ping);
+      // The engine sends its final state and then closes: when the close overtakes that message's decryption, it is
+      // handled after it, so a session that ended is never taken for a dropped connection.
+      if (opening > 0) inChain = inChain.then(closed, closed);
+      else closed();
+    };
+    const closed = () => {
       if (stopped) return;
       downSince ??= Date.now();
       if (Date.now() - downSince >= RESUME_WINDOW_MS) {

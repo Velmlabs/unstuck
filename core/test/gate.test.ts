@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { RESUME_WINDOW_MS, type ViewerToEngine } from '@velmlabs/unstuck-protocol';
 import { FakeViewer } from '../src/testing';
 import type { ViewerConnection } from '../src/transport';
-import { createViewerGate, HELLO_TIMEOUT_MS, type GateOptions } from '../src/session/gate';
+import { createViewerGate, END_DELIVERY_MS, HELLO_TIMEOUT_MS, type GateOptions } from '../src/session/gate';
 import { importSecret, newSecret, signToken } from '../src/session/tokens';
 import { settle } from './settle';
 
@@ -230,5 +230,52 @@ describe('viewer gate', () => {
     await settle();
     t.gate.end('resolved');
     expect(v.json().at(-1)).toEqual({ t: 'state', status: 'resolved' });
+  });
+  it('end resolves only once the holder has closed: its final state has gone out before the session tears down', async () => {
+    const t = await setup();
+    const v = t.open();
+    v.push({ t: 'hello', token: t.token });
+    await settle();
+    const realClose = v.close.bind(v);
+    let closeNow: (() => void) | null = null;
+    v.close = (code, reason) => void (closeNow = () => realClose(code, reason)); // a close that completes later
+    t.end();
+    let delivered = false;
+    void t.gate.end('answered', { choice: 0, label: 'Yes' }).then(() => (delivered = true));
+    await settle();
+    expect(v.json().at(-1)).toEqual({ t: 'state', status: 'answered', answer: { choice: 0, label: 'Yes' } });
+    expect(delivered).toBe(false);
+    closeNow!();
+    await settle();
+    expect(delivered).toBe(true);
+  });
+
+  it('end stops waiting for a close that never completes after END_DELIVERY_MS', async () => {
+    const t = await setup();
+    const v = t.open();
+    v.push({ t: 'hello', token: t.token });
+    await settle();
+    v.close = () => {}; // a dead connection never reports its close
+    t.end();
+    let delivered = false;
+    void t.gate.end('resolved').then(() => (delivered = true));
+    await vi.advanceTimersByTimeAsync(END_DELIVERY_MS - 1);
+    expect(delivered).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(delivered).toBe(true);
+  });
+
+  it('end resolves at once with nobody holding, or when the holder had already closed', async () => {
+    const t = await setup();
+    await expect(t.gate.end('timed_out')).resolves.toBeUndefined();
+    const v = t.open();
+    v.push({ t: 'hello', token: t.token });
+    await settle();
+    t.end();
+    v.close(1001, 'gone'); // closed after the session ended: still the holder, but nothing more can go out
+    let delivered = false;
+    void t.gate.end('failed').then(() => (delivered = true));
+    await settle();
+    expect(delivered).toBe(true);
   });
 });

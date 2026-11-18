@@ -8,6 +8,7 @@ import { importSecret, newSecret } from '../src/session/tokens';
 import { checkAsk, runAsk, ASK_LIMITS, type AskSessionOptions } from '../src/session/ask';
 import { cleanLine, cleanReason, type LinkInfo, type TakeoverControl } from '../src/session/takeover';
 import { settle } from './settle';
+import { END_DELIVERY_MS } from '../src/session/gate';
 
 async function setup(o: Partial<AskSessionOptions> = {}, transport = new FakeTransport()) {
   const log = new MemoryEventLog();
@@ -169,6 +170,33 @@ describe('question session', () => {
     expect(v.closed).toMatchObject({ code: 1000, reason: 'answered' });
     // Nobody gets in after it ended.
     expect(() => t.transport.connect(t.links[0]!.url)).toThrow(/not published/);
+  });
+
+  it('unpublishes only once the final state has gone out and the viewer connection has closed (a relay closes the viewer on unpublish)', async () => {
+    const t = await setup();
+    const v = await t.join();
+    const atUnpublish: { rawClosed: boolean; sent: number }[] = [];
+    const unpublish = t.transport.unpublish.bind(t.transport);
+    t.transport.unpublish = (id) => (atUnpublish.push({ rawClosed: v.raw.closed !== null, sent: v.raw.sent.length }), unpublish(id));
+    const sentBefore = v.raw.sent.length;
+    v.push({ t: 'answer', choice: 0 });
+    await t.finished();
+    // The sealed state frame was on the wire, and the connection closed after it, before the session was unpublished.
+    expect(atUnpublish).toEqual([{ rawClosed: true, sent: sentBefore + 1 }]);
+    expect(v.json().at(-1)).toEqual({ t: 'state', status: 'answered', answer: { choice: 0, label: 'Yes' } });
+  });
+
+  it('a viewer connection whose close never completes holds the unpublish back at most END_DELIVERY_MS', async () => {
+    const t = await setup();
+    const v = await t.join();
+    v.raw.close = () => {}; // a dead socket: its close is never reported
+    v.push({ t: 'answer', choice: 1 });
+    await settle();
+    expect(t.transport.unpublished).toEqual([]);
+    expect(t.result()).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(END_DELIVERY_MS);
+    expect(await t.finished()).toMatchObject({ status: 'answered', answer: { choice: 1, label: 'No' } });
+    expect(t.transport.unpublished).toEqual([t.id()]);
   });
 
   it('quick answer ends it with via telegram when private: false', async () => {

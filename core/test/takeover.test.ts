@@ -72,6 +72,25 @@ describe('takeover session', () => {
     expect(v.closed).not.toBeNull();
   });
 
+  it('unpublishes only once the final state has gone out and the viewer connection has closed', async () => {
+    const t = setup();
+    await settle();
+    const v = await t.join();
+    const realClose = v.raw.close.bind(v.raw);
+    let closeNow: (() => void) | null = null;
+    v.raw.close = (code, reason) => void (closeNow = () => realClose(code, reason)); // the close completes later
+    v.push({ t: 'done' });
+    await settle();
+    expect(v.json().at(-1)).toEqual({ t: 'state', status: 'resolved' });
+    expect(t.transport.unpublished).toEqual([]); // a relay would close the viewer before the state frame reached it
+    expect(t.result()).toBeUndefined();
+    closeNow!();
+    await settle();
+    await t.done;
+    expect(t.transport.unpublished).toEqual([t.links[0]!.sessionId]);
+    expect(t.result()).toMatchObject({ status: 'resolved' });
+  });
+
   it('answers ping with pong and rejects malformed messages without closing', async () => {
     const t = setup();
     await settle();

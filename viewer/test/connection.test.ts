@@ -195,6 +195,67 @@ describe('connect', () => {
     expect(alive).toHaveBeenCalledTimes(2);
   });
 
+  it('a socket that closes while its last message is still being opened: a final state in it ends the session, no reconnect', async () => {
+    let release: () => void = () => {};
+    let slow = false;
+    const codec: Codec = {
+      seal: async (_c, _s, p) => p,
+      open: async (_c, b) => {
+        if (slow) await new Promise<void>((r) => (release = r)); // decryption still running when the close arrives
+        return { seq: ++inSeq, plain: b };
+      },
+    };
+    const h = handlers();
+    const alive = vi.fn(async () => false);
+    connect('ws://x/ws/abc', 'TOK', codec, h, { WebSocketImpl: FakeWs as never, alive });
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    slow = true;
+    FakeWs.all[0]!.msg({ t: 'state', status: 'answered', answer: { choice: 0, label: 'Yes' } });
+    FakeWs.all[0]!.drop(); // the relay closed the viewer right behind the state frame
+    await flush();
+    expect(h.onPhase).not.toHaveBeenCalledWith('reconnecting');
+    release();
+    await flush();
+    expect(h.onState).toHaveBeenCalledWith('answered', { choice: 0, label: 'Yes' });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(h.onPhase).not.toHaveBeenCalledWith('reconnecting');
+    expect(h.onPhase).not.toHaveBeenCalledWith('ended');
+    expect(alive).not.toHaveBeenCalled();
+    expect(FakeWs.all).toHaveLength(1);
+  });
+
+  it('a close behind a message that was not final still reconnects once that message is handled', async () => {
+    let release: () => void = () => {};
+    let slow = false;
+    const codec: Codec = {
+      seal: async (_c, _s, p) => p,
+      open: async (_c, b) => {
+        if (slow) await new Promise<void>((r) => (release = r));
+        return { seq: ++inSeq, plain: b };
+      },
+    };
+    const h = handlers();
+    connect('ws://x/ws/abc', 'TOK', codec, h, { WebSocketImpl: FakeWs as never });
+    FakeWs.all[0]!.open();
+    await flush();
+    FakeWs.all[0]!.msg(ready);
+    await flush();
+    slow = true;
+    FakeWs.all[0]!.msg({ t: 'state', status: 'active' });
+    FakeWs.all[0]!.drop();
+    await flush();
+    expect(h.onPhase).not.toHaveBeenCalledWith('reconnecting');
+    release();
+    await flush();
+    expect(h.onState).toHaveBeenCalledWith('active');
+    expect(h.onPhase).toHaveBeenLastCalledWith('reconnecting');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(FakeWs.all).toHaveLength(2);
+  });
+
   it('wake() (page visible again, network back) retries at once instead of waiting out the backoff', async () => {
     const { h, sock } = make();
     FakeWs.all[0]!.open();

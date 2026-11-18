@@ -11,6 +11,12 @@ import type { ViewerConnection } from '../transport';
 import { newSessionId, verifyToken } from './tokens';
 
 export const HELLO_TIMEOUT_MS = 10_000;
+/**
+ * How long `end` waits for the holder's connection to close once the final `state` is on its way. A session unpublishes
+ * after that, and a relay closes the viewer's socket when it is unpublished, so without the wait the person could miss
+ * the result ("Answer sent") and see the session as gone. Bounded: a dead connection must not stall the agent's result.
+ */
+export const END_DELIVERY_MS = 2_000;
 /** Wrong 6-digit codes before the link stops admitting anyone new (relay spec §5.8). */
 export const MAX_CODE_ATTEMPTS = 5;
 
@@ -51,8 +57,12 @@ export interface ViewerGate {
    * window restarts in full from now. Returns whether it did (the session then restarts its own viewer-left timer).
    */
   renewResumeWindow(): boolean;
-  /** On finish: clears hello timers, sends `state` (with `answer` when given) to the holder and closes it. */
-  end(status: SessionStatus, answer?: AskAnswer): void;
+  /**
+   * On finish: clears hello timers, sends `state` (with `answer` when given) to the holder and closes it. Resolves once
+   * that connection has closed (what was queued on it, the state included, went out first), or after END_DELIVERY_MS;
+   * at once when nobody holds the session. Unpublish only after it. Never rejects.
+   */
+  end(status: SessionStatus, answer?: AskAnswer): Promise<void>;
   reject(conn: ViewerConnection, code: ViewerErrorCode, close?: boolean): void;
 }
 
@@ -74,6 +84,8 @@ export function createViewerGate(o: GateOptions): ViewerGate {
   let leftAt: number | null = null;
   let wrongCodes = 0;
   const helloTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** Connections whose close has completed (`end` must not wait for a close that already happened). */
+  const closed = new WeakSet<ViewerConnection>();
 
   const sendJson = (c: ViewerConnection, m: EngineToViewer) => c.send(JSON.stringify(m));
   const reject = (c: ViewerConnection, code: ViewerErrorCode, close = true) => {
@@ -150,6 +162,7 @@ export function createViewerGate(o: GateOptions): ViewerGate {
     }, HELLO_TIMEOUT_MS);
     helloTimers.add(helloTimer);
     conn.onClose(() => {
+      closed.add(conn);
       clearTimeout(helloTimer);
       helloTimers.delete(helloTimer);
       detach(conn);
@@ -180,14 +193,21 @@ export function createViewerGate(o: GateOptions): ViewerGate {
     return true;
   }
 
-  function end(status: SessionStatus, answer?: AskAnswer): void {
+  function end(status: SessionStatus, answer?: AskAnswer): Promise<void> {
     for (const t of helloTimers) clearTimeout(t);
     helloTimers.clear();
     const viewer = holder;
     holder = null;
-    if (!viewer) return;
-    sendJson(viewer, { t: 'state', status, ...(answer ? { answer } : {}) });
-    viewer.close(1000, status);
+    if (!viewer || closed.has(viewer)) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, END_DELIVERY_MS);
+      viewer.onClose(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+      sendJson(viewer, { t: 'state', status, ...(answer ? { answer } : {}) });
+      viewer.close(1000, status);
+    });
   }
 
   return {

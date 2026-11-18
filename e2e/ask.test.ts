@@ -78,6 +78,31 @@ describe('ask() through relay-node', () => {
     await unstuck.close();
   });
 
+  it('a page answer through relay-node: the person sees "Answer sent", not "This check has ended"', async () => {
+    const unstuck = new Unstuck({ enginePath: ENGINE, relay: relay.url, agentKey: RELAY_KEY, agentName: 'Travel bot' });
+    const c = linkCatcher();
+    const asked = unstuck.ask('Which flight?', { choices: ['BA 117', 'LH 400'], onLink: c.onLink });
+    const link = await c.link;
+
+    const phone = await humanBrowser.newContext({ ...devices['iPhone 13'] });
+    const human = await phone.newPage();
+    await human.goto(link.url);
+    await tapStart(human);
+    await human.getByRole('heading', { name: 'Which flight?' }).waitFor({ timeout: 15_000 });
+    await human.getByRole('button', { name: 'LH 400' }).click();
+    await human.getByRole('button', { name: 'Send answer' }).click();
+
+    await expect(asked).resolves.toMatchObject({ status: 'answered', answer: { choice: 1, label: 'LH 400' }, via: 'page' });
+    await human.getByRole('heading', { name: 'Answer sent' }).waitFor({ timeout: 10_000 });
+    // The relay has closed the viewer by now: a late close or a liveness check must not replace the screen.
+    await expect.poll(() => events.some((e) => e.name === 'session_closed' && e.sessionId === link.sessionId), { timeout: 10_000 }).toBe(true);
+    await human.waitForTimeout(1_500);
+    await expect(human.getByRole('heading', { name: 'Answer sent' }).isVisible()).resolves.toBe(true);
+    await expect(human.getByText('This check has ended').count()).resolves.toBe(0);
+    await phone.close();
+    await unstuck.close();
+  }, 60_000);
+
   it('a private question ignores a quick answer: only the page can answer it', async () => {
     const unstuck = new Unstuck({ enginePath: ENGINE, relay: relay.url, agentKey: RELAY_KEY });
     const c = linkCatcher();

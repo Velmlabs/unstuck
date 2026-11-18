@@ -109,6 +109,17 @@ describe('approval screen', () => {
     expect(screen.getByRole('heading', { name: 'Approved, thank you' })).toBeTruthy();
   });
 
+  it('an approval result stays once it arrived, even when the session is then reported ended or lost', () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(approvalMode));
+    act(() => a.h().onState('failed'));
+    act(() => a.h().onPhase('ended'));
+    act(() => a.h().onPhase('closed'));
+    expect(screen.getByRole('heading', { name: "The sign-in didn't go through" })).toBeTruthy();
+    expect(screen.queryByText('This check has ended')).toBeNull();
+  });
+
   it('the engine judging the page shows Checking the page…, before any tap', () => {
     const a = fakeApp();
     a.ready();

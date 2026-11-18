@@ -235,6 +235,8 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   modeRef.current = modeFrame;
   const [errors, setErrors] = useState(0);
   const [answered, setAnswered] = useState<AskAnswer | null>(null);
+  /** The engine sent the session's result: what the socket reports after that (closed, ended, an error) changes nothing. */
+  const finished = useRef(false);
   /** Approval mode: the engine is checking the page before it ends the session. */
   const [approvalChecking, setApprovalChecking] = useState(false);
   const approvalCanvas = useRef<HTMLCanvasElement>(null);
@@ -382,18 +384,21 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         const final = approving && s === 'resolved' ? APPROVED_SCREEN : approving && s === 'failed' ? NOT_APPROVED_SCREEN : FINAL_SCREENS[s];
         if (s === 'answered') setAnswered(answer ?? {});
         if (final || s === 'answered') {
+          finished.current = true;
           resumeStore.set(sessionId, null);
           if (final) setScreen(final);
           sockRef.current?.close();
         }
       },
       onError: (code) => {
+        if (finished.current) return;
         setErrors((n) => n + 1);
         // An error that ends this link for good: the secret kept for reloads goes with it.
         if (code === 'token_used' || code === 'expired' || code === 'session_closed' || code === 'token_invalid') resumeStore.set(sessionId, null);
         if (code in ERROR_SCREENS) setScreen(ERROR_SCREENS[code as keyof typeof ERROR_SCREENS]);
       },
       onPhase: (p) => {
+        if (finished.current) return;
         setPhase(p);
         if (p === 'closed')
           setScreen({ kind: 'message', title: 'Connection lost', body: 'Reopen the link on this device within 5 minutes to continue where you left off.', tone: 'error' });

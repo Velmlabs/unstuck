@@ -254,7 +254,7 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
     fieldFeed.stop();
     for (const t of targets) t.off();
     const locks = targets.map((t) => t.lock);
-    gate.end(status);
+    const delivered = gate.end(status);
     // No input from this takeover may reach the page once it has ended: what is still queued is discarded, the
     // dispatch in progress is waited for, and a button left pressed is released, all before the lock comes off.
     inputDropped += pendingInput.splice(0).length;
@@ -268,6 +268,8 @@ export function runTakeover(deps: TakeoverDeps, cdp: CdpClient, opts: TakeoverOp
       await stopStream();
       // Unlocking talks to the page, which may never answer (SDK gone, page closed): bounded like stopping the stream.
       await bounded(Promise.all(locks.map((l) => l?.stop())));
+      // The person sees the result before the link goes (a relay closes the viewer on unpublish); bounded by the gate.
+      await delivered;
       if (published) await transport.unpublish(sessionId).catch(() => {});
       emit('finished', { status: final, durationS, inputCount, ...(inputDropped ? { inputDropped } : {}), ...(logged ?? (detail ? { detail } : {})) });
       const fallbacks = [!caps.screencast && 'screenshots', !caps.insertText && 'per-key typing'].filter(Boolean).join(', ');
