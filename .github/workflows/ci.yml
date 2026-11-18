@@ -32,6 +32,8 @@ jobs:
       - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
+      # Ubuntu 24.04 runners block unprivileged user namespaces via AppArmor, which breaks Chromium's sandbox (it dies before DevTools is ready).
+      - run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - run: pnpm check:runtime
       - run: pnpm build
       - run: pnpm test
