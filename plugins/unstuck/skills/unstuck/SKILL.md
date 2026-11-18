@@ -191,7 +191,8 @@ CDP="$(agent-browser get cdp-url)"
 agent-browser tab list --json               # note the targetId of the tab you are using
 TAB=<that targetId>
 unstuck check --cdp "$CDP" --tab "$TAB"     # 0 clear: carry on; 20 check_found: ↓
-unstuck rescue --cdp "$CDP" --tab "$TAB"    # 0: it cleared by itself; 10 human_needed: prints id and link
+OUT="$(unstuck rescue --cdp "$CDP" --tab "$TAB")"   # 0: it cleared by itself; 10 human_needed: show the link
+ID="$(echo "$OUT" | jq -r .id)"
 unstuck wait "$ID"                          # repeat while it exits 11; 0 resolved: carry on
 ```
 

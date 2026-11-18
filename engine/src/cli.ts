@@ -28,12 +28,14 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
        unstuck-engine doctor --cdp <url>
        unstuck-engine check    --cdp <url> [--tab <targetId>] [--url <requested>] [--rescue <kinds>]
        unstuck-engine rescue   --cdp <url> [--tab <targetId>] [--url <requested>] [--rescue <kinds>] [--reason <text>]
+                               [--profile <name>] [--max-rescues-per-hour <n>]
                                [--timeout <s>] [--alerts true|false|required] [--agent-name <name>]
        unstuck-engine takeover --cdp <url> [--tab <targetId>] --reason <text> [--timeout <s>] [--alerts …]
        unstuck-engine ask      <question> [--choice <label>]… [--allow-text] [--public] [--details <text>]
                                [--timeout <s>] [--alerts …]
-       unstuck-engine wait     <id> [--max-wait <s>]
+       unstuck-engine wait     <id> [--max-wait <s>]   (default 45, at most 120)
        unstuck-engine cancel   <id>
+       rescue, takeover and ask also take [--relay <url> --agent-key <key>] (or UNSTUCK_API_KEY for Unstuck Cloud)
        unstuck-engine --version | --help
 
 --mcp runs an MCP server on stdin/stdout. Tools: request_human_takeover (one

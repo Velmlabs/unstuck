@@ -61,6 +61,11 @@ describe('unstuck plugin', () => {
     expect(loop.indexOf('unstuck check')).toBeLessThan(loop.indexOf('unstuck rescue'));
     expect(loop.indexOf('unstuck rescue')).toBeLessThan(loop.indexOf('unstuck wait'));
     expect(section).toMatch(/never solve a check yourself/i);
+    expect(loop).toContain('jq -r .id'); // how the agent gets the id for wait
+    const example = read('examples/agent-browser/README.md');
+    expect(example).toContain('jq -r .id');
+    expect(example).toMatch(/"check_found","check":\{[^}]*"rule":/); // the real check output
+    expect(read('README.md')).toContain('jq -r .id');
     expect(section).toMatch(/the link is for the person only/i);
     const exit = read('engine/src/shell/output.ts');
     const codes = Object.fromEntries([...exit.matchAll(/(\w+): (\d+)/g)].map((m) => [m[1], m[2]]));

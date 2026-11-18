@@ -24,6 +24,11 @@ function io(stdinText?: string) {
 }
 
 describe('main', () => {
+  it('USAGE lists every shell flag', () => {
+    const shell = USAGE.slice(USAGE.indexOf('unstuck-engine rescue'), USAGE.indexOf('unstuck-engine --version'));
+    for (const f of ['--profile', '--max-rescues-per-hour', '--relay', '--agent-key', '--url', '--max-wait']) expect(shell, f).toContain(f);
+  });
+
   it('the shell commands dispatch before the MCP flags (usage problems are exit 2 with one JSON line)', async () => {
     for (const argv of [['rescue'], ['takeover'], ['ask'], ['wait'], ['cancel']]) {
       const x = { ...io(), env: { UNSTUCK_HOME: fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'unstuck-cli-')) } };

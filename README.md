@@ -289,8 +289,9 @@ Agents that drive a browser one shell command at a time, like [agent-browser](ht
 npm install -g @velmlabs/unstuck-engine
 CDP="$(agent-browser get cdp-url)"
 unstuck check  --cdp "$CDP" --tab "$TAB"   # after each navigation: 0 clear, 20 a human check is on the page
-unstuck rescue --cdp "$CDP" --tab "$TAB"   # 10: prints the link for the person and a request id
-unstuck wait   "$ID"                       # 11 while they're on it, 0 once they're done
+OUT="$(unstuck rescue --cdp "$CDP" --tab "$TAB")"   # 10: the link for the person and a request id
+ID="$(echo "$OUT" | jq -r .id)"
+unstuck wait "$ID"                         # 11 while they're on it, 0 once they're done
 ```
 
 `TAB` is the tab's `targetId` from `agent-browser tab list --json` (leave `--tab` out with a single tab). `unstuck takeover --reason "…"` hands the tab over for anything else, and `unstuck ask "…"` asks a question. A killed `wait` doesn't end the request; `unstuck cancel <id>` does. Walkthrough: [`examples/agent-browser`](examples/agent-browser).

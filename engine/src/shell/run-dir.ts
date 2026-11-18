@@ -222,7 +222,11 @@ export async function startControlServer(h: ControlHandlers): Promise<{ port: nu
 }
 
 /** Asks a request's background process; a process or port that is gone reads as `request_lost` (and its file goes). */
-export async function askControl(dir: string, f: RunFile, route: '/result' | '/cancel', maxWaitS = 0): Promise<Record<string, unknown>> {
+/**
+ * Asks the request's process. A process that is gone is `request_lost` (its file removed); one that is alive but doesn't
+ * answer within maxWaitS plus `graceMs` is `request_unresponsive` (its file kept: it may come back).
+ */
+export async function askControl(dir: string, f: RunFile, route: '/result' | '/cancel', maxWaitS = 0, graceMs = 15_000): Promise<Record<string, unknown>> {
   const lost = async () => {
     await removeRunFile(dir, f.id);
     return { ...LOST };
@@ -230,9 +234,14 @@ export async function askControl(dir: string, f: RunFile, route: '/result' | '/c
   if (!alive(f.pid)) return lost();
   const query = route === '/result' ? `?max_wait_s=${maxWaitS}` : '';
   try {
-    const res = await fetch(`http://127.0.0.1:${f.port}${route}${query}`, { method: route === '/cancel' ? 'POST' : 'GET', headers: { authorization: `Bearer ${f.token}` } });
+    const res = await fetch(`http://127.0.0.1:${f.port}${route}${query}`, {
+      method: route === '/cancel' ? 'POST' : 'GET',
+      headers: { authorization: `Bearer ${f.token}` },
+      signal: AbortSignal.timeout(maxWaitS * 1000 + graceMs),
+    });
     return (await res.json()) as Record<string, unknown>;
-  } catch {
+  } catch (e) {
+    if ((e as Error).name === 'TimeoutError') return { status: 'failed', detail: 'request_unresponsive' };
     return lost();
   }
 }

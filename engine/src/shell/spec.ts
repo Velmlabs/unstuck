@@ -18,6 +18,8 @@ export interface RequestSpec {
   browserWsUrl?: string;
   targetId?: string;
   tabKey?: string;
+  /** The running slot (one of MAX_RUNNING) this request holds, like its tab. */
+  slotKey?: string;
   pageUrl?: string;
   site?: string;
   check?: HumanCheck;

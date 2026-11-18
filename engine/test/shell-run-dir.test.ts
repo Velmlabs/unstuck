@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import fs from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { askControl, claimTab, listRunning, readRunFile, removeRunFile, runDir, startControlServer, writeRunFile, type RunFile } from '../src/shell/run-dir';
@@ -173,5 +174,20 @@ describe('tab claims and control failures', () => {
     expect(await claimTab(dir, 'T6')).toEqual({ claimed: false, id: null }); // the dead shell's marker goes
     expect(fs.existsSync(marker)).toBe(false);
     expect((await claimTab(dir, 'T6')).claimed).toBe(true);
+  });
+
+  it('a live process that accepts but never answers is request_unresponsive, and its run file stays', async () => {
+    const mute = net.createServer(() => {});
+    await new Promise<void>((r) => mute.listen(0, '127.0.0.1', () => r()));
+    try {
+      const f = file({ id: 'muterequestidxxxxxxxx', port: (mute.address() as net.AddressInfo).port });
+      await writeRunFile(dir, f);
+      const t0 = Date.now();
+      expect(await askControl(dir, f, '/result', 0, 300)).toEqual({ status: 'failed', detail: 'request_unresponsive' });
+      expect(Date.now() - t0).toBeLessThan(5000);
+      expect(await readRunFile(dir, f.id)).not.toBeNull();
+    } finally {
+      mute.close();
+    }
   });
 });

@@ -18,18 +18,19 @@ $ agent-browser tab list --json        # note the targetId of the tab you're usi
 $ TAB=8081AB0A0E24433A430C71F27681F878
 
 $ unstuck check --cdp "$CDP" --tab "$TAB"; echo "exit $?"
-{"status":"check_found","check":{"kind":"challenge","vendor":"cloudflare","site":"shop.example"}}
+{"status":"check_found","check":{"kind":"challenge","vendor":"cloudflare","site":"shop.example","rule":"cloudflare.interstitial"}}
 exit 20
 
 $ unstuck rescue --cdp "$CDP" --tab "$TAB"; echo "exit $?"
 {"status":"human_needed","id":"Q2x1ZS1yZXF1ZXN0LWlk","link":"https://…","expires_in_s":600,"reason":"…"}
 exit 10
 # The agent shows the person the link (only them). They open it, tap Start, solve it, tap Done.
+$ ID=Q2x1ZS1yZXF1ZXN0LWlk               # in a script: ID="$(unstuck rescue … | jq -r .id)"
 
-$ unstuck wait Q2x1ZS1yZXF1ZXN0LWlk; echo "exit $?"
+$ unstuck wait "$ID"; echo "exit $?"
 {"status":"waiting","id":"Q2x1ZS1yZXF1ZXN0LWlk","joined":true,"expires_in_s":541}
 exit 11
-$ unstuck wait Q2x1ZS1yZXF1ZXN0LWlk; echo "exit $?"
+$ unstuck wait "$ID"; echo "exit $?"
 {"status":"resolved","check":{"kind":"challenge","vendor":"cloudflare","site":"shop.example"},"waited_s":74}
 exit 0
 

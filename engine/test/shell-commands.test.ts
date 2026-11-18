@@ -189,9 +189,22 @@ describe('unstuck rescue / takeover / ask / wait / cancel', () => {
     const got = await new Promise<unknown>((resolve) => {
       children.push(runRequest({ kind: 'takeover', profile: 'cli', reason: 'r', browserWsUrl: 'ws://127.0.0.1:9/devtools/browser/x', targetId: 'x', tabKey: 'K2' }, { transport, env }, resolve));
     });
-    expect(got).toMatchObject({ final: { status: 'failed' } });
+    expect(got).toEqual({ final: { status: 'failed', detail: 'browser_unreachable' } });
     await Promise.all(children);
     expect((await claimTab(dir, 'K2')).claimed).toBe(true);
+  });
+
+  it('six questions started at the same moment: exactly three run, three are too_many_requests', async () => {
+    const all = await Promise.all(['A?', 'B?', 'C?', 'D?', 'E?', 'F?'].map((q) => start('ask', [q], 200)));
+    expect(all.filter((r) => r.code === 10).length).toBe(3);
+    expect(all.filter((r) => r.code === 2 && r.json.error === 'too_many_requests').length).toBe(3);
+  }, 60_000);
+
+  it('a tab that is gone before the request connects is page_closed, not a raw error', async () => {
+    const got = await new Promise<unknown>((resolve) => {
+      children.push(runRequest({ kind: 'takeover', profile: 'cli', reason: 'r', browserWsUrl: chrome.wsUrl, targetId: 'NOSUCHTARGET' }, { transport, env }, resolve));
+    });
+    expect(got).toEqual({ final: { status: 'failed', detail: 'page_closed' } });
   });
 
   it('a background process that never gets to a link gives up: failed start_timeout', async () => {
@@ -315,7 +328,7 @@ describe('selfArgs', () => {
   it('runs the compiled engine itself, node plus the script from source, or an explicit entry', async () => {
     const { selfArgs } = await import('../src/shell/start');
     expect(selfArgs({}, '/$bunfs/root/unstuck-engine', '1.4.4')).toEqual([]);
-    expect(selfArgs({}, '/repo/engine/dist/cli.js', undefined)).toEqual(['/repo/engine/dist/cli.js']);
+    expect(selfArgs({}, '/repo/engine/dist/cli.js', undefined, [])).toEqual(['/repo/engine/dist/cli.js']);
     expect(selfArgs({ UNSTUCK_SHELL_ENTRY: '/x/entry.js' }, '/$bunfs/root/a', '1.4.4')).toEqual(['/x/entry.js']);
     expect(selfArgs({}, '', '')).toEqual([]);
   });
@@ -384,7 +397,7 @@ describe('runStart flags and the spec it hands the background process', () => {
     const gate = new Promise<void>((r) => (go = r));
     const slow: SpawnRequest = async (spec, e) => (await gate, inProcess(3000)(spec, e));
     const first = run((io) => runStart('takeover', ['--cdp', chrome.wsUrl, '--reason', 'r'], io, env, slow));
-    await expect.poll(() => fs.readdirSync(runDir(env)).filter((n) => n.endsWith('.lock')).length).toBe(1);
+    await expect.poll(() => fs.readdirSync(runDir(env)).filter((n) => n.endsWith('.lock')).length).toBe(2); // the tab and a running slot
     const second = run((io) => runStart('takeover', ['--cdp', chrome.wsUrl, '--reason', 'r'], io, env, slow));
     await new Promise((r) => setTimeout(r, 300));
     go();

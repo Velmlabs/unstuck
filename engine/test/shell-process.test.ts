@@ -1,12 +1,12 @@
 // The process edges of the shell commands: starting the background process, the background process's own entry,
 // and the result shapes it reports.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
-import { askResult, rescueResult, startResult } from '../src/shell/request';
-import { runRequestChild, spawnRequest } from '../src/shell/start';
+import { askResult, rescueResult, startResult, untilDone } from '../src/shell/request';
+import { runRequestChild, selfArgs, spawnRequest, tabKeyFor } from '../src/shell/start';
 import { ShellError } from '../src/shell/tab';
 import type { RequestSpec } from '../src/shell/spec';
 
@@ -77,5 +77,38 @@ describe('result shapes', () => {
     expect(s).toMatchObject({ code_required: true, alerted: false, expires_in_s: 0 });
     expect(JSON.stringify(s)).not.toContain('123456');
     expect(startResult({ ...(info as object), code: undefined } as never, undefined)).not.toHaveProperty('alerted');
+  });
+});
+
+describe('shell details', () => {
+  it('one tab is one key however the DevTools address is spelled', () => {
+    const a = tabKeyFor('ws://localhost:9222/devtools/browser/0b5e-41', 'T1');
+    expect(tabKeyFor('ws://127.0.0.1:9222/devtools/browser/0b5e-41', 'T1')).toBe(a);
+    expect(tabKeyFor('ws://127.0.0.1:9222/devtools/browser/0b5e-41', 'T2')).not.toBe(a);
+    expect(tabKeyFor('ws://127.0.0.1:9333/devtools/browser/other', 'T1')).not.toBe(a);
+  });
+
+  it('a wait leaves no timer or listener behind once it returns', async () => {
+    vi.useFakeTimers();
+    try {
+      let finish!: () => void;
+      const done = new Promise<void>((r) => (finish = r));
+      const ac = new AbortController();
+      const w = untilDone(done, 60_000, ac.signal);
+      finish();
+      await w;
+      expect(vi.getTimerCount()).toBe(0);
+      const w2 = untilDone(new Promise<void>(() => {}), 60_000, ac.signal);
+      ac.abort();
+      await w2;
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('from source, the background process gets the same node flags (e.g. a TypeScript loader)', () => {
+    expect(selfArgs({}, '/repo/engine/src/bin.ts', undefined, ['--import', 'tsx'])).toEqual(['--import', 'tsx', '/repo/engine/src/bin.ts']);
+    expect(selfArgs({}, '/$bunfs/root/unstuck-engine', '1.4.4', ['--x'])).toEqual([]);
   });
 });

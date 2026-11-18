@@ -12,7 +12,7 @@ import { cdpUrlFrom, parseShell, rescueScope } from './args';
 import { usageError } from './check';
 import { EXIT, emit, exitFor } from './output';
 import { runRequest } from './request';
-import { askControl, claimTab, listRunning, readRunFile, runDir, type TabClaim } from './run-dir';
+import { askControl, claimTab, readRunFile, runDir, type TabClaim } from './run-dir';
 import { type RequestSpec } from './spec';
 import { ShellError, resolveTab } from './tab';
 
@@ -35,10 +35,15 @@ export type SpawnRequest = (spec: RequestSpec, env: Record<string, string | unde
  * How to run this same program again: the released engine is a single compiled executable (process.execPath is the
  * engine itself; Bun puts a virtual /$bunfs path in argv[1]), while from source it is node plus a script.
  */
-export function selfArgs(env: Record<string, string | undefined>, argv1: string | undefined = process.argv[1], bun: string | undefined = process.versions.bun): string[] {
+export function selfArgs(
+  env: Record<string, string | undefined>,
+  argv1: string | undefined = process.argv[1],
+  bun: string | undefined = process.versions.bun,
+  execArgv: string[] = process.execArgv,
+): string[] {
   if (env.UNSTUCK_SHELL_ENTRY) return [env.UNSTUCK_SHELL_ENTRY];
   if (bun && (argv1 ?? '').includes('$bunfs')) return [];
-  return argv1 ? [argv1] : [];
+  return argv1 ? [...execArgv, argv1] : [];
 }
 
 /** The default: this same program, detached, `__request`, spec on stdin, one JSON line back on stdout. */
@@ -120,23 +125,27 @@ export async function runStart(kind: 'rescue' | 'takeover' | 'ask', argv: string
       };
       const problem = checkAsk({ ...ask, ...(timeoutS ? { timeoutS } : {}) });
       if (problem) throw new ShellError('usage', undefined, problem);
-      if ((await running(dir)) >= MAX_RUNNING) throw new ShellError('too_many_requests', undefined, 'finish or cancel a request first');
-      spec = { ...base, kind, ask };
+      const slot = await claimSlot(dir);
+      release = slot.release;
+      spec = { ...base, kind, ask, slotKey: slot.key };
     } else {
       if (kind === 'takeover' && !v.reason) throw new ShellError('usage', undefined, 'takeover needs --reason "<what the person should do>"');
       const scope = kind === 'rescue' ? rescueScope(v.rescue as string | undefined) : undefined;
       const profile = (v.profile as string | undefined) ?? 'cli';
       const maxRescuesPerHour = positiveInt('max-rescues-per-hour', v['max-rescues-per-hour'] as string | undefined);
       const tab = await resolveTab(cdpUrlFrom(v.cdp as string | undefined, env), v.tab as string | undefined);
-      const tabKey = `${tab.browserWsUrl}|${tab.targetId}`;
+      const tabKey = tabKeyFor(tab.browserWsUrl, tab.targetId);
       const claim = await claimOrJoin(dir, tabKey);
       if (!claim.claimed) {
         const current = claim.id ? await readRunFile(dir, claim.id) : null;
         if (current?.start) return emit(io, current.start, EXIT.humanNeeded, 'A person is already being asked about this tab: show them the link, then run unstuck wait.');
         throw new ShellError('busy', undefined, 'another request for this tab is starting: try again in a moment');
       }
-      release = claim.release;
-      if ((await running(dir)) >= MAX_RUNNING) throw new ShellError('too_many_requests', undefined, 'finish or cancel a request first');
+      const slot = await claimSlot(dir).catch(async (e: unknown) => {
+        await claim.release();
+        throw e;
+      });
+      release = () => Promise.all([claim.release(), slot.release()]).then(() => {});
       let check;
       if (kind === 'rescue') {
         const cdp = await connectCdp(tab.browserWsUrl, { targetId: tab.targetId });
@@ -159,6 +168,7 @@ export async function runStart(kind: 'rescue' | 'takeover' | 'ask', argv: string
         browserWsUrl: tab.browserWsUrl,
         targetId: tab.targetId,
         tabKey,
+        slotKey: slot.key,
         pageUrl: tab.url,
         site: check?.site ?? siteOfUrl(tab.url),
         ...(check ? { check } : {}),
@@ -170,16 +180,38 @@ export async function runStart(kind: 'rescue' | 'takeover' | 'ask', argv: string
       release = null;
       return report(io, r);
     }
-    return report(io, await spawnImpl(spec, env));
+    const r = await spawnImpl(spec, env);
+    release = null; // the background process owns the slot now
+    return report(io, r);
   } catch (e) {
     if (release) await release();
     return usageError(io, e);
   }
 }
 
-/** Requests still running (ended ones kept only for `wait` don't count). */
-async function running(dir: string): Promise<number> {
-  return (await listRunning(dir)).filter((f) => !f.endedAt).length;
+/**
+ * One tab, whatever the DevTools address looked like (localhost or 127.0.0.1): the browser's port and id plus the
+ * tab's targetId.
+ */
+export function tabKeyFor(browserWsUrl: string, targetId: string): string {
+  try {
+    const u = new URL(browserWsUrl);
+    const id = /\/devtools\/browser\/([^/?#]+)/.exec(u.pathname)?.[1];
+    if (id) return `browser:${u.port}/${id}|${targetId}`;
+  } catch {
+    /* not a URL: use it as given */
+  }
+  return `${browserWsUrl}|${targetId}`;
+}
+
+/** A running slot (MAX_RUNNING of them, held like a tab lock until the request ends), or too_many_requests. */
+async function claimSlot(dir: string): Promise<{ key: string; release(): Promise<void> }> {
+  for (let n = 0; n < MAX_RUNNING; n++) {
+    const key = `slot:${n}`;
+    const c = await claimTab(dir, key);
+    if (c.claimed) return { key, release: c.release };
+  }
+  throw new ShellError('too_many_requests', undefined, 'finish or cancel a request first');
 }
 
 /**

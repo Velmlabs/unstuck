@@ -84,6 +84,29 @@ const within = <T>(p: Promise<T>, ms: number): Promise<T | undefined> =>
     );
   });
 
+/** Resolves when `done` settles, `ms` passes or `signal` aborts, whichever is first; leaves no timer or listener. */
+export function untilDone(done: Promise<unknown>, ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const finish = () => {
+      clearTimeout(t);
+      signal.removeEventListener('abort', finish);
+      resolve();
+    };
+    const t = setTimeout(finish, ms);
+    signal.addEventListener('abort', finish);
+    void done.then(finish, finish);
+  });
+}
+
+/** Why a request ended before its link, as a detail code (never a raw error message). */
+function startFailure(e: unknown): string {
+  const m = (e as Error)?.message ?? '';
+  if (m === 'start_timeout') return m;
+  if (/could not reach the browser|ECONNREFUSED|fetch failed/i.test(m)) return 'browser_unreachable';
+  if (/target .* not found|no page target|No target with given id/i.test(m)) return 'page_closed';
+  return 'start_failed';
+}
+
 /** The paint check, cached per browser in the run directory; its probe tab opens in the background. */
 export function cachedPaintCheck(dir: string, browserWsUrl: string): RenderCheck {
   return onceRenderCheck(async () => {
@@ -128,9 +151,10 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     resolveLink({ info, alert });
   };
 
+  const locks = [spec.tabKey, spec.slotKey].filter((k): k is string => !!k);
   /** With `id`, the tab's lock is freed only while it still names this request (a newer one may hold the tab). */
   const closeAll = async (id?: string) => {
-    if (spec.tabKey) await (id ? releaseTabIf(dir, spec.tabKey, id) : releaseTab(dir, spec.tabKey));
+    for (const key of locks) await (id ? releaseTabIf(dir, key, id) : releaseTab(dir, key));
     await engine.close().catch(() => {});
     await cdp?.close().catch(() => {});
   };
@@ -181,7 +205,7 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     }
   } catch (e) {
     clearTimeout(startTimer);
-    ready({ final: { status: 'failed', detail: (e as Error).message } });
+    ready({ final: { status: 'failed', detail: startFailure(e) } });
     await closeAll();
     return d.onExit?.();
   }
@@ -219,7 +243,7 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     token,
     onRead: () => {},
     result: async (maxWaitS, signal) => {
-      if (!final) await Promise.race([done, new Promise((r) => setTimeout(r, maxWaitS * 1000)), new Promise((r) => signal.addEventListener('abort', r))]);
+      if (!final) await untilDone(done, maxWaitS * 1000, signal);
       if (!final) return waiting();
       scheduleExit();
       return final;
@@ -246,11 +270,11 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     start,
   });
   // This process names the request in the tab's lock before reporting, so a concurrent start finds it.
-  if (spec.tabKey) await nameTabLock(dir, spec.tabKey, info.sessionId);
+  for (const key of locks) await nameTabLock(dir, key, info.sessionId);
   // At the end the tab and the running slot are free at once; the result stays readable for keepMs (read or not).
   void done.then(async () => {
     await markEnded(dir, info.sessionId);
-    if (spec.tabKey) await releaseTabIf(dir, spec.tabKey, info.sessionId);
+    for (const key of locks) await releaseTabIf(dir, key, info.sessionId);
     scheduleExit();
   });
   ready({ start });
