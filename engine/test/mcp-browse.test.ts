@@ -189,7 +189,7 @@ describe('MCP browse tools', { timeout: 30_000 }, () => {
     await m.close();
   });
 
-  it('resume_after_human finishes a browsing call and refuses unknown ids', async () => {
+  it('resume_after_human is there without browsing, and refuses an unknown id', async () => {
     const m = await open({ browse: false });
     expect((await m.call('resume_after_human', { takeover_id: 'nope' })).isError).toBe(true);
     await m.close();

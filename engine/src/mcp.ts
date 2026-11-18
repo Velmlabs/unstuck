@@ -188,6 +188,8 @@ export interface TwoStep {
   forget?: ReturnType<typeof setTimeout>;
   /** What resume_after_human waits for and returns: set for a browsing call or question that returned human_needed. */
   resume?: { outcome: Promise<unknown>; answer(): Promise<CallToolResult> };
+  /** A question: its answer only comes back through resume_after_human. */
+  question?: boolean;
 }
 
 /** The human_needed result of a browsing call or a question: the link for the person, never the 6-digit code. */
@@ -481,6 +483,8 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
     async ({ takeover_id, max_wait_s }, extra) => {
       const t = lookup(takeover_id);
       if ('content' in t) return t;
+      // Its result has no answer in it: only resume_after_human returns that.
+      if (t.question) return text(`takeover_id "${takeover_id}" is a question from ${ASK_TOOL}; use ${RESUME_TOOL}`, true);
       const r = await within(t.result, (max_wait_s ?? DEFAULT_WAIT_S) * 1000, extra.signal);
       if (!r) {
         const joined = t.control.joined();
@@ -519,7 +523,10 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
         t.control.cancel(AGENT_CANCEL_DETAIL);
       }
       const r = await t.result;
-      t.returned = true;
+      // An answered question's answer comes back through resume_after_human, which must stay able to return it.
+      if (t.question) {
+        if (r.status === 'answered') return text(`takeover_id "${takeover_id}" was answered; call ${RESUME_TOOL} to get the answer`, true);
+      } else t.returned = true;
       return structured(resultOut(r, t.byAgent), r.status === 'failed');
     },
   );
@@ -589,7 +596,7 @@ export function createMcpServer(opts: McpServerOptions): McpServer {
           (r): TakeoverResult => ({ status: r.status, sessionId: info.sessionId, url: info.url, durationS: r.durationS, ...(r.detail ? { detail: r.detail } : {}) }),
         );
         const memo = asked.then(askOut);
-        registry.add({ id: info.sessionId, info, control: ctl, result, final: null, returned: false, byAgent: false, resume: { outcome: asked, answer: () => memo } });
+        registry.add({ id: info.sessionId, info, control: ctl, result, final: null, returned: false, byAgent: false, question: true, resume: { outcome: asked, answer: () => memo } });
         return humanNeeded(info);
       } finally {
         extra.signal.removeEventListener('abort', onAbort);

@@ -309,17 +309,6 @@ describe('ask_question', () => {
     await m.server.close();
   });
 
-  it('wait_for_human_takeover finishes a question as its takeover result, and cancel ends it', async () => {
-    const m = await askWith();
-    const h = await m.call('ask_question', { question: 'Ship it?' });
-    const id = h.structuredContent.takeover_id;
-    await m.call('cancel_human_takeover', { takeover_id: id });
-    const r = await m.call('resume_after_human', { takeover_id: id });
-    expect(r.isError).toBe(true);
-    expect(r.structuredContent).toEqual({ status: 'cancelled', detail: 'cancelled_by_agent' });
-    await m.server.close();
-  });
-
   it('the code never appears in ask_question results', async () => {
     const m = await askWith({ env: { UNSTUCK_REQUIRE_CODE: '1' } });
     const h = await m.call('ask_question', { question: 'Ship it?' });
@@ -382,19 +371,57 @@ describe('ask_question', () => {
     await m.server.close();
   });
 
-  it('a client that cancels the call ends the question', async () => {
-    const m = await askWith();
+  it('a client that cancels the call ends the question (the page sees it cancelled)', async () => {
+    const m = await askWith({ open: true });
     const ac = new AbortController();
     const p = m.client.callTool({ name: 'ask_question', arguments: { question: 'Ship it?' } }, undefined, { signal: ac.signal }).catch(() => 'aborted');
     await vi.waitFor(() => expect(m.err()).toMatch(/→/));
+    const link = /→ (\S+)/.exec(m.err())![1]!;
+    const v = (m.transport as FakeTransport).connect(link);
+    v.push({ t: 'hello', token: new URLSearchParams(new URL(link).hash.slice(1)).get('t')! });
+    await vi.waitFor(() => expect(v.json().some((f: any) => f.t === 'mode')).toBe(true));
     ac.abort();
     await p;
+    await vi.waitFor(() => expect(v.json().find((f: any) => f.t === 'state' && f.status === 'cancelled')).toBeTruthy());
+    await m.server.close();
+  });
+
+  it('wait_for_human_takeover refuses a question id (its answer only comes from resume_after_human); cancel on an answered question does too', async () => {
+    const m = await askWith();
+    const h = await m.call('ask_question', { question: 'Ship it?', choices: ['Yes', 'No'] });
+    const id = h.structuredContent.takeover_id;
+    const w = await m.call('wait_for_human_takeover', { takeover_id: id, max_wait_s: 1 });
+    expect(w.isError).toBe(true);
+    expect(w.content[0]!.text).toContain('resume_after_human');
+    await m.answer({ choice: 1 });
+    await new Promise((r) => setTimeout(r, 100)); // the answer lands
+    const c = await m.call('cancel_human_takeover', { takeover_id: id });
+    expect(c.isError).toBe(true);
+    expect(c.content[0]!.text).toContain('resume_after_human');
+    // the answer was not consumed
+    expect((await m.call('resume_after_human', { takeover_id: id })).structuredContent).toEqual({ status: 'answered', answer: { choice: 1, label: 'No' }, via: 'page' });
+    await m.server.close();
+  });
+
+  it('cancel_human_takeover on a waiting question ends it; resume_after_human then returns the cancelled error', async () => {
+    const m = await askWith();
+    const h = await m.call('ask_question', { question: 'Ship it?' });
+    const id = h.structuredContent.takeover_id;
+    await m.call('cancel_human_takeover', { takeover_id: id });
+    const r = await m.call('resume_after_human', { takeover_id: id });
+    expect(r.isError).toBe(true);
+    expect(r.structuredContent).toEqual({ status: 'cancelled', detail: 'cancelled_by_agent' });
     await m.server.close();
   });
 
   it('resume_after_human on an unknown id, or a start_human_takeover id, is an error', async () => {
     const m = await askWith();
     expect((await m.call('resume_after_human', { takeover_id: 'nope' })).isError).toBe(true);
+    const started = await m.call('start_human_takeover', { reason: 'Solve it', cdp_url: `127.0.0.1:${chrome.port}` });
+    const sid = (started.structuredContent ?? JSON.parse(started.content[0]!.text)).takeover_id;
+    const r = await m.call('resume_after_human', { takeover_id: sid });
+    expect(r.isError).toBe(true);
+    expect(r.content[0]!.text).toContain('wait_for_human_takeover');
     await m.server.close();
   });
 });
