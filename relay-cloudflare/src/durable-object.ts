@@ -120,7 +120,7 @@ export function makeRelaySessionDO<E>(opts: DoOptions<E>) {
         return;
       }
       const r = s.record;
-      const key = JSON.stringify([r.secretHash, r.billed, r.agentDownSince, r.nextC, r.expiresAt, r.keyHash, r.account]);
+      const key = JSON.stringify([r.secretHash, r.billed, r.agentDownSince, r.nextC, r.expiresAt, r.keyHash, r.account, r.mode]);
       if (flush || key !== this.savedKey) {
         this.savedKey = key;
         await this.ctx.storage.put('rec', r);
@@ -136,11 +136,29 @@ export function makeRelaySessionDO<E>(opts: DoOptions<E>) {
       return !!s && !s.ended && s.record.secretHash !== null;
     }
 
+    private async quickAnswer(req: Request, s: RelaySession | null): Promise<Response> {
+      if (req.method !== 'POST') return new Response(null, { status: 405 });
+      let body: unknown;
+      try {
+        body = await req.json();
+      } catch {
+        return new Response(null, { status: 400 });
+      }
+      const b = body as { choice?: unknown } | null;
+      const choice = b?.choice;
+      if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).length !== 1 || typeof choice !== 'number' || !Number.isInteger(choice) || choice < 0 || choice > 5) {
+        return new Response(null, { status: 400 });
+      }
+      return new Response(null, { status: this.live(s) && s.quickAnswer(choice) ? 204 : 404 });
+    }
+
     override async fetch(req: Request): Promise<Response> {
       const path = new URL(req.url).pathname;
       const id = req.headers.get(H_SESSION) ?? '';
       let s = await this.load();
       if (path === '/status') return new Response(null, { status: this.live(s) ? 204 : 404 });
+      // Internal, like /status: only the Worker's own stub calls it (Unstuck Cloud's Telegram callback), never public routing.
+      if (path === '/quick_answer') return this.quickAnswer(req, s);
 
       const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket];
       if (path === '/viewer') {

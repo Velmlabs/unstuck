@@ -6,13 +6,13 @@ import { FakeSocket } from './helpers';
 
 let now = 1_000_000;
 let events: RelayEvent[];
-const hello = (secret = 'SECRET', expiresAt = now + 600_000) => JSON.stringify({ t: 'hello', expiresAt, secret });
+const hello = (secret = 'SECRET', expiresAt = now + 600_000, mode?: string) => JSON.stringify({ t: 'hello', expiresAt, secret, ...(mode ? { mode } : {}) });
 
-async function registered() {
+async function registered(mode?: string) {
   const s = new RelaySession(newRecord('SID_0123456789abcdef', 'acct', 'KEYHASH', now), (e) => void events.push(e), () => now);
   const agent = new FakeSocket();
   s.attachAgent(agent);
-  s.agentMessage(agent, hello());
+  s.agentMessage(agent, hello('SECRET', now + 600_000, mode));
   await s.flush();
   return { s, agent };
 }
@@ -110,6 +110,94 @@ describe('pairing and routing', () => {
     const c2 = s.attachViewer(v2)!;
     s.viewerClosed(c2);
     expect(agent.json()).toContainEqual({ t: 'close', c: c2 });
+  });
+});
+
+describe('modes', () => {
+  const taken = () => events.filter((e) => e.name === 'takeover_opened');
+
+  it('question session bills on viewer confirmation, not on bytes', async () => {
+    const { s, agent } = await registered('question');
+    expect(s.record.mode).toBe('question');
+    s.attachViewer(new FakeSocket());
+    s.agentMessage(agent, encodeEnvelope(1, new Uint8Array(RELAY_LIMITS.billableBytes * 2)));
+    await s.flush();
+    expect(taken()).toHaveLength(0);
+    s.agentMessage(agent, encodeEnvelope(1, new Uint8Array(10)));
+    await s.flush();
+    expect(taken()).toMatchObject([{ mode: 'question' }]);
+    s.agentMessage(agent, encodeEnvelope(1, new Uint8Array(10)));
+    await s.flush();
+    expect(taken()).toHaveLength(1);
+  });
+
+  it('approval session bills once even with several confirmed viewers', async () => {
+    const { s, agent } = await registered('approval');
+    s.attachViewer(new FakeSocket());
+    s.attachViewer(new FakeSocket());
+    for (const c of [1, 1, 2, 2]) s.agentMessage(agent, encodeEnvelope(c, new Uint8Array(5)));
+    await s.flush();
+    expect(taken()).toMatchObject([{ mode: 'approval' }]);
+  });
+
+  it('an unconfirmed viewer in an approval session is not billed', async () => {
+    const { s, agent } = await registered('approval');
+    s.attachViewer(new FakeSocket());
+    s.agentMessage(agent, encodeEnvelope(1, new Uint8Array(5)));
+    await s.flush();
+    expect(taken()).toHaveLength(0);
+  });
+
+  it('control session still bills on the first 4096-byte payload, and tags the event', async () => {
+    const { s, agent } = await registered('control');
+    s.attachViewer(new FakeSocket());
+    s.agentMessage(agent, encodeEnvelope(1, new Uint8Array(5)));
+    s.agentMessage(agent, encodeEnvelope(1, new Uint8Array(5)));
+    await s.flush();
+    expect(taken()).toHaveLength(0);
+    s.agentMessage(agent, encodeEnvelope(1, new Uint8Array(RELAY_LIMITS.billableBytes)));
+    await s.flush();
+    expect(taken()).toMatchObject([{ mode: 'control' }]);
+  });
+
+  it('a hello without a mode means control', async () => {
+    const { s } = await registered();
+    expect(s.record.mode).toBe('control');
+  });
+
+  it('a reconnecting hello does not change the stored mode', async () => {
+    const { s } = await registered('question');
+    const a2 = new FakeSocket();
+    s.attachAgent(a2);
+    s.agentMessage(a2, hello('SECRET', now + 600_000, 'control'));
+    await s.flush();
+    expect(s.isAgent(a2)).toBe(true);
+    expect(s.record.mode).toBe('question');
+  });
+
+  it('a record stored before modes existed defaults to control', () => {
+    const { mode: _m, ...old } = newRecord('SID_0123456789abcdef', 'a', 'K', now);
+    const s = new RelaySession(old as never, () => {}, () => now);
+    expect(s.record.mode).toBe('control');
+  });
+
+  it('session_closed carries the mode', async () => {
+    const { s, agent } = await registered('approval');
+    s.agentMessage(agent, '{"t":"end"}');
+    await s.flush();
+    expect(events.find((e) => e.name === 'session_closed')).toMatchObject({ mode: 'approval' });
+  });
+
+  it('quickAnswer reaches the agent; false when invalid, done or no agent', async () => {
+    const { s, agent } = await registered('question');
+    expect(s.quickAnswer(2)).toBe(true);
+    expect(agent.json()).toContainEqual({ t: 'quick_answer', choice: 2 });
+    for (const bad of [-1, 6, 1.5, NaN]) expect(s.quickAnswer(bad)).toBe(false);
+    s.agentClosed(agent);
+    expect(s.quickAnswer(1)).toBe(false);
+    const r2 = await registered('question');
+    r2.s.end('x');
+    expect(r2.s.quickAnswer(1)).toBe(false);
   });
 });
 

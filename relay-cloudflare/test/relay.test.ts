@@ -442,3 +442,62 @@ describe('security fixes', () => {
     expect(JSON.parse(reason).error).toMatch(/^quota exceeded/);
   });
 });
+
+describe('modes and quick answers', () => {
+  let n = 0;
+  const sid = () => `SESSIONMODE_${String(++n).padStart(9, '0')}`;
+  async function modeAgent(id: string, mode: string) {
+    const ws = new FetchWs(`wss://relay.test/agent/${id}`, ['unstuck-relay.1', 'key.K3']);
+    const msgs: unknown[] = [];
+    ws.onmessage = (e) => typeof e.data === 'string' && msgs.push(JSON.parse(e.data));
+    await waitFor(() => ws.readyState === 1);
+    ws.send(JSON.stringify({ t: 'hello', expiresAt: Date.now() + 60_000, secret: 'S', mode }));
+    await waitFor(() => msgs.some((m) => (m as { t: string }).t === 'registered'));
+    return { ws, msgs };
+  }
+  const post = (id: string, body: string) => stub(id).fetch('https://do/quick_answer', { method: 'POST', body, headers: { 'x-unstuck-session': id } });
+
+  it('durable object /quick_answer forwards to the agent: 204; strict body; 404 without a live session', async () => {
+    const SID = sid();
+    expect((await post(SID, '{"choice":1}')).status).toBe(404);
+    const { ws, msgs } = await modeAgent(SID, 'question');
+    expect((await post(SID, '{"choice":2}')).status).toBe(204);
+    await waitFor(() => msgs.some((m) => (m as { t: string }).t === 'quick_answer'));
+    expect(msgs).toContainEqual({ t: 'quick_answer', choice: 2 });
+    for (const bad of ['nope', '{"choice":9}', '{"choice":1.5}', '{"choice":"1"}', '{}', '{"choice":1,"x":2}', '[1]', 'null']) {
+      expect((await post(SID, bad)).status, bad).toBe(400);
+    }
+    expect((await stub(SID).fetch('https://do/quick_answer')).status).toBe(405);
+    ws.close();
+  });
+
+  it('a public request to /quick_answer is never forwarded to the Durable Object', async () => {
+    const SID = sid();
+    const { ws, msgs } = await modeAgent(SID, 'question');
+    for (const m of ['POST', 'GET']) {
+      const res = await exports.default.fetch(new Request(`${BASE}/quick_answer`, { method: m, ...(m === 'POST' ? { body: '{"choice":1}' } : {}) }));
+      expect(res.status).toBe(404);
+    }
+    const res = await exports.default.fetch(new Request(`${BASE}/quick_answer/${SID}`, { method: 'POST', body: '{"choice":1}', headers: { Upgrade: 'websocket' } }));
+    expect(res.status).toBe(404);
+    expect(msgs.some((m) => (m as { t: string }).t === 'quick_answer')).toBe(false);
+    ws.close();
+  });
+
+  it('the mode survives hibernation, and records without a mode default to control', async () => {
+    const SID = sid();
+    const { ws } = await modeAgent(SID, 'approval');
+    await evictDurableObject(stub(SID));
+    const mode = await runInDurableObject(stub(SID), async (_i, state) => (await state.storage.get<SessionRecord>('rec'))?.mode);
+    expect(mode).toBe('approval');
+    await runInDurableObject(stub(SID), async (_i, state) => {
+      const rec = (await state.storage.get<SessionRecord>('rec'))!;
+      delete (rec as Partial<SessionRecord>).mode;
+      await state.storage.put('rec', rec);
+    });
+    await evictDurableObject(stub(SID));
+    expect((await post(SID, '{"choice":1}')).status).toBe(204); // rebuilt from the mode-less record
+    await runDurableObjectAlarm(stub(SID));
+    ws.close();
+  });
+});

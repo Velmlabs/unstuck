@@ -184,6 +184,32 @@ describe('createRelayTransport', () => {
     expect(closed).toBe(1);
   });
 
+  it('publish sends mode in the hello, and omits it when none is given', async () => {
+    const t = make('K');
+    const p = t.publish(ID, { expiresAt: 5_000, mode: 'question' });
+    const ws = FakeWs.all.at(-1)!;
+    ws.accept();
+    await flush();
+    expect(ws.json()[0]).toMatchObject({ t: 'hello', mode: 'question' });
+    ws.text({ t: 'registered' });
+    await p;
+    const { ws: plain } = await published();
+    expect(plain.json()[0]).not.toHaveProperty('mode');
+  });
+
+  it('delivers a quick_answer to the registered handler, and never opens a viewer connection', async () => {
+    const { t, ws } = await published();
+    const got: number[] = [];
+    const onConn = vi.fn();
+    t.onConnection(ID, onConn);
+    t.onQuickAnswer!(ID, (c) => got.push(c));
+    ws.text({ t: 'quick_answer', choice: 3 });
+    expect(got).toEqual([3]);
+    expect(onConn).not.toHaveBeenCalled();
+    t.onQuickAnswer!('UNKNOWN_SESSION_0000', () => got.push(99));
+    expect(got).toEqual([3]);
+  });
+
   it('ignores a quick_answer frame: it never opens a viewer connection', async () => {
     const { t, ws } = await published();
     const onConn = vi.fn();

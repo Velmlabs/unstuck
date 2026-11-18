@@ -2,7 +2,7 @@ import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
-  plugins: [cloudflareTest({ wrangler: { configPath: './test/wrangler.test.toml' }, miniflare: { bindings: { AGENT_KEYS: 'K,K2' } } })],
+  plugins: [cloudflareTest({ wrangler: { configPath: './test/wrangler.test.toml' }, miniflare: { bindings: { AGENT_KEYS: 'K,K2,K3' } } })],
   test: {
     include: ['test/**/*.test.ts'],
     coverage: {

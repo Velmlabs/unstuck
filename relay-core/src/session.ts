@@ -1,4 +1,4 @@
-import { decodeEnvelope, encodeEnvelope, parseAgentToRelay, RELAY_CLOSE, RELAY_LIMITS } from '@velmlabs/unstuck-protocol';
+import { decodeEnvelope, encodeEnvelope, parseAgentToRelay, RELAY_CLOSE, RELAY_LIMITS, type SessionMode } from '@velmlabs/unstuck-protocol';
 import type { OnEvent, RelayEvent } from './hooks';
 import { hashKey, sameHash } from './keys';
 
@@ -23,6 +23,8 @@ export interface SessionRecord {
   bytesToViewers: number;
   bytesToAgent: number;
   viewersSeen: number;
+  /** What the takeover is for, from the first hello (a reconnect never changes it). Records stored before modes existed lack it: control. */
+  mode: SessionMode;
 }
 
 export function newRecord(sessionId: string, account: string, keyHash: string, now: number): SessionRecord {
@@ -39,6 +41,7 @@ export function newRecord(sessionId: string, account: string, keyHash: string, n
     bytesToViewers: 0,
     bytesToAgent: 0,
     viewersSeen: 0,
+    mode: 'control',
   };
 }
 
@@ -91,7 +94,7 @@ export class RelaySession {
     private readonly now: () => number,
     private readonly opts: RelaySessionOptions = {},
   ) {
-    this.rec = { ...rec };
+    this.rec = { ...rec, mode: rec.mode ?? 'control' };
     this.lastPing = now();
   }
 
@@ -202,6 +205,13 @@ export class RelaySession {
     }
   }
 
+  /** Sends a Telegram-style quick answer to the live agent. False when there is no agent or the session is over. */
+  quickAnswer(choice: number): boolean {
+    if (this.done || !this.agent || !Number.isInteger(choice) || choice < 0 || choice > 5) return false;
+    this.agent.send(JSON.stringify({ t: 'quick_answer', choice }));
+    return true;
+  }
+
   deadline(): number {
     const d = [this.rec.expiresAt];
     if (this.rec.secretHash === null) d.push(this.rec.createdAt + RELAY_LIMITS.heartbeatMs);
@@ -249,6 +259,7 @@ export class RelaySession {
       bytesToViewers: r.bytesToViewers,
       bytesToAgent: r.bytesToAgent,
       viewers: r.viewersSeen,
+      mode: r.mode,
     });
   }
 
@@ -290,6 +301,7 @@ export class RelaySession {
     this.candidates.delete(s);
     if (this.rec.secretHash === null) {
       this.rec.secretHash = h;
+      this.rec.mode = m.mode ?? 'control';
       this.rec.expiresAt = Math.min(m.expiresAt, this.now() + RELAY_LIMITS.maxExpiryMs);
       this.agent = s;
       s.send('{"t":"registered"}');
@@ -320,11 +332,13 @@ export class RelaySession {
     const big = env.payload.length >= RELAY_LIMITS.billableBytes;
     if (big && v.socket.bufferedAmount > RELAY_LIMITS.backpressureBytes) return; // slow viewer: drop frames, keep control
     v.socket.send(env.payload);
-    if (++v.got === 2) this.opts.onViewerConfirmed?.(env.c);
+    const confirmed = ++v.got === 2;
+    if (confirmed) this.opts.onViewerConfirmed?.(env.c);
     this.rec.bytesToViewers += env.payload.length;
-    if (big && !this.rec.billed) {
+    // Approvals and questions send little data: they are billed when a person is confirmed, not on bytes.
+    if (!this.rec.billed && (this.rec.mode === 'control' ? big : confirmed)) {
       this.rec.billed = true;
-      this.emit({ name: 'takeover_opened' });
+      this.emit({ name: 'takeover_opened', mode: this.rec.mode });
     }
   }
 

@@ -7,6 +7,7 @@ import {
   RELAY_CLOSE,
   RELAY_SUBPROTOCOL,
 } from '@velmlabs/unstuck-protocol';
+import type { SessionMode } from '@velmlabs/unstuck-protocol';
 import type { Transport, ViewerConnection } from './transport';
 
 export type RelayErrorDetail = 'relay_unauthorized' | 'relay_quota_exceeded' | 'relay_rate_limited' | 'relay_unreachable';
@@ -58,6 +59,8 @@ interface Session {
   expiresAt: number;
   ws: WebSocket | null;
   handler: ((c: ViewerConnection) => void) | null;
+  quickAnswer: ((choice: number) => void) | null;
+  mode?: SessionMode;
   status: ((s: 'up' | 'down') => void) | null;
   conns: Map<number, Conn>;
   registered: boolean;
@@ -116,7 +119,7 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
         ws.close();
         reject(new RelayError('relay_unreachable'));
       }, timeoutMs);
-      ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', expiresAt: s.expiresAt, secret: s.secret }));
+      ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', expiresAt: s.expiresAt, secret: s.secret, ...(s.mode ? { mode: s.mode } : {}) }));
       // Workers' client sockets deliver binary as Blob: read it without letting later messages overtake it.
       let reading: Promise<void> | null = null;
       ws.onmessage = (e: MessageEvent) => {
@@ -163,9 +166,8 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
           resolve();
         } else if (m.t === 'ping') ws.send('{"t":"pong"}');
         else if (m.t === 'close') closeConn(s, m.c);
-        else if (m.t === 'quick_answer') {
-          // Not handled yet: never treated as a new viewer connection.
-        } else {
+        else if (m.t === 'quick_answer') s.quickAnswer?.(m.choice); // never a new viewer connection; dropped without a handler
+        else {
           const conn: Conn = { messages: [], closes: [], closed: false };
           s.conns.set(m.c, conn);
           const vc = viewerConnection(s, ws, m.c, conn);
@@ -217,13 +219,15 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
   };
 
   return {
-    async publish(id, { expiresAt }) {
+    async publish(id, { expiresAt, mode }) {
       const s: Session = {
         id,
         secret: b64urlEncode(crypto.getRandomValues(new Uint8Array(16))),
         expiresAt,
+        mode,
         ws: null,
         handler: null,
+        quickAnswer: null,
         status: null,
         conns: new Map(),
         registered: false,
@@ -245,6 +249,10 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
     onConnection(id, h) {
       const s = sessions.get(id);
       if (s) s.handler = h;
+    },
+    onQuickAnswer(id, h) {
+      const s = sessions.get(id);
+      if (s) s.quickAnswer = h;
     },
     onStatus(id, h) {
       const s = sessions.get(id);
