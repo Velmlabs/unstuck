@@ -9,8 +9,12 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import androidx.core.app.NotificationCompat
+import sh.unstuck.android.R
 
 object Notifications {
+    /** Brand green (web/shared/tokens.css --color-accent): the notification's accent and icon tint. */
+    const val BRAND_GREEN = 0xFF22C55E.toInt()
+
     const val CHANNEL = "takeovers"
     const val EXTRA_LINK = "sh.unstuck.android.LINK"
     private const val VIEWER = "sh.unstuck.android.viewer.ViewerActivity"
@@ -40,7 +44,8 @@ object Notifications {
         }
         val pi = PendingIntent.getActivity(context, n.id, tap, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = NotificationCompat.Builder(context, n.channel)
-            .setSmallIcon(android.R.drawable.stat_notify_more)
+            .setSmallIcon(R.drawable.ic_stat_unstuck)
+            .setColor(BRAND_GREEN)
             .setContentTitle(n.title)
             .setContentText(n.body)
             .setPriority(NotificationCompat.PRIORITY_HIGH)

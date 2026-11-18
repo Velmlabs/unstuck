@@ -102,5 +102,7 @@ class AlertHandlerTest {
         assertNotNull(ch.sound)
         val posted = shadowOf(nm).allNotifications.single()
         assertEquals("Your agent needs you: Solve the CAPTCHA · shop.example", shadowOf(posted).contentTitle)
+        assertEquals("the Unstuck arrow, not a system icon", sh.unstuck.android.R.drawable.ic_stat_unstuck, posted.smallIcon.resId)
+        assertEquals(0xFF22C55E.toInt(), posted.color)
     }
 }

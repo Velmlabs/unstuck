@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Unstuck brand (web/shared/tokens.css). launcher_glyph is amber in the staging build, so the two installs differ. -->
+<resources>
+    <color name="brand_bg">#FF0F172A</color>
+    <color name="brand_card">#FF1B2336</color>
+    <color name="brand_green">#FF22C55E</color>
+    <color name="brand_text">#FFF8FAFC</color>
+    <color name="brand_muted">#FF94A3B8</color>
+    <color name="launcher_glyph">#FF22C55E</color>
+</resources>

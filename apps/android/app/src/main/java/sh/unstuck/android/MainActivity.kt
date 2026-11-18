@@ -9,11 +9,11 @@ import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -32,6 +32,8 @@ import sh.unstuck.android.pair.EncryptedPairingStore
 import sh.unstuck.android.pair.Forget
 import sh.unstuck.android.pair.PairApi
 import sh.unstuck.android.ui.AppModel
+import sh.unstuck.android.ui.Brand
+import sh.unstuck.android.ui.UnstuckTheme
 import sh.unstuck.android.ui.HomeScreen
 import sh.unstuck.android.ui.Screen
 import sh.unstuck.android.ui.SetupScreen
@@ -46,6 +48,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge(SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
         Notifications.ensureChannel(this)
         val keys = DeviceKeys(this)
         model = AppModel(
@@ -63,8 +66,8 @@ class MainActivity : ComponentActivity() {
             },
         )
         setContent {
-            MaterialTheme(colorScheme = darkColorScheme()) {
-                Surface {
+            UnstuckTheme {
+                Surface(color = Brand.Background) {
                     val screen by model.screen.collectAsState()
                     val error by model.error.collectAsState()
                     val notice by model.notice.collectAsState()

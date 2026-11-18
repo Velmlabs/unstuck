@@ -17,6 +17,14 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.widget.FrameLayout
+import android.widget.ImageView
+import android.widget.ScrollView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import sh.unstuck.android.R
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.ComponentActivity
@@ -126,7 +134,7 @@ class ViewerActivity : ComponentActivity() {
             }
         }
         web = w
-        setContentView(w)
+        setContentView(insetRoot(w))
         w.loadUrl(url)
     }
 
@@ -154,19 +162,58 @@ class ViewerActivity : ComponentActivity() {
     }
 
     private fun showMessage(title: String, body: String, action: Pair<String, () -> Unit>? = null) {
-        val pad = (24 * resources.displayMetrics.density).toInt()
+        val dp = resources.displayMetrics.density
+        val pad = (24 * dp).toInt()
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
+            gravity = Gravity.CENTER_HORIZONTAL or Gravity.CENTER_VERTICAL
             setPadding(pad, pad, pad, pad)
         }
-        layout.addView(TextView(this).apply { text = title; textSize = 22f; gravity = Gravity.CENTER })
+        layout.addView(ImageView(this).apply { setImageResource(R.drawable.logo_mark); importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO }, LinearLayout.LayoutParams((56 * dp).toInt(), (56 * dp).toInt()).apply { bottomMargin = pad })
+        layout.addView(TextView(this).apply {
+            text = title; textSize = 24f; gravity = Gravity.CENTER; setTextColor(getColor(R.color.brand_text)); setTypeface(typeface, Typeface.BOLD)
+            ViewCompat.setAccessibilityHeading(this, true)
+        })
         message = TextView(this).apply { text = "$title\n$body"; visibility = View.GONE }
         layout.addView(message)
-        layout.addView(TextView(this).apply { text = body; textSize = 16f; gravity = Gravity.CENTER; setPadding(0, pad / 2, 0, pad) })
-        action?.let { (label, run) -> layout.addView(Button(this).apply { text = label; setOnClickListener { run() } }) }
-        layout.addView(Button(this).apply { text = "Close"; setOnClickListener { finish() } })
-        setContentView(layout)
+        layout.addView(TextView(this).apply {
+            text = body; textSize = 16f; gravity = Gravity.CENTER; setTextColor(getColor(R.color.brand_muted)); setLineSpacing(0f, 1.25f); setPadding(0, pad / 2, 0, pad)
+        })
+        val buttonParams = { LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (52 * dp).toInt()).apply { topMargin = (12 * dp).toInt() } }
+        action?.let { (label, run) -> layout.addView(button(label, primary = true) { run() }, buttonParams()) }
+        layout.addView(button("Close", primary = action == null) { finish() }, buttonParams())
+        setContentView(insetRoot(ScrollView(this).apply { isFillViewport = true; addView(layout) }))
+    }
+
+    /** A brand button as a plain View: green filled, or outlined. */
+    private fun button(label: String, primary: Boolean, onClick: () -> Unit) = Button(this).apply {
+        text = label
+        isAllCaps = false
+        textSize = 16f
+        setTypeface(typeface, Typeface.BOLD)
+        stateListAnimator = null
+        val radius = 14 * resources.displayMetrics.density
+        background = android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x33FFFFFF),
+            GradientDrawable().apply {
+                cornerRadius = radius
+                if (primary) setColor(getColor(R.color.brand_green)) else setStroke((1.5f * resources.displayMetrics.density).toInt(), 0xFF475569.toInt())
+            },
+            null,
+        )
+        setTextColor(if (primary) getColor(R.color.brand_bg) else getColor(R.color.brand_text))
+        setOnClickListener { onClick() }
+    }
+
+    /** Android 15 draws apps edge to edge: keep the content clear of the status bar, navigation bar and keyboard. */
+    private fun insetRoot(child: View): View = FrameLayout(this).apply {
+        setBackgroundColor(getColor(R.color.brand_bg))
+        addView(child, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
+        ViewCompat.setOnApplyWindowInsetsListener(this) { v, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.ime() or WindowInsetsCompat.Type.displayCutout())
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            WindowInsetsCompat.CONSUMED
+        }
     }
 
     /** The message screen's text (tests). */
