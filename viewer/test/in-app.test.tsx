@@ -77,7 +77,7 @@ describe('document.title', () => {
       cleanup();
       render(<App location={{ hash: hash(''), pathname: `/s/SESSION5${i}`, origin: 'https://view.unstuck.sh' }} connectFn={connectFn} now={() => NOW} />);
       fireEvent.click(screen.getByRole('button', { name: 'Start takeover' }));
-      act(() => handlers.onError(code));
+      act(() => handlers.onError(code, 'm'));
       expect(document.title, code).toBe('Unstuck · ended');
     }
   });
