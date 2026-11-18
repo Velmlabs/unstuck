@@ -41,10 +41,10 @@ async def test_goto_returns_past_a_resolved_rescue(wrapped):
     assert seen == [ev]
     opened = engine.calls("guard.open")[0]
     assert opened["browserKey"] == str(id(page.context.browser)) and opened["remember"] is True and opened["maxRescuesPerHour"] == 3
-    assert opened["rescue"] == ["challenge"] and opened["profile"] == "default"
+    assert opened["rescue"] == ["challenge", "approval"] and opened["profile"] == "default"
     assert engine.calls("guard.before")[0] == {"guardId": "g1", "url": "https://shop.example/shop"}
     assert engine.calls("guard.after")[0] == {"guardId": "g1", "requestedUrl": "https://shop.example/shop"}
-    assert engine.calls("engine.hello")[0]["protocolMinor"] == 1
+    assert engine.calls("engine.hello")[0]["protocolMinor"] == 2
 
 
 async def test_failed_rescue_raises_with_status_and_detail(wrapped):
@@ -201,3 +201,16 @@ async def test_guarded_locators_are_playwright_locators(wrapped):
     await page.locator("#q").fill("x")
     await loc.first.click()
     assert len(engine.calls("guard.after")) == 3 and page.unstuck.last_rescue.status == "resolved"
+
+
+async def test_wrap_approval_timeout_param(wrapped, tmp_path):
+    page, engine = await wrapped(outcomes=[None], wrap={"approval_timeout_s": 120})
+    await page.goto("https://shop.example/shop")
+    assert engine.calls("guard.open")[0]["approvalTimeoutS"] == 120
+
+
+async def test_wrap_defaults_rescue_challenge_and_approval(wrapped):
+    page, engine = await wrapped(outcomes=[None])
+    await page.goto("https://shop.example/shop")
+    opened = engine.calls("guard.open")[0]
+    assert opened["rescue"] == ["challenge", "approval"] and "approvalTimeoutS" not in opened

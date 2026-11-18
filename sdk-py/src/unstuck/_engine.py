@@ -66,6 +66,7 @@ async def spawn_engine(
     port: int | None = None,
     relay: str | None = None,
     agent_key: str | None = None,
+    agent_name: str | None = None,
     handshake_timeout_s: float = HANDSHAKE_TIMEOUT_S,
 ) -> EngineProcess:
     args = ["--stdio"]
@@ -80,6 +81,8 @@ async def spawn_engine(
             env["UNSTUCK_RELAY_URL"] = relay
         if agent_key:
             env["UNSTUCK_AGENT_KEY"] = agent_key
+        if agent_name:
+            env["UNSTUCK_AGENT_NAME"] = agent_name  # the engine cleans and limits it
         proc = await asyncio.create_subprocess_exec(
             path, *args, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=None, limit=16 * 1024 * 1024, env=env
         )

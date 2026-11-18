@@ -206,7 +206,7 @@ def wrap_page(
     client: "Unstuck",
     page: Any,
     *,
-    rescue: Sequence[CheckKind] = ("challenge",),
+    rescue: Sequence[CheckKind] = ("challenge", "approval"),
     remember: bool = False,
     profile: str = "default",
     max_rescues_per_hour: int = 10,
@@ -216,13 +216,14 @@ def wrap_page(
     allowed_sites: list[str] | None = None,
     alerts: bool | Literal["required"] | None = None,
     require_code: bool | None = None,
+    approval_timeout_s: int | None = None,
 ) -> Any:
     if isinstance(getattr(page, "unstuck", None), PageGuard):
         return page
     if not inspect.iscoroutinefunction(getattr(page, "goto", None)):
         raise TypeError(SYNC_PAGE)
     opts: dict[str, Any] = {"profile": profile, "rescue": list(rescue), "remember": remember, "maxRescuesPerHour": max_rescues_per_hour}
-    for key, value in (("timeoutS", timeout_s), ("allowedSites", allowed_sites), ("alerts", alerts), ("requireCode", require_code)):
+    for key, value in (("timeoutS", timeout_s), ("allowedSites", allowed_sites), ("alerts", alerts), ("requireCode", require_code), ("approvalTimeoutS", approval_timeout_s)):
         if value is not None:
             opts[key] = list(value) if key == "allowedSites" else value
     guard = PageGuard(client, page, opts, on_rescue, on_rescue_fail)

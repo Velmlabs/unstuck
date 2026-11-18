@@ -12,7 +12,7 @@ from ._attach import AttachedPage, attach_page
 from ._engine import EngineProcess, resolve_engine_path, spawn_engine
 from ._errors import PageClosedError, UnstuckConfigError, UnstuckEngineError
 from ._rpc import RpcCallError
-from ._types import CheckKind, RescueEvent, TakeoverLink, TakeoverResult
+from ._types import AskResult, CheckKind, RescueEvent, TakeoverLink, TakeoverResult
 from ._wrap import wrap_page
 
 SHUTDOWN_GRACE_S = 2.0
@@ -22,6 +22,32 @@ _PAGE_CLOSED = TakeoverResult(status="failed", session_id="", url="", duration_s
 def _default_on_link(link: TakeoverLink) -> None:
     # Never prints a 6-digit code: require_code needs its own on_link, so the code travels apart from the link.
     print(f"Unstuck: a human is needed ({link.reason}) → {link.url}", file=sys.stderr, flush=True)
+
+
+ENGINE_TOO_OLD_FOR_ASK = "this engine can't ask questions (needs @velmlabs/unstuck-engine 0.4.0 or later)"
+
+
+def _check_ask(question: Any, choices: Any, allow_text: Any, private: Any, details: Any, timeout_s: Any) -> str | None:
+    """Why this can't be asked, or None (the engine's checkAsk messages, word for word)."""
+    if not isinstance(question, str) or not question.strip() or len(question) > 300:
+        return "question must be 1-300 characters"
+    if choices is not None and (
+        not isinstance(choices, (list, tuple))
+        or not 2 <= len(choices) <= 6
+        or not all(isinstance(c, str) and c.strip() != "" and len(c) <= 80 for c in choices)
+    ):
+        return "choices must be 2-6 labels of at most 80 characters"
+    if allow_text is False and choices is None:
+        return "a question needs choices or allowText"
+    if details is not None and (not isinstance(details, str) or len(details) > 1000):
+        return "details must be at most 1000 characters"
+    if timeout_s is not None and (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or not 10 <= timeout_s <= 3600):
+        return "timeoutS must be 10-3600"
+    if allow_text is not None and not isinstance(allow_text, bool):
+        return "allowText must be true or false"
+    if not isinstance(private, bool):
+        return "private must be true or false"
+    return None
 
 
 _LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -62,8 +88,11 @@ class Unstuck:
         relay: str | None = None,
         agent_key: str | None = None,
         require_code: bool | None = None,
+        agent_name: str | None = None,
+        approval_timeout_s: int | None = None,
     ) -> None:
-        """``relay``/``agent_key`` use a relay instead of the local server (or set UNSTUCK_RELAY_URL /
+        """``agent_name`` names this agent in alerts (the engine reads UNSTUCK_AGENT_NAME; empty means the key's name);
+        ``approval_timeout_s`` is how long a person has to approve a sign-in (default 300). ``relay``/``agent_key`` use a relay instead of the local server (or set UNSTUCK_RELAY_URL /
         UNSTUCK_AGENT_KEY; with only UNSTUCK_API_KEY set, Unstuck Cloud is used). ``require_code`` asks the
         human for a 6-digit code delivered with the link. Raises UnstuckConfigError for a ``relay`` that is not
         wss:// (ws:// only to localhost)."""
@@ -76,6 +105,11 @@ class Unstuck:
         self._relay = relay
         self._agent_key = agent_key
         self._require_code = require_code
+        self._agent_name = agent_name
+        self._approval_timeout_s = approval_timeout_s
+        # Questions waiting for their link by link id: the engine echoes it in ask.link, so concurrent asks never swap links.
+        self._ask_links: dict[str, Callable[[TakeoverLink], None]] = {}
+        self._next_ask_link = 0
         self._engine: asyncio.Task[EngineProcess] | None = None
         self._pages: dict[str, AttachedPage] = {}
         # Probe tabs the engine opened (page.create), and popup followers of active guard rescues.
@@ -174,11 +208,50 @@ class Unstuck:
                 closed_early.cancel()
             await attached.detach()
 
+    async def ask(
+        self,
+        question: str,
+        *,
+        choices: list[str] | None = None,
+        allow_text: bool | None = None,
+        private: bool = True,
+        details: str | None = None,
+        timeout_s: int | None = None,
+        on_link: Callable[[TakeoverLink], None] | None = None,
+    ) -> AskResult:
+        """Asks the person a question (no browser page); awaiting this IS the pause. The link goes to ``on_link`` (default:
+        this client's ``on_link``, else printed to stderr) and, with Unstuck Cloud, to paired phones. Returns the outcome
+        (``status`` answered, timed_out, cancelled or failed). Raises UnstuckConfigError for a question out of range (nothing
+        is started) and UnstuckEngineError when the engine can't run or is too old to ask."""
+        problem = _check_ask(question, choices, allow_text, private, details, timeout_s)
+        if problem:
+            raise UnstuckConfigError(problem)
+        params: dict[str, Any] = {"question": question, "private": private}
+        for key, value in (("choices", choices), ("allowText", allow_text), ("details", details), ("timeoutS", timeout_s)):
+            if value is not None:
+                params[key] = list(value) if key == "choices" else value
+        engine = await self._ensure_engine()
+        if "ask" not in engine.capabilities:
+            raise UnstuckEngineError(ENGINE_TOO_OLD_FOR_ASK)
+        link_id = f"ask-{self._next_ask_link}"
+        self._next_ask_link += 1
+        self._ask_links[link_id] = on_link or self._on_link
+        try:
+            return AskResult.from_wire(await engine.peer.request("ask", {**params, "linkId": link_id}))
+        except RpcCallError as e:
+            if e.code == "closed":
+                raise UnstuckEngineError(f"engine exited with code {await engine.wait()}") from None
+            if e.code in ("bad_params", "config_error"):
+                raise UnstuckConfigError(e.message) from None
+            raise
+        finally:
+            self._ask_links.pop(link_id, None)
+
     def wrap(
         self,
         page: Any,
         *,
-        rescue: Sequence[CheckKind] = ("challenge",),
+        rescue: Sequence[CheckKind] = ("challenge", "approval"),
         remember: bool = False,
         profile: str = "default",
         max_rescues_per_hour: int = 10,
@@ -188,6 +261,7 @@ class Unstuck:
         allowed_sites: list[str] | None = None,
         alerts: bool | Literal["required"] | None = None,
         require_code: bool | None = None,
+        approval_timeout_s: int | None = None,
     ) -> Any:
         """Guards an async Playwright page: navigations and clicks that land on a human check (a CAPTCHA, Cloudflare's
         "verify you are human") bring a person in and return once they're past it. Returns the same page, with
@@ -197,6 +271,7 @@ class Unstuck:
             self, page, rescue=rescue, remember=remember, profile=profile, max_rescues_per_hour=max_rescues_per_hour,
             on_rescue_fail=on_rescue_fail, on_rescue=on_rescue, timeout_s=timeout_s, allowed_sites=allowed_sites,
             alerts=alerts, require_code=require_code,
+            approval_timeout_s=self._approval_timeout_s if approval_timeout_s is None else approval_timeout_s,
         )
 
     def _background(self, aw: Awaitable[Any]) -> None:
@@ -261,7 +336,8 @@ class Unstuck:
 
     async def _start_engine(self) -> EngineProcess:
         engine = await spawn_engine(
-            resolve_engine_path(self._engine_path), host=self._host, port=self._port, relay=self._relay, agent_key=self._agent_key
+            resolve_engine_path(self._engine_path), host=self._host, port=self._port, relay=self._relay, agent_key=self._agent_key,
+            agent_name=self._agent_name,
         )
         peer = engine.peer
 
@@ -311,5 +387,11 @@ class Unstuck:
         peer.handle("page.create", page_create)
         peer.handle("page.close", page_close)
         peer.on_notification("guard.rescue", guard_rescue)
+        def ask_link(p: dict[str, Any]) -> None:
+            on_link = self._ask_links.get(p.get("linkId") or "")  # a link for no known ask is ignored
+            if on_link is not None:
+                on_link(TakeoverLink.from_wire(p))
+
+        peer.on_notification("ask.link", ask_link)
         peer.on_notification("takeover.link", lambda p: self._on_link(TakeoverLink.from_wire(p)))
         return engine

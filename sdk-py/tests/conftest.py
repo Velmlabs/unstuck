@@ -147,3 +147,55 @@ class GuardEngine:
 
     def calls(self, method: str):
         return [e.get("params") for e in self.entries() if e["method"] == method]
+
+
+ASK_ENGINE = """
+import json, sys
+CAPS = CAPS_JSON
+LOG = LOG_PATH
+REPLY = REPLY_JSON
+def out(m):
+    sys.stdout.write(json.dumps(m) + "\\n"); sys.stdout.flush()
+for line in sys.stdin:
+    m = json.loads(line)
+    with open(LOG, "a") as f:
+        f.write(json.dumps(m) + "\\n")
+    if m.get("method") == "engine.hello":
+        res = {"engineVersion": "fake-ask", "protocolVersion": 1}
+        if CAPS is not None:
+            res.update({"protocolMinor": 2, "capabilities": CAPS})
+        out({"id": m["id"], "result": res})
+    elif m.get("method") == "ask":
+        p = m["params"]
+        if REPLY.get("error"):
+            out({"id": m["id"], "error": REPLY["error"]})
+            continue
+        out({"method": "ask.link", "params": {"sessionId": "s1", "url": "https://x.example/a#t=1", "reason": p["question"], "expiresAt": 123, "linkId": "other"}})
+        out({"method": "ask.link", "params": {"sessionId": "s1", "url": "https://x.example/a#t=1", "reason": p["question"], "expiresAt": 123, "linkId": p.get("linkId"), "code": "123456"}})
+        out({"id": m["id"], "result": REPLY["result"]})
+    elif m.get("method") == "shutdown":
+        out({"id": m["id"], "result": {}}); sys.exit(0)
+"""
+
+
+class AskEngine:
+    """A scripted engine that answers `ask` (and sends ask.link); `calls(method)` lists the params it received."""
+
+    def __init__(self, tmp_path, reply=None, capabilities=("ask",)) -> None:
+        import json
+
+        self.log = tmp_path / "ask-calls.jsonl"
+        reply = reply or {"result": {"status": "answered", "answer": {"choice": 1, "label": "No"}, "via": "page", "durationS": 4.5, "sessionId": "s1"}}
+        body = (
+            ASK_ENGINE.replace("CAPS_JSON", "None" if capabilities is None else repr(list(capabilities)))
+            .replace("LOG_PATH", repr(str(self.log)))
+            .replace("REPLY_JSON", repr(reply))
+        )
+        self.path = write_engine(tmp_path, body)
+
+    def calls(self, method: str):
+        import json
+
+        if not self.log.exists():
+            return []
+        return [m.get("params") for m in (json.loads(line) for line in self.log.read_text().splitlines()) if m.get("method") == method]

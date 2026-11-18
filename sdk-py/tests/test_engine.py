@@ -130,14 +130,14 @@ async def test_relay_settings_reach_the_engine_environment(tmp_path):
     await e.wait()
 
 
-async def test_hello_sends_minor_1_and_reads_capabilities(tmp_path):
+async def test_hello_sends_minor_2_and_reads_capabilities(tmp_path):
     from conftest import GuardEngine
 
     (tmp_path / "new").mkdir()
     new = GuardEngine(tmp_path / "new", [], capabilities=("guard", "paintCheck"))
     engine = await spawn_engine(new.path)
     assert engine.capabilities == frozenset({"guard", "paintCheck"}) and engine.engine_version == "fake-guard"
-    assert new.calls("engine.hello")[0]["protocolMinor"] == 1
+    assert new.calls("engine.hello")[0]["protocolMinor"] == 2
     engine.kill()
     await engine.wait()
     (tmp_path / "old").mkdir()

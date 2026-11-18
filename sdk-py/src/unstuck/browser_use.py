@@ -71,7 +71,16 @@ class UnstuckTools(Tools):
                 return f"A person solved the check on {event.check.site}. Look at the page again and carry on."
             return _still_blocked(event)
 
+        async def ask_question(question: str, choices: list[str] | None = None) -> str:
+            result = await self._unstuck.ask(question, **({"choices": choices} if choices else {}))
+            a = result.answer
+            if result.status == "answered" and a is not None and (a.label or a.text):
+                return a.label or a.text or ""
+            detail = f": {result.detail}" if result.detail else ""
+            return f"No answer ({result.status}{detail})"
+
         self.action("Bring in a person for something only they can do (a login, a 2FA code). Give the reason and the tab's URL.")(ask_human)
+        self.action("Ask the person a question (optionally with 2-6 short choices) and get their answer.")(ask_question)
         self.action("After opening a page or submitting a form: checks the tab at this URL for a CAPTCHA or human check, and has a person solve it.")(check_page)
 
     async def _pages(self) -> list[Any]:

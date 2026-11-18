@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Mapping
 
 TakeoverStatus = Literal["resolved", "timed_out", "cancelled", "failed"]
-CheckKind = Literal["challenge", "login", "2fa"]
+CheckKind = Literal["challenge", "approval", "login", "2fa"]
 RescueStatus = Literal[
     "resolved", "still_blocked", "timed_out", "cancelled", "rescue_limited", "alert_failed", "browser_cannot_render_captcha", "failed"
 ]
@@ -35,6 +35,40 @@ class TakeoverLink:
     @classmethod
     def from_wire(cls, d: Mapping[str, Any]) -> "TakeoverLink":
         return cls(url=d["url"], reason=d["reason"], session_id=d["sessionId"], expires_at=d["expiresAt"], code=d.get("code"))
+
+
+AskStatus = Literal["answered", "timed_out", "cancelled", "failed"]
+
+
+@dataclass(frozen=True)
+class AskAnswer:
+    """The person's answer: the chosen ``choice`` index and its ``label``, and/or typed ``text``."""
+
+    choice: int | None = None
+    label: str | None = None
+    text: str | None = None
+
+    @classmethod
+    def from_wire(cls, d: Mapping[str, Any]) -> "AskAnswer":
+        return cls(choice=d.get("choice"), label=d.get("label"), text=d.get("text"))
+
+
+@dataclass(frozen=True)
+class AskResult:
+    status: AskStatus
+    answer: AskAnswer | None
+    via: str | None
+    duration_s: float
+    session_id: str
+    detail: str | None = None
+
+    @classmethod
+    def from_wire(cls, d: Mapping[str, Any]) -> "AskResult":
+        a = d.get("answer")
+        return cls(
+            status=d["status"], answer=AskAnswer.from_wire(a) if a else None, via=d.get("via"), duration_s=d["durationS"],
+            session_id=d["sessionId"], detail=d.get("detail"),
+        )
 
 
 @dataclass(frozen=True)

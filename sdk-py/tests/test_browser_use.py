@@ -35,6 +35,12 @@ class FakeUnstuck:
     def __init__(self):
         self.wrapped = []
         self.closed = False
+        self.reply = None
+        self.asked = []
+
+    async def ask(self, question, **kw):
+        self.asked.append((question, kw))
+        return self.reply
 
     def wrap(self, page, **kw):
         self.wrapped.append((page, kw))
@@ -61,9 +67,9 @@ def call(tools, name, **args):
     return fn(**args)
 
 
-def test_registers_two_actions():
+def test_registers_three_actions():
     t = UnstuckTools("http://127.0.0.1:9222")
-    assert [f.name for f in t.functions] == ["ask_human", "check_page"]
+    assert [f.name for f in t.functions] == ["ask_human", "ask_question", "check_page"]
 
 
 async def test_check_page_reports_a_solved_check():
@@ -131,3 +137,25 @@ def test_import_without_browser_use_says_how_to_install(monkeypatch):
     with pytest.raises(ImportError) as e:
         importlib.import_module("unstuck.browser_use")
     assert str(e.value) == "unstuck.browser_use needs browser-use 1.0.6: pip install 'unstuck[browser-use]'"
+
+
+async def test_browser_use_ask_question():
+    from unstuck import AskAnswer, AskResult
+
+    t, u, _ = tools_for([])
+
+    def reply(**kw):
+        u.reply = AskResult(**{"status": "answered", "answer": None, "via": "page", "duration_s": 1, "session_id": "s", **kw})
+
+    reply(answer=AskAnswer(choice=0, label="Yes", text=None))
+    assert await call(t, "ask_question", question="Ship?", choices=["Yes", "No"]) == "Yes"
+    assert u.asked == [("Ship?", {"choices": ["Yes", "No"]})]
+    reply(answer=AskAnswer(choice=None, label=None, text="Use blue"))
+    assert await call(t, "ask_question", question="Colour?") == "Use blue"
+    assert u.asked[-1] == ("Colour?", {})
+    reply(status="timed_out", answer=None)
+    assert await call(t, "ask_question", question="Colour?") == "No answer (timed_out)"
+    reply(status="failed", answer=None, detail="viewer_left")
+    assert await call(t, "ask_question", question="Colour?") == "No answer (failed: viewer_left)"
+    reply(answer=AskAnswer(choice=None, label=None, text=None))
+    assert await call(t, "ask_question", question="Colour?") == "No answer (answered)"

@@ -8,7 +8,7 @@ import json
 from typing import Any, Awaitable, Callable
 
 PROTOCOL_VERSION = 1
-PROTOCOL_MINOR = 1
+PROTOCOL_MINOR = 2
 
 
 class RpcCallError(Exception):
