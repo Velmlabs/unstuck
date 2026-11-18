@@ -247,6 +247,7 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
       return 1;
     }
   }
+  const agentName = cleanAgentName(values['agent-name'] ?? io.env.UNSTUCK_AGENT_NAME);
   const alerter = cloudAlerterFor({ relay: values.relay, agentKey: values['agent-key'], agentName: values['agent-name'] }, io.env, (l) => void io.stderr.write(l + '\n'));
   if (values.mcp) {
     const server = createMcpServer({ transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), env: io.env, stderr: io.stderr, open: values.open, alerter, ...(browsing.browse ? { browse: browsing.browse } : {}) });
@@ -268,6 +269,6 @@ export async function main(argv: string[], io: CliIO): Promise<number> {
     await server.close();
     return 0;
   }
-  await runStdioHost({ input: io.stdin, output: io.stdout, transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), version: VERSION, requireCode, alerter });
+  await runStdioHost({ input: io.stdin, output: io.stdout, transport, log: new JsonlFileEventLog(defaultLogPath(io.env)), version: VERSION, requireCode, alerter, agentName });
   return 0;
 }

@@ -6,7 +6,7 @@ import { FakeTransport, FakeCdp } from '@velmlabs/unstuck-core/testing';
 import { MemoryEventLog } from '@velmlabs/unstuck-core';
 import { REQUIRED_WITHOUT_CLOUD, runStdioHost } from '../src/stdio-host';
 
-function start(alerter?: (info: any, site: string | undefined) => Promise<any>) {
+function start(alerter?: (info: any, site: string | undefined) => Promise<any>, agentName?: string) {
   const input = new PassThrough();
   const output = new PassThrough();
   const transport = new FakeTransport();
@@ -17,7 +17,7 @@ function start(alerter?: (info: any, site: string | undefined) => Promise<any>) 
     raw.push(l);
     sdk.receive(l);
   });
-  const done = runStdioHost({ input, output, transport, log, version: '9.9.9', alerter });
+  const done = runStdioHost({ input, output, transport, log, version: '9.9.9', alerter, agentName });
   return { input, output, transport, sdk, done, raw, log };
 }
 
@@ -382,5 +382,42 @@ describe('runStdioHost ask and approval takeovers', () => {
     expect(h.transport.published.size).toBe(0);
     h.input.end();
     await h.done;
+  });
+
+  it('a private:false question without choices is alerted without question or choices', async () => {
+    const alerter = vi.fn(async (_info: any, _site: string | undefined, _extra?: any) => ({ delivered: 1 }));
+    const h = start(alerter as any);
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.askLink, (p) => links.push(p));
+    const result = h.sdk.request<any>(Methods.ask, { question: 'Code?', private: false, timeoutS: 30 });
+    await vi.waitFor(() => expect(links).toHaveLength(1));
+    expect(alerter.mock.calls[0]).toHaveLength(2);
+    h.input.end();
+    await h.done;
+    await result;
+  });
+
+  it('the agent name reaches the viewer mode frame for ask, approval takeover and control takeover', async () => {
+    const h = start(undefined, 'Flag Bot');
+    const cdp = new FakeCdp();
+    cdp.respond('Runtime.evaluate', () => ({ result: { value: 'https://bank.example/approve' } }));
+    h.sdk.handle(Methods.cdpSend, (p) => cdp.send((p as { method: string }).method, (p as { params?: object }).params));
+    h.sdk.handle(Methods.cdpSubscribe, () => ({}));
+    const askLinks: any[] = [];
+    const tkLinks: any[] = [];
+    h.sdk.onNotification(Methods.askLink, (p) => askLinks.push(p));
+    h.sdk.onNotification(Methods.takeoverLink, (p) => tkLinks.push(p));
+    const a = h.sdk.request<any>(Methods.ask, { question: 'q', timeoutS: 30 });
+    const t = h.sdk.request<any>(Methods.takeover, { pageId: 'p1', reason: 'Approve', timeoutS: 30, mode: 'approval', kind: 'approval' });
+    await vi.waitFor(() => expect(askLinks.length + tkLinks.length).toBe(2));
+    for (const link of [askLinks[0], tkLinks[0]]) {
+      const viewer = h.transport.connect(link.url);
+      viewer.push({ t: 'hello', token: tokenOf(link.url) });
+      await vi.waitFor(() => expect(viewer.json().some((m: any) => m.t === 'mode')).toBe(true));
+      expect(viewer.json().find((m: any) => m.t === 'mode')).toMatchObject({ agentName: 'Flag Bot' });
+    }
+    h.input.end();
+    await h.done;
+    await Promise.all([a, t]);
   });
 });

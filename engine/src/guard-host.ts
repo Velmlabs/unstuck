@@ -42,6 +42,7 @@ export interface GuardHostDeps {
   env: Record<string, string | undefined>;
   storeFs: StoreFs;
   alerter?: CloudAlerter;
+  agentName?: string;
   popupsFor(pageId: string): PopupSource;
   linkFor(pageId: string, site: string | undefined, alerts: TakeoverParams['alerts']): LinkHandler;
 }
@@ -115,6 +116,7 @@ export function registerGuardMethods(d: GuardHostDeps): { closeAll(): Promise<vo
             timeoutS: mode === 'approval' ? (timeoutS ?? p.timeoutS) : p.timeoutS,
             kind,
             mode,
+            agentName: d.agentName,
             requireCode: p.requireCode,
             allowedSites: hostnames(p.allowedSites),
             onLink: d.linkFor(p.pageId, site, p.alerts),

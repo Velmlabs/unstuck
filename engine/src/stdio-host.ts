@@ -55,6 +55,8 @@ export interface StdioHostOptions {
   /** Where remembered sites live (UNSTUCK_HOME); defaults to process.env. */
   env?: Record<string, string | undefined>;
   storeFs?: StoreFs;
+  /** Who is asking (UNSTUCK_AGENT_NAME / --agent-name, cleaned): shown on the viewer's card as well as the alert. */
+  agentName?: string;
 }
 
 /**
@@ -115,7 +117,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
       sendTakeoverAlert(opts.alerter, alerts, info, site, takeover);
       peer.notify(Methods.takeoverLink, { ...info, pageId });
     };
-  const guards = registerGuardMethods({ peer, engine, env: opts.env ?? process.env, storeFs: opts.storeFs ?? nodeStoreFs(), alerter: opts.alerter, popupsFor, linkFor });
+  const guards = registerGuardMethods({ peer, engine, env: opts.env ?? process.env, storeFs: opts.storeFs ?? nodeStoreFs(), alerter: opts.alerter, agentName: opts.agentName, popupsFor, linkFor });
 
   peer.handle(Methods.takeover, (raw) => {
     const p = raw as TakeoverParams;
@@ -133,6 +135,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
       popups: popupsFor(p.pageId),
       mode: p.mode,
       kind: p.kind ?? 'other',
+      agentName: opts.agentName,
     });
   });
 
@@ -141,7 +144,8 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
     const problem = checkAsk(p) ?? askTypeProblem(p);
     if (problem) throw Object.assign(new Error(problem), { code: 'bad_params' });
     if (p.alerts === 'required' && !opts.alerter) throw Object.assign(new Error(REQUIRED_WITHOUT_CLOUD), { code: 'config_error' });
-    const quick = p.private === false ? { question: p.question, choices: p.choices ?? [] } : undefined;
+    // Quick answers are choice buttons only (Cloud rejects a readable question without choices).
+    const quick = p.private === false && p.choices ? { question: p.question, choices: p.choices } : undefined;
     return engine.ask({
       question: p.question,
       choices: p.choices,
@@ -149,6 +153,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
       private: p.private,
       details: p.details,
       timeoutS: p.timeoutS,
+      agentName: opts.agentName,
       onLink: (info, takeover) => {
         // Like linkFor: the alert starts first. A question has no page, so no site.
         sendTakeoverAlert(opts.alerter, p.alerts, { ...info, kind: 'question' }, undefined, takeover, quick);
