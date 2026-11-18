@@ -1039,6 +1039,7 @@ input:focus-visible {
   font-size: 22px;
   line-height: 1.25;
   text-wrap: balance;
+  overflow-wrap: anywhere; /* a question or site with no spaces must not widen the page */
 }
 .bridge-lede {
   margin: 0;
@@ -1100,6 +1101,9 @@ input:focus-visible {
   }
 }
 .bridge-foot {
+  /* The answer and approval buttons stay on screen however long the question is. */
+  position: sticky;
+  bottom: 0;
   display: grid;
   gap: 8px;
   padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
