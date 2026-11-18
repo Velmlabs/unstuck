@@ -150,7 +150,7 @@ class GuardEngine:
 
 
 ASK_ENGINE = """
-import json, sys
+import json, os, sys
 CAPS = CAPS_JSON
 LOG = LOG_PATH
 REPLY = REPLY_JSON
@@ -167,6 +167,9 @@ for line in sys.stdin:
         out({"id": m["id"], "result": res})
     elif m.get("method") == "ask":
         p = m["params"]
+        if REPLY.get("hang_first") and not os.path.exists(LOG + ".hung"):
+            open(LOG + ".hung", "w").close()
+            continue
         if REPLY.get("error"):
             out({"id": m["id"], "error": REPLY["error"]})
             continue

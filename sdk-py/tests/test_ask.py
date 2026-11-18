@@ -133,3 +133,34 @@ for line in sys.stdin:
     async with Unstuck(engine_path=path, agent_name="Bot") as u:
         engine = await u._ensure_engine()
         assert engine.engine_version == "Bot"
+
+
+async def test_cancelled_ask_cleans_up_and_client_still_works(tmp_path):
+    import asyncio
+
+    engine = AskEngine(tmp_path, {"hang_first": True, "result": {"status": "answered", "answer": {"text": "ok"}, "via": "page", "durationS": 1, "sessionId": "s9"}})
+    async with Unstuck(engine_path=engine.path, on_link=lambda l: None) as u:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(u.ask("Never answered?"), 0.5)
+        assert u._ask_links == {}
+        r = await u.ask("Again?")
+        assert r.answer.text == "ok" and u._ask_links == {}
+
+
+async def test_limits_count_utf16_units_like_the_engine(tmp_path):
+    engine = AskEngine(tmp_path)
+    async with Unstuck(engine_path=engine.path, on_link=lambda l: None) as u:
+        await u.ask("\U0001F600" * 150)  # 300 UTF-16 units: ok
+        with pytest.raises(UnstuckConfigError, match="question must be 1-300 characters"):
+            await u.ask("\U0001F600" * 151)  # 302 units though only 151 code points
+        with pytest.raises(UnstuckConfigError, match="choices must be"):
+            await u.ask("Q", choices=["a", "\U0001F600" * 41])
+        await u.ask("Q", choices=["a", "\U0001F600" * 40])
+        with pytest.raises(UnstuckConfigError, match="details must be"):
+            await u.ask("Q", details="\U0001F600" * 501)
+        await u.ask("Q", details="\U0001F600" * 500)
+        # JS trim() strips U+FEFF but not U+001C
+        with pytest.raises(UnstuckConfigError, match="question must be"):
+            await u.ask("\ufeff \u2003")
+        await u.ask("\x1c")
+    assert len(engine.calls("ask")) == 4

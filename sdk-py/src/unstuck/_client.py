@@ -27,19 +27,33 @@ def _default_on_link(link: TakeoverLink) -> None:
 ENGINE_TOO_OLD_FOR_ASK = "this engine can't ask questions (needs @velmlabs/unstuck-engine 0.4.0 or later)"
 
 
+# What JavaScript's String.prototype.trim() strips (core's checkAsk uses it); Python's str.strip() differs (it also
+# strips \x1c-\x1f and \x85, and not \ufeff).
+_JS_WHITESPACE = "\t\n\v\f\r \xa0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+
+
+def _js_blank(s: str) -> bool:
+    return not s.strip(_JS_WHITESPACE)
+
+
+def _js_len(s: str) -> int:
+    """JavaScript's String.length: UTF-16 code units (an emoji counts 2), as core's checkAsk counts."""
+    return len(s.encode("utf-16-le")) // 2
+
+
 def _check_ask(question: Any, choices: Any, allow_text: Any, private: Any, details: Any, timeout_s: Any) -> str | None:
     """Why this can't be asked, or None (the engine's checkAsk messages, word for word)."""
-    if not isinstance(question, str) or not question.strip() or len(question) > 300:
+    if not isinstance(question, str) or _js_blank(question) or _js_len(question) > 300:
         return "question must be 1-300 characters"
     if choices is not None and (
         not isinstance(choices, (list, tuple))
         or not 2 <= len(choices) <= 6
-        or not all(isinstance(c, str) and c.strip() != "" and len(c) <= 80 for c in choices)
+        or not all(isinstance(c, str) and not _js_blank(c) and _js_len(c) <= 80 for c in choices)
     ):
         return "choices must be 2-6 labels of at most 80 characters"
     if allow_text is False and choices is None:
         return "a question needs choices or allowText"
-    if details is not None and (not isinstance(details, str) or len(details) > 1000):
+    if details is not None and (not isinstance(details, str) or _js_len(details) > 1000):
         return "details must be at most 1000 characters"
     if timeout_s is not None and (isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or not 10 <= timeout_s <= 3600):
         return "timeoutS must be 10-3600"

@@ -6,7 +6,7 @@ import pytest
 if sys.version_info < (3, 11):
     pytest.importorskip("browser_use")
 
-from unstuck import HumanCheck, RescueEvent  # noqa: E402
+from unstuck import HumanCheck, RescueEvent, UnstuckConfigError  # noqa: E402
 from unstuck.browser_use import UNSTUCK_SYSTEM_MESSAGE, UnstuckTools  # noqa: E402
 
 CHECK = HumanCheck(kind="challenge", rule_id="cloudflare.interstitial", evidence=[], url="https://shop.example/", site="shop.example", vendor="cloudflare")
@@ -147,6 +147,12 @@ async def test_browser_use_ask_question():
     def reply(**kw):
         u.reply = AskResult(**{"status": "answered", "answer": None, "via": "page", "duration_s": 1, "session_id": "s", **kw})
 
+    async def refuse(question, **kw):
+        raise UnstuckConfigError("choices must be 2-6 labels of at most 80 characters")
+
+    saved, u.ask = u.ask, refuse
+    assert await call(t, "ask_question", question="Q", choices=["x"]) == "Could not ask: choices must be 2-6 labels of at most 80 characters"
+    u.ask = saved
     reply(answer=AskAnswer(choice=0, label="Yes", text=None))
     assert await call(t, "ask_question", question="Ship?", choices=["Yes", "No"]) == "Yes"
     assert u.asked == [("Ship?", {"choices": ["Yes", "No"]})]

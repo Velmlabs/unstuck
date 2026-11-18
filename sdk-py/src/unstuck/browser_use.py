@@ -17,6 +17,7 @@ except ImportError as e:  # pragma: no cover - exercised by a test that hides br
     raise ImportError("unstuck.browser_use needs browser-use 1.0.6: pip install 'unstuck[browser-use]'") from e
 
 from ._client import Unstuck
+from ._errors import UnstuckConfigError
 from ._types import RescueEvent
 
 UNSTUCK_SYSTEM_MESSAGE = (
@@ -72,7 +73,10 @@ class UnstuckTools(Tools):
             return _still_blocked(event)
 
         async def ask_question(question: str, choices: list[str] | None = None) -> str:
-            result = await self._unstuck.ask(question, **({"choices": choices} if choices else {}))
+            try:
+                result = await self._unstuck.ask(question, **({"choices": choices} if choices else {}))
+            except UnstuckConfigError as e:
+                return f"Could not ask: {e}"  # the model can fix its question and try again
             a = result.answer
             if result.status == "answered" and a is not None and (a.label or a.text):
                 return a.label or a.text or ""
