@@ -222,8 +222,18 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const [modeFrame, setModeFrame] = useState<Extract<EngineToViewer, { t: 'mode' }> | null>(null);
   const modeRef = useRef(modeFrame);
   modeRef.current = modeFrame;
+  const [errors, setErrors] = useState(0);
   const [answered, setAnswered] = useState<AskAnswer | null>(null);
   const approvalCanvas = useRef<HTMLCanvasElement>(null);
+  /** A frame that came in before the preview canvas was on the page. */
+  const previewWait = useRef<{ f: Frame; drawn: (f: Frame) => void } | null>(null);
+  useEffect(() => {
+    const w = previewWait.current;
+    if (w && approvalCanvas.current) {
+      previewWait.current = null;
+      drawFrame(approvalCanvas.current, w.f, w.drawn);
+    }
+  }, [modeFrame]);
   const embed = new URLSearchParams(location.search ?? '').get('embed') === '1';
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bridgeRef = useRef<HTMLInputElement>(null);
@@ -331,24 +341,30 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         // Frame credit: the engine sends the next frame once this one is on screen (a slow phone never builds a backlog).
         const drawn = (d: Frame) => sockRef.current?.ack(d);
         const target = modeRef.current?.mode === 'approval' ? approvalCanvas.current : modeRef.current?.mode === 'question' ? null : canvasRef.current;
+        previewWait.current = null;
         if (target) drawFrame(target, f, drawn);
+        else if (modeRef.current?.mode === 'approval') previewWait.current = { f, drawn }; // drawn once the preview mounts
         else drawn(f);
-        if (!framedRef.current) {
+        if (target === canvasRef.current && !framedRef.current) {
           framedRef.current = true;
           setFramed(true);
         }
       },
-      onMode: setModeFrame,
+      onMode: (m) => {
+        modeRef.current = m; // a frame right behind it (same tick) must already go to the right canvas
+        setModeFrame(m);
+      },
       onState: (s, answer) => {
-        if (s === 'answered') return void setAnswered(answer ?? {});
         const final = s === 'resolved' && modeRef.current?.mode === 'approval' ? APPROVED_SCREEN : FINAL_SCREENS[s];
-        if (final) {
+        if (s === 'answered') setAnswered(answer ?? {});
+        if (final || s === 'answered') {
           resumeStore.set(sessionId, null);
-          setScreen(final);
+          if (final) setScreen(final);
           sockRef.current?.close();
         }
       },
       onError: (code) => {
+        setErrors((n) => n + 1);
         // An error that ends this link for good: the secret kept for reloads goes with it.
         if (code === 'token_used' || code === 'expired' || code === 'session_closed' || code === 'token_invalid') resumeStore.set(sessionId, null);
         if (code in ERROR_SCREENS) setScreen(ERROR_SCREENS[code as keyof typeof ERROR_SCREENS]);
@@ -1073,7 +1089,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   if (answered || modeFrame?.mode === 'question' || modeFrame?.mode === 'approval') {
     const left = info ? remaining : undefined;
     return !modeFrame || modeFrame.mode === 'question' ? (
-      <QuestionScreen question={modeFrame?.question} agentName={modeFrame?.agentName} answer={answered ?? undefined} answered={!!answered} remaining={left} embed={embed} onAnswer={(a) => send({ t: 'answer', ...a })} />
+      <QuestionScreen question={modeFrame?.question} agentName={modeFrame?.agentName} answer={answered ?? undefined} answered={!!answered} remaining={left} embed={embed} errors={errors} onAnswer={(a) => send({ t: 'answer', ...a })} />
     ) : (
       <ApprovalScreen reason={modeFrame.reason} site={modeFrame.site} canvasRef={approvalCanvas} remaining={left} embed={embed} onApproved={() => send({ t: 'approved' })} onShowPage={() => send({ t: 'switch_control' })} />
     );

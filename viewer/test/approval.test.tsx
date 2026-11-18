@@ -22,7 +22,7 @@ describe('approval screen', () => {
     expect(a.sent).toContainEqual({ t: 'approved' });
   });
 
-  it('a frame with no preview canvas yet is still acknowledged', () => {
+  it('a frame in question mode is acknowledged but not drawn', () => {
     const a = fakeApp();
     a.ready();
     act(() => a.h().onMode?.({ ...approvalMode, mode: 'question', question: { text: 'Q?', allowText: true } }));
@@ -30,6 +30,18 @@ describe('approval screen', () => {
     act(() => a.h().onFrame(frame));
     expect(a.drawFrame).not.toHaveBeenCalled();
     expect(a.acked).toEqual([frame]); // nothing to draw on, but the engine's credit is still returned
+  });
+
+  it('a frame right behind the mode frame (same tick) is drawn on the preview', () => {
+    const a = fakeApp();
+    a.ready();
+    const frame = { width: 400, height: 300, jpeg: new Uint8Array([1]) };
+    act(() => {
+      a.h().onMode?.(approvalMode);
+      a.h().onFrame(frame);
+    });
+    expect(a.drawFrame).toHaveBeenCalledTimes(1);
+    expect(a.drawFrame.mock.calls[0]![0]).toBe(screen.getByLabelText(/preview of the agent's page/i));
   });
 
   it('Show me the page sends switch_control, and a control mode frame shows the live view', () => {
@@ -42,6 +54,8 @@ describe('approval screen', () => {
     act(() => a.h().onMode?.({ ...approvalMode, mode: 'control' }));
     expect(screen.getByTestId('screen')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
+    // The preview frame wasn't drawn on the control canvas: the live view still waits for its own first frame.
+    expect(screen.getByText('Waiting for the page…')).toBeTruthy();
   });
 
   it('a resolved approval says Approved, thank you', () => {

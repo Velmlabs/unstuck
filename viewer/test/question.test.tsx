@@ -79,6 +79,44 @@ describe('question screen', () => {
     expect(screen.queryByRole('button', { name: 'Send answer' })).toBeNull();
   });
 
+  it('an answered state clears the saved key and closes the socket', () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(ask({ text: 'Go?', choices: ['Yes', 'No'], allowText: false })));
+    expect(localStorage.getItem('unstuck:resume:SESSION')).toBe('k');
+    act(() => a.h().onState('answered', { choice: 0, label: 'Yes' }));
+    expect(localStorage.getItem('unstuck:resume:SESSION')).toBeNull();
+    expect(a.closed()).toBe(true);
+  });
+
+  it('two submits in one tick send one answer', () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(ask({ text: 'Which?', allowText: true })));
+    const input = screen.getByLabelText('Your answer') as HTMLInputElement;
+    fireEvent.input(input, { target: { value: 'x' } });
+    const form = input.closest('form')!;
+    act(() => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    expect(a.sent.filter((m) => (m as { t: string }).t === 'answer')).toHaveLength(1);
+  });
+
+  it('an error from the engine lets the person send again', () => {
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(ask({ text: 'Go?', choices: ['Yes', 'No'], allowText: false })));
+    fireEvent.click(screen.getByRole('button', { name: 'Yes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    expect((screen.getByRole('button', { name: 'Send answer' }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => a.h().onError('bad_message', 'nope'));
+    const send = screen.getByRole('button', { name: 'Send answer' }) as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    fireEvent.click(send);
+    expect(a.sent.filter((m) => (m as { t: string }).t === 'answer')).toHaveLength(2);
+  });
+
   it('echoes typed text, and copes with an answered state without an answer', () => {
     const a = fakeApp();
     a.ready();

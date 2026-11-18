@@ -1,4 +1,4 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { AskAnswer, QuestionView } from '@velmlabs/unstuck-protocol';
 import { CheckIcon, QuestionIcon } from './icons';
 
@@ -24,14 +24,22 @@ export interface QuestionScreenProps {
   answered?: boolean;
   remaining?: string;
   embed?: boolean;
+  /** Counts errors from the engine: a new one means the answer didn't go through, so the person can try again. */
+  errors?: number;
   onAnswer(a: { choice?: number; text?: string }): void;
 }
 
 /** A question from the agent: pick a choice and/or write a reply, then Send answer. */
-export function QuestionScreen({ question, agentName, answer, answered, remaining, embed, onAnswer }: QuestionScreenProps) {
+export function QuestionScreen({ question, agentName, answer, answered, remaining, embed, errors = 0, onAnswer }: QuestionScreenProps) {
   const [choice, setChoice] = useState<number | null>(null);
   const [text, setText] = useState('');
   const [sent, setSent] = useState(false);
+  /** Synchronous double-tap guard: two events before the next render must not both send. */
+  const sending = useRef(false);
+  useEffect(() => {
+    sending.current = false;
+    setSent(false);
+  }, [errors]);
   const bar = embed ? null : <BridgeBar remaining={remaining} />;
 
   if (answered) {
@@ -55,7 +63,8 @@ export function QuestionScreen({ question, agentName, answer, answered, remainin
   const ready = !sent && (choice !== null || (q.allowText && typed !== ''));
   const submit = (e?: Event) => {
     e?.preventDefault();
-    if (!ready) return;
+    if (!ready || sending.current) return;
+    sending.current = true;
     setSent(true);
     onAnswer(choice !== null ? { choice } : { text: typed });
   };

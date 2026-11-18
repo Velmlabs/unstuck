@@ -13,14 +13,16 @@ export interface FakeApp {
   drawFrame: ReturnType<typeof vi.fn>;
   h: () => ConnectionHandlers;
   ready: () => void;
+  closed: () => boolean;
 }
 export function fakeApp(search = ''): FakeApp {
   const sent: unknown[] = [];
   const acked: unknown[] = [];
+  let closed = false;
   const box: { h: ConnectionHandlers | null } = { h: null };
   const connectFn: AppProps['connectFn'] = (_url, _t, _c, h) => {
     box.h = h;
-    return { send: (m) => void sent.push(m), sendHello: () => {}, close: () => {}, wake: () => {}, ack: (f) => void acked.push(f) };
+    return { send: (m) => void sent.push(m), sendHello: () => {}, close: () => void (closed = true), wake: () => {}, ack: (f) => void acked.push(f) };
   };
   const drawFrame = vi.fn();
   const location = { hash: `#t=TOK&k=${KEY}`, pathname: '/s/SESSION', origin: 'http://127.0.0.1:5000', search };
@@ -33,5 +35,5 @@ export function fakeApp(search = ''): FakeApp {
       h().onPhase('live');
       h().onReady({ t: 'ready', reason: 'Approve the sign-in', site: 'accounts.example.com', expiresAt: NOW + 125_000, resumeKey: 'k' });
     });
-  return { sent, acked, drawFrame, h, ready };
+  return { closed: () => closed, sent, acked, drawFrame, h, ready };
 }
