@@ -21,19 +21,29 @@
   <img src="docs/assets/strip-4-carries-on.png" alt="4. Your agent carries on: its terminal says resolved after 26 s; its browser is signed in" width="400">
 </p>
 
-Every screen above is the real product, from one recorded run on the demo site. A person solves every check; the site's terms still apply.
+Real captures from one recorded run on the demo site; the Telegram alert is the bot's real message, redrawn. A person solves every check; the site's terms still apply.
 
 ## 🚀 Quick start
 
 ```bash
 npm install @velmlabs/unstuck playwright     # TypeScript, Node.js 20+
-pip install unstuck playwright               # Python 3.10+
+npx playwright install chromium
 ```
 
-The engine ships inside the package for macOS, Linux and Windows: nothing else to install ([requirements](https://unstuck.sh/docs/requirements/)). Add one call where your agent gets stuck:
+```bash
+pip install unstuck playwright               # Python 3.10+
+python -m playwright install chromium
+```
+
+The Unstuck engine ships inside the package for macOS, Linux and Windows ([requirements](https://unstuck.sh/docs/requirements/)). Add one call where your agent gets stuck:
 
 ```ts
+import { chromium } from 'playwright';
 import { Unstuck } from '@velmlabs/unstuck';
+
+const browser = await chromium.launch();
+const page = await browser.newPage();
+await page.goto('https://www.google.com/recaptcha/api2/demo'); // a page with a CAPTCHA
 
 const unstuck = new Unstuck({ onLink: ({ url }) => console.log('Open this link:', url) });
 const result = await unstuck.takeover(page, { reason: 'Please solve the CAPTCHA' });
@@ -45,6 +55,7 @@ if (result.status === 'resolved') {
 <details><summary>The same in Python</summary>
 
 ```python
+# page: your Playwright page (async API), on the page with the CAPTCHA
 async with Unstuck(on_link=lambda link: print("Open this link:", link.url)) as unstuck:
     result = await unstuck.takeover(page, reason="Please solve the CAPTCHA")
 if result.status == "resolved":
@@ -68,7 +79,7 @@ Open the printed link, solve the check, tap **Done**. `takeover()` returns `reso
 | Cloudflare Workers, Durable Objects, Agents SDK | [Cloudflare Workers](https://unstuck.sh/docs/cloudflare-workers/) | [`cloudflare-worker`](examples/cloudflare-worker), [`cloudflare-agent`](examples/cloudflare-agent) |
 | Any Chromium over CDP, Selenium, hosted browsers | [Any browser](https://unstuck.sh/docs/any-browser/) | [`cdp`](examples/cdp), [`selenium`](examples/selenium) |
 
-**Claude Code in one line:** `claude mcp add unstuck -- npx -y @velmlabs/unstuck-engine --mcp --open`, or install the [plugin and skill](plugins/unstuck) so the agent knows when to ask.
+**Claude Code in one line:** `claude mcp add unstuck -- npx -y @velmlabs/unstuck-engine --mcp --browser` gives the agent a browser of its own that brings you in at each check. Or install the [plugin and skill](plugins/unstuck) so the agent knows when to ask.
 
 **Shell agents:** `npm install -g @velmlabs/unstuck-engine`, then `unstuck check`, `unstuck rescue` and `unstuck wait "$(… | jq -r .id)"` after each navigation ([agent-browser guide](https://unstuck.sh/docs/agent-browser/)).
 

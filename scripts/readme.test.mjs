@@ -10,7 +10,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const md = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
 const SLUGS = JSON.parse(fs.readFileSync(path.join(root, 'scripts/readme-doc-slugs.json'), 'utf8'));
 const STRIP = ['strip-1-stuck', 'strip-2-alert', 'strip-3-live', 'strip-4-carries-on'];
-const slug = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}\s-]/gu, '').trim().replace(/\s+/g, '-');
+/** GitHub's heading anchor: lowercase, punctuation and emoji dropped, each space a hyphen (no trimming: "🚀 Quick start" → "-quick-start"). */
+const slug = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/ /g, '-');
 
 describe('README', () => {
   it('is the 30-second version', () => {
@@ -19,6 +20,23 @@ describe('README', () => {
     expect(lines.slice(0, 15).join('\n')).toContain('docs/assets/unstuck-loop.gif');
     for (const s of ['npm install @velmlabs/unstuck', 'pip install unstuck', 'https://unstuck.sh/docs/requirements/', 'Apache-2.0', "A person solves every check; the site's terms still apply."]) expect(md, s).toContain(s);
     for (const n of STRIP) expect(md, n).toContain(`docs/assets/${n}.png`);
+  });
+
+  it('the quick start runs as written: browser install lines, and the example opens its own page', () => {
+    for (const s of ['npx playwright install chromium', 'python -m playwright install chromium', "import { chromium } from 'playwright';", 'await chromium.launch()', 'const page = await browser.newPage()']) expect(md, s).toContain(s);
+    expect(md).not.toContain('nothing else to install');
+  });
+
+  it('says plainly which screens are captures and which are redrawn', () => {
+    expect(md).not.toContain('Every screen above is the real product');
+    expect(md).toMatch(/Telegram alert is the bot's real message, redrawn/);
+  });
+
+  it("GitHub's anchors: emoji headings keep their leading hyphen, and the README's own #links resolve", () => {
+    expect(slug('🚀 Quick start')).toBe('-quick-start');
+    expect(slug('Why I built it')).toBe('why-i-built-it');
+    const anchors = new Set([...md.matchAll(/^#{1,6}\s+(.+)$/gm)].map((m) => slug(m[1])));
+    for (const [, a] of md.matchAll(/(?:href="|\]\()#([^")]+)/g)) expect(anchors.has(a), `#${a}`).toBe(true);
   });
 
   it('every image exists and is within budget', () => {

@@ -20,7 +20,7 @@ describe('unstuck plugin', () => {
   it('registers the published MCP server the README tells people to use', () => {
     const server = json('plugins/unstuck/.mcp.json').mcpServers.unstuck;
     expect(server).toEqual({ command: 'npx', args: ['-y', '@velmlabs/unstuck-engine', '--mcp', '--open'] });
-    expect(read('README.md')).toContain('npx -y @velmlabs/unstuck-engine --mcp --open');
+    expect(read('README.md')).toContain('claude mcp add unstuck -- npx -y @velmlabs/unstuck-engine --mcp --browser'); // the setup that works without a Chrome of your own
   });
 
   it('the skill has a name and a description an agent can match on', () => {
