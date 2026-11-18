@@ -74,6 +74,7 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-messaging")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5") // the scanner pulls an old Fragment; result APIs need 1.3+
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
 
     testImplementation("junit:junit:4.13.2")

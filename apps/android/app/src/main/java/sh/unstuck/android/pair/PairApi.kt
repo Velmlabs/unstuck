@@ -16,9 +16,17 @@ sealed class PairException(message: String) : Exception(message) {
     class Http(val status: Int) : PairException("Unstuck Cloud answered $status.")
 }
 
+/** What the app's screens need from Unstuck Cloud (PairApi; fakes in tests). */
+interface DeviceApi {
+    suspend fun pair(code: String, publicKey: String, label: String): Paired
+    suspend fun putFcm(deviceToken: String, token: String)
+    suspend fun test(deviceToken: String): JSONObject?
+    suspend fun unpair(deviceToken: String)
+}
+
 /** Unstuck Cloud's device API: pairing with a code, then calls authenticated with the device token. */
-class PairApi(private val apiOrigin: String) {
-    suspend fun pair(code: String, publicKey: String, label: String): Paired {
+class PairApi(private val apiOrigin: String) : DeviceApi {
+    override suspend fun pair(code: String, publicKey: String, label: String): Paired {
         val body = JSONObject().put("code", code).put("publicKey", publicKey).put("label", label).put("kind", "android")
         val (status, json) = call("POST", "/api/v1/devices/pair", null, body)
         return when (status) {
@@ -29,14 +37,14 @@ class PairApi(private val apiOrigin: String) {
         }
     }
 
-    suspend fun putFcm(deviceToken: String, token: String) {
+    override suspend fun putFcm(deviceToken: String, token: String) {
         self("PUT", "/api/v1/devices/self/fcm", deviceToken, JSONObject().put("token", token))
     }
 
     /** Sends a test alert to this phone; the per-channel results. */
-    suspend fun test(deviceToken: String): JSONObject? = self("POST", "/api/v1/devices/self/test", deviceToken, null).second
+    override suspend fun test(deviceToken: String): JSONObject? = self("POST", "/api/v1/devices/self/test", deviceToken, null).second
 
-    suspend fun unpair(deviceToken: String) {
+    override suspend fun unpair(deviceToken: String) {
         self("DELETE", "/api/v1/devices/self", deviceToken, null)
     }
 
