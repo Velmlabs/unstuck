@@ -3,7 +3,7 @@
 #
 # One-time setup (repository owner):
 #   - npmjs.com → each @velmlabs package → Settings → Trusted publishing → GitHub Actions:
-#       organization/user Velmlabs, repository unstuck, workflow release.yml, environment release
+#       organization/user velmlabs, repository unstuck, workflow release.yml, environment release
 #   - pypi.org → project unstuck → Publishing → add a trusted publisher with the same four values
 #   - GitHub → repository Settings → Environments → create `release` with required reviewers
 #
