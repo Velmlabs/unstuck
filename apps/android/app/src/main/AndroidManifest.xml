@@ -7,6 +7,11 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity
+            android:name=".viewer.ViewerActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|keyboardHidden|keyboard|screenLayout"
+            android:windowSoftInputMode="adjustResize" />
         <service
             android:name=".alerts.UnstuckMessagingService"
             android:exported="false">
