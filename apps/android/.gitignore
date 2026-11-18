@@ -1,0 +1,8 @@
+# Never committed: the Firebase config, signing keys, local SDK path, builds.
+app/google-services.json
+*.jks
+*.keystore
+local.properties
+.gradle/
+build/
+app/build/
