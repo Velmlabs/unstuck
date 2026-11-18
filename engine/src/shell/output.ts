@@ -4,8 +4,8 @@
 export const EXIT = { done: 0, humanNeeded: 10, waiting: 11, checkFound: 20, failed: 30, usage: 2 } as const;
 
 interface Out {
-  stdout: NodeJS.WritableStream;
-  stderr: NodeJS.WritableStream;
+  stdout: { write(s: string): unknown };
+  stderr: { write(s: string): unknown };
 }
 
 /** Writes `out` as one JSON line (and `human` as one stderr line), and returns `code` for the caller to exit with. */

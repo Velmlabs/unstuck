@@ -13,6 +13,7 @@ import { unstuckHome } from './browser/node-store-fs';
 import { PROFILE_NAME, cleanAgentName } from '@velmlabs/unstuck-core';
 import type { CheckKind } from '@velmlabs/unstuck-protocol';
 import { formatReport, runDoctor } from './doctor';
+import { runCheck } from './shell/check';
 import { buildTransport, cloudAlertsFor, selectTransport } from './transport-select';
 import { createCloudAlerter } from './cloud-alerts';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -24,6 +25,7 @@ export const USAGE = `Usage: unstuck-engine --stdio [--host <host>] [--port <por
                      [--browser[=chrome|obscura] [--obscura-path <path>] | --tools takeover|browser]
                      [--profile <name>] [--no-remember] [--max-rescues-per-hour <n>] [--allow-private-network]
        unstuck-engine doctor --cdp <url>
+       unstuck-engine check --cdp <url> [--tab <targetId>] [--url <requested>] [--rescue <kinds>]
        unstuck-engine --version | --help
 
 --mcp runs an MCP server on stdin/stdout. Tools: request_human_takeover (one
@@ -201,8 +203,15 @@ export interface CliIO {
 
 const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 
+/** Shell commands for CLI browser agents (agent-browser and others): their own flags, JSON out, stable exit codes. */
+const SHELL_COMMANDS: Record<string, (argv: string[], io: CliIO, env: Record<string, string | undefined>) => Promise<number>> = {
+  check: (argv, io, env) => runCheck(argv, io, env),
+};
+
 /** Returns the process exit code. */
 export async function main(argv: string[], io: CliIO): Promise<number> {
+  const shell = argv[0] !== undefined ? SHELL_COMMANDS[argv[0]] : undefined;
+  if (shell) return shell(argv.slice(1), io, io.env);
   let positionals: string[];
   let values: ReturnType<typeof parse>['values'];
   try {
