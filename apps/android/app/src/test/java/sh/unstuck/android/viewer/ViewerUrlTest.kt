@@ -39,4 +39,16 @@ class ViewerUrlTest {
         assertEquals(ViewerState.HANDED_BACK, viewerState("Unstuck · handed back"))
         assertEquals(ViewerState.OTHER, viewerState("Unstuck"))
     }
+
+    @Test fun `trusted alert links are on the viewer origin with the viewer path`() {
+        val v = "https://view.unstuck.sh"
+        assertEquals("sess_1", trustedAlertLink("https://view.unstuck.sh/v/0.5.0/s/sess_1?r=https%3A%2F%2Frelay.unstuck.sh#x=dev_1.BLOB", v)?.sessionId)
+        for (bad in listOf(
+            "https://evil.test/v/0.5.0/s/sess_1#x=dev_1.BLOB",
+            "http://view.unstuck.sh/v/0.5.0/s/sess_1#x=dev_1.BLOB",
+            "https://view.unstuck.sh/s/sess_1#x=dev_1.BLOB",
+            "https://view.unstuck.sh/v/latest/s/sess_1#x=dev_1.BLOB",
+            "https://a:b@view.unstuck.sh/v/0.5.0/s/sess_1#x=dev_1.BLOB",
+        )) org.junit.Assert.assertNull(bad, trustedAlertLink(bad, v))
+    }
 }

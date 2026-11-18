@@ -25,13 +25,15 @@ import sh.unstuck.android.pair.Pairing
 
 @RunWith(RobolectricTestRunner::class)
 class ViewerActivityTest {
-    private val link = "https://view.unstuck.sh/v/0.5.0/s/sess_1#x=dev_1.BLOB"
+    private val link = "${sh.unstuck.android.BuildConfig.VIEW_ORIGIN}/v/0.5.0/s/sess_1#x=dev_1.BLOB"
     private val store = MemoryPairingStore(Pairing("dev_1", "tok_1", "Pixel · App"))
     private val live = AlertPayload("TOK", "KEY", "Solve the CAPTCHA", "shop.example", System.currentTimeMillis() + 60_000)
 
-    private fun launch(payload: AlertPayload?, sender: suspend (String, String) -> String?): ViewerActivity {
-        ViewerActivity.deps = ViewerDeps(store = { store }, unseal = { payload }, sender = sender)
-        val intent = Intent(ApplicationProvider.getApplicationContext(), ViewerActivity::class.java).putExtra(Notifications.EXTRA_LINK, link)
+    private var unsealed = false
+    private var forgot = false
+    private fun launch(payload: AlertPayload?, open: String = link, unseal: (String) -> AlertPayload? = { unsealed = true; payload }, sender: suspend (String, String) -> String?): ViewerActivity {
+        ViewerActivity.deps = ViewerDeps(store = { store }, unseal = unseal, sender = sender, forget = { forgot = true; store.clear() })
+        val intent = Intent(ApplicationProvider.getApplicationContext(), ViewerActivity::class.java).putExtra(Notifications.EXTRA_LINK, open)
         val a = Robolectric.buildActivity(ViewerActivity::class.java, intent).setup().get()
         shadowOf(Looper.getMainLooper()).idle()
         return a
@@ -42,7 +44,7 @@ class ViewerActivityTest {
     @Test fun `loads the viewer locked down, with the app's user agent, and keeps the screen on`() {
         val a = launch(live) { _, _ -> "laptop" }
         val web = a.findViewById<WebView>(ViewerActivity.WEB_ID)!!
-        assertTrue(shadowOf(web).lastLoadedUrl.startsWith("https://view.unstuck.sh/v/0.5.0/s/sess_1#t=TOK&k=KEY&from=laptop"))
+        assertTrue(shadowOf(web).lastLoadedUrl.startsWith("${sh.unstuck.android.BuildConfig.VIEW_ORIGIN}/v/0.5.0/s/sess_1#t=TOK&k=KEY&from=laptop"))
         val s = web.settings
         assertTrue(s.javaScriptEnabled)
         assertTrue(s.domStorageEnabled)
@@ -65,9 +67,22 @@ class ViewerActivityTest {
         assertTrue(a.messageText().contains("This takeover has ended"))
     }
 
+    @Test fun `C1 a link off the viewer origin opens nothing and is never unsealed`() {
+        val a = launch(live, open = "https://evil.test/v/0.5.0/s/sess_1#x=dev_1.BLOB") { _, _ -> "laptop" }
+        assertNull(a.findViewById<WebView>(ViewerActivity.WEB_ID))
+        assertTrue(a.messageText().contains("Nothing to open"))
+        assertFalse(unsealed)
+    }
+
+    @Test fun `I4 an unseal that throws says Couldn't open this alert, no crash`() {
+        val a = launch(live, unseal = { throw IllegalStateException("keystore") }) { _, _ -> "laptop" }
+        assertTrue(a.messageText().contains("Couldn't open this alert"))
+    }
+
     @Test fun `a 401 on any self call unpairs`() {
         val a = launch(live) { _, _ -> throw PairException.Unpaired() }
         assertNull(store.load())
+        assertTrue("I5: the shared forget wipes the key too", forgot)
         assertTrue(a.isFinishing)
         assertNotNull(shadowOf(a).nextStartedActivity)
     }

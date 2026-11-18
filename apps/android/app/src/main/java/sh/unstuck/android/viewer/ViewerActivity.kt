@@ -26,9 +26,9 @@ import kotlinx.coroutines.launch
 import sh.unstuck.android.BuildConfig
 import sh.unstuck.android.alerts.Notifications
 import sh.unstuck.android.alerts.UnstuckMessagingService
-import sh.unstuck.android.crypto.AlertCrypto
 import sh.unstuck.android.crypto.AlertPayload
 import sh.unstuck.android.pair.EncryptedPairingStore
+import sh.unstuck.android.pair.Forget
 import sh.unstuck.android.pair.PairApi
 import sh.unstuck.android.pair.PairException
 import sh.unstuck.android.pair.PairingStore
@@ -38,15 +38,18 @@ class ViewerDeps(
     val store: (Context) -> PairingStore,
     val unseal: (Context, String) -> AlertPayload?,
     val sender: suspend (deviceToken: String, sessionId: String) -> String?,
+    /** Forgets the pairing, the key and the FCM token (Forget.all). */
+    val forget: (Context) -> Unit,
 ) {
-    constructor(store: (Context) -> PairingStore, unseal: (String) -> AlertPayload?, sender: suspend (String, String) -> String?) :
-        this(store, { _: Context, l: String -> unseal(l) }, sender)
+    constructor(store: (Context) -> PairingStore, unseal: (String) -> AlertPayload?, sender: suspend (String, String) -> String?, forget: (Context) -> Unit) :
+        this(store, { _: Context, l: String -> unseal(l) }, sender, forget)
 
     companion object {
         fun real() = ViewerDeps(
             store = { c: Context -> EncryptedPairingStore(c) },
             unseal = { c: Context, l: String -> UnstuckMessagingService.unseal(c, l) },
             sender = { t: String, s: String -> PairApi(BuildConfig.API_ORIGIN).sender(t, s) },
+            forget = { c: Context -> Forget.all(c) },
         )
     }
 }
@@ -71,19 +74,19 @@ class ViewerActivity : ComponentActivity() {
             override fun handleOnBackPressed() = back()
         })
         val link = intent.getStringExtra(Notifications.EXTRA_LINK)
-        val parsed = link?.let { AlertCrypto.parseAlertLink(it) }
+        val parsed = link?.let { trustedAlertLink(it, BuildConfig.VIEW_ORIGIN) }
         val store = deps.store(this)
         val pairing = store.load()
         if (link == null || parsed == null) return showMessage("Nothing to open", "This alert has no takeover link.")
-        if (pairing == null) return unpaired(store)
-        val payload = deps.unseal(this, link)
+        if (pairing == null) return unpaired()
+        val payload = runCatching { deps.unseal(this, link) }.getOrNull()
             ?: return showMessage("Couldn't open this alert", "It may be for another phone, or this phone was paired again.")
         if (payload.expiresAt <= System.currentTimeMillis()) return showMessage("This takeover has ended", "The agent is no longer waiting. If it still needs you, it will send a new alert.")
         lifecycleScope.launch {
             val keyName = try {
                 deps.sender(pairing.deviceToken, parsed.sessionId)
             } catch (e: PairException.Unpaired) {
-                return@launch unpaired(store)
+                return@launch unpaired()
             } catch (e: Exception) {
                 null
             }
@@ -101,6 +104,7 @@ class ViewerActivity : ComponentActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     private fun load(url: String) {
+        if (!allowed(url, BuildConfig.VIEW_ORIGIN)) return showMessage("Nothing to open", "This alert has no takeover link.")
         val w = WebView(this).apply {
             id = WEB_ID
             settings.javaScriptEnabled = true // the viewer is a web app
@@ -143,8 +147,8 @@ class ViewerActivity : ComponentActivity() {
             .show()
     }
 
-    private fun unpaired(store: PairingStore) {
-        store.clear()
+    private fun unpaired() {
+        deps.forget(this)
         startActivity(Intent().setClassName(this, "sh.unstuck.android.MainActivity").addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
         finish()
     }

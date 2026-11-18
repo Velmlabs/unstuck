@@ -29,6 +29,7 @@ import sh.unstuck.android.alerts.Notifications
 import sh.unstuck.android.crypto.AlertCrypto
 import sh.unstuck.android.pair.DeviceKeys
 import sh.unstuck.android.pair.EncryptedPairingStore
+import sh.unstuck.android.pair.Forget
 import sh.unstuck.android.pair.PairApi
 import sh.unstuck.android.ui.AppModel
 import sh.unstuck.android.ui.HomeScreen
@@ -53,6 +54,7 @@ class MainActivity : ComponentActivity() {
             publicKey = { AlertCrypto.rawPublicKey(keys.publicKey()) },
             deleteKey = { keys.delete() },
             fcmToken = { fcmToken() },
+            deleteFcmToken = { Forget.deleteFcmToken() },
             label = "${Build.MODEL} · App",
             viewOrigin = BuildConfig.VIEW_ORIGIN,
             batteryUnrestricted = { getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName) },
@@ -81,6 +83,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         refresh.intValue++ // the person may have changed a setting
+        lifecycleScope.launch { model.refresh() } // re-sends the FCM token; a phone removed on the dashboard goes back to Welcome
     }
 
     private fun pair(input: String) {

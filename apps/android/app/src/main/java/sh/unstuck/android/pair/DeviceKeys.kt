@@ -35,7 +35,8 @@ class DeviceKeys(private val context: Context) {
 
     fun publicKey(): ECPublicKey = getOrCreate().public as ECPublicKey
 
-    fun privateKey(): PrivateKey = getOrCreate().private
+    /** The paired key; throws when there is none (reading never makes a new key). */
+    fun privateKey(): PrivateKey = load()?.private ?: throw IllegalStateException("no device key")
 
     fun delete() {
         if (ks.containsAlias(EC_ALIAS)) ks.deleteEntry(EC_ALIAS)

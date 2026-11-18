@@ -19,6 +19,7 @@ class AppModel(
     private val publicKey: () -> String,
     private val deleteKey: () -> Unit,
     private val fcmToken: suspend () -> String?,
+    private val deleteFcmToken: suspend () -> Unit,
     private val label: String,
     private val viewOrigin: String,
     private val batteryUnrestricted: () -> Boolean,
@@ -45,12 +46,28 @@ class AppModel(
         try {
             val paired = api.pair(code, publicKey(), label)
             store.save(Pairing(paired.deviceId, paired.deviceToken, label))
-            fcmToken()?.let { api.putFcm(paired.deviceToken, it) }
+            // The pairing worked; a token that doesn't go up now goes up on the next launch (refresh).
+            runCatching { fcmToken()?.let { api.putFcm(paired.deviceToken, it) } }
             _screen.value = Screen.SETUP
         } catch (e: PairException) {
             _error.value = e.message
         } catch (e: Exception) {
             _error.value = "Couldn't reach Unstuck Cloud. Check the connection and try again."
+        }
+    }
+
+    /**
+     * On each launch while paired: send Cloud the current FCM token again (it may have rotated, or Cloud dropped it), or,
+     * without Firebase, just ask Cloud whether this phone is still paired. A 401 forgets the pairing; offline changes nothing.
+     */
+    suspend fun refresh() {
+        val p = store.load() ?: return
+        try {
+            val token = runCatching { fcmToken() }.getOrNull()
+            if (token != null) api.putFcm(p.deviceToken, token) else api.check(p.deviceToken)
+        } catch (e: PairException.Unpaired) {
+            forget()
+        } catch (_: Exception) {
         }
     }
 
@@ -83,7 +100,8 @@ class AppModel(
         forget()
     }
 
-    private fun forget() {
+    private suspend fun forget() {
+        runCatching { deleteFcmToken() }
         deleteKey()
         store.clear()
         _notice.value = null

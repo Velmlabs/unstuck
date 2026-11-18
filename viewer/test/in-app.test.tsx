@@ -62,4 +62,23 @@ describe('document.title', () => {
     act(() => handlers.onPhase('ended'));
     expect(document.title).toBe('Unstuck · ended');
   });
+
+  it('I3: a resumable message (connection lost) is not "ended", so the app stays open to read and reopen it', () => {
+    render(<App location={{ hash: hash(''), pathname: '/s/SESSION4', origin: 'https://view.unstuck.sh' }} connectFn={connectFn} now={() => NOW} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start takeover' }));
+    act(() => handlers.onPhase('live'));
+    act(() => handlers.onPhase('closed'));
+    expect(screen.getByText('Connection lost')).toBeTruthy();
+    expect(document.title).toBe('Unstuck · message');
+  });
+
+  it('I3: a link that is over for good (already in use, expired, session closed) is "ended"', () => {
+    for (const [i, code] of (['token_used', 'expired', 'session_closed'] as const).entries()) {
+      cleanup();
+      render(<App location={{ hash: hash(''), pathname: `/s/SESSION5${i}`, origin: 'https://view.unstuck.sh' }} connectFn={connectFn} now={() => NOW} />);
+      fireEvent.click(screen.getByRole('button', { name: 'Start takeover' }));
+      act(() => handlers.onError(code));
+      expect(document.title, code).toBe('Unstuck · ended');
+    }
+  });
 });

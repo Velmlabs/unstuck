@@ -1,5 +1,6 @@
 package sh.unstuck.android.viewer
 
+import sh.unstuck.android.crypto.AlertCrypto
 import sh.unstuck.android.crypto.AlertLink
 import sh.unstuck.android.crypto.AlertPayload
 import java.net.URI
@@ -26,6 +27,20 @@ fun allowed(url: String, viewOrigin: String): Boolean {
     val u = runCatching { URI(url) }.getOrNull() ?: return false
     val v = URI(viewOrigin)
     return u.scheme == "https" && u.scheme == v.scheme && u.host != null && u.host.equals(v.host, ignoreCase = true) && u.port == v.port
+}
+
+private val VIEWER_PATH = Regex("^/v/\\d+\\.\\d+\\.\\d+/s/[A-Za-z0-9_-]+$")
+
+/**
+ * A sealed alert link, only when it points at the viewer itself: [viewOrigin] exactly, no user info, and the path
+ * `/v/<x.y.z>/s/<session>` (what Cloud's checkViewerUrl accepts). Checked before unsealing, so a link naming any other
+ * page (sent by whoever can reach this app through FCM) never gets the plain `#t=…&k=…`.
+ */
+fun trustedAlertLink(link: String, viewOrigin: String): AlertLink? {
+    val parsed = AlertCrypto.parseAlertLink(link) ?: return null
+    val u = runCatching { URI(parsed.viewerUrl) }.getOrNull() ?: return null
+    if (!allowed(parsed.viewerUrl, viewOrigin) || u.rawUserInfo != null || !VIEWER_PATH.matches(u.rawPath ?: "")) return null
+    return parsed
 }
 
 enum class ViewerState { LIVE, ENDED, HANDED_BACK, OTHER }

@@ -61,6 +61,13 @@ class PairApiTest {
         assertEquals("GET /api/v1/devices/self/alerts/sess_1", server.takeRequest().let { "${it.method} ${it.path}" })
         server.enqueue(MockResponse().setResponseCode(404).setBody("""{"error":"not_sent_by_unstuck"}"""))
         assertNull(api.sender("tok_1", "sess_2"))
+        server.takeRequest()
+        server.enqueue(MockResponse().setBody("{}"))
+        api.check("tok_1")
+        server.takeRequest().let {
+            assertEquals("GET /api/v1/devices/self", "${it.method} ${it.path}")
+            assertEquals("Bearer tok_1", it.getHeader("Authorization"))
+        }
     }
 
     @Test fun `a 401 on a self call is Unpaired`() = runTest {

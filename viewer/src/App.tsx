@@ -181,9 +181,17 @@ function fromLine(keyName: string, sealedSite: string): string {
 }
 
 /** `Unstuck · live` in control, `Unstuck · handed back` once the person finished it, `Unstuck · ended` for any other end. */
-export function viewerTitle(session: boolean, phase: Phase, handedBack: boolean): string {
+/** Message screens that mean the link is over for good (the Android app closes on them). */
+const OVER_SCREENS: ReadonlySet<Screen> = new Set([ERROR_SCREENS.token_invalid, ERROR_SCREENS.token_used, ERROR_SCREENS.expired, ERROR_SCREENS.session_closed]);
+
+/**
+ * The page's state in its title, read by the Android app (no JS bridge): `live`, `handed back`, `ended` (over for
+ * good: the app closes) or `message` (anything the person may act on, such as "Connection lost": the app stays open).
+ */
+export function viewerTitle(screen: Screen, phase: Phase, handedBack: boolean): string {
   if (handedBack) return 'Unstuck · handed back';
-  if (!session || phase === 'ended' || phase === 'closed') return 'Unstuck · ended';
+  if (phase === 'ended' || OVER_SCREENS.has(screen)) return 'Unstuck · ended';
+  if (screen.kind !== 'session') return 'Unstuck · message';
   return phase === 'live' ? 'Unstuck · live' : 'Unstuck';
 }
 
@@ -322,7 +330,7 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const live = screen.kind === 'session' && phase === 'live';
   // The session's state in the title, for the Android app's WebView (it watches the title: no JS bridge).
   useEffect(() => {
-    document.title = viewerTitle(screen.kind === 'session', phase, finished.current || answered !== null);
+    document.title = viewerTitle(screen, phase, finished.current || answered !== null);
   }, [screen, phase, answered]);
   const liveRef = useRef(live);
   liveRef.current = live && !asking && !helping;

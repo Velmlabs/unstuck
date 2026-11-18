@@ -18,10 +18,15 @@ class AppModelTest {
     private var pairResult: () -> Paired = { Paired("dev_1", "tok_1") }
     private val api = object : DeviceApi {
         override suspend fun pair(code: String, publicKey: String, label: String): Paired = pairResult().also { calls += "pair $code $publicKey $label" }
-        override suspend fun putFcm(deviceToken: String, token: String) { calls += "fcm $deviceToken $token" }
+        override suspend fun putFcm(deviceToken: String, token: String) { calls += "fcm $deviceToken $token"; fcmPut() }
         override suspend fun test(deviceToken: String): JSONObject? { calls += "test $deviceToken"; return testResult() }
         override suspend fun unpair(deviceToken: String) { calls += "unpair $deviceToken" }
+        override suspend fun check(deviceToken: String) { calls += "check $deviceToken"; checkResult() }
     }
+    private var checkResult: () -> Unit = {}
+    private var fcmPut: () -> Unit = {}
+    private var fcm: String? = "fcm-1"
+    private var fcmDeleted = false
     private var keysDeleted = false
     private var battery = false
     private val store = MemoryPairingStore()
@@ -30,7 +35,8 @@ class AppModelTest {
         api = api,
         publicKey = { "PUBKEY" },
         deleteKey = { keysDeleted = true },
-        fcmToken = { "fcm-1" },
+        fcmToken = { fcm },
+        deleteFcmToken = { fcmDeleted = true },
         label = "Pixel 8 · App",
         viewOrigin = "https://view.unstuck.sh",
         batteryUnrestricted = { battery },
@@ -94,5 +100,55 @@ class AppModelTest {
         testResult = { JSONObject("""{"results":[{"channel":"fcm","status":"not_configured"}]}""") }
         m.sendTest()
         assertEquals("Unstuck Cloud can't send app alerts yet.", m.notice.value)
+    }
+
+    @Test fun `I1 a failed token upload doesn't undo a pairing that worked`() = runTest {
+        fcmPut = { throw java.io.IOException("offline") }
+        val m = model()
+        m.pairWith("ABCD-EFGH")
+        assertEquals(Pairing("dev_1", "tok_1", "Pixel 8 · App"), store.load())
+        assertEquals(Screen.SETUP, m.screen.value)
+        assertNull(m.error.value)
+    }
+
+    @Test fun `I1 each launch while paired sends the current FCM token again`() = runTest {
+        store.save(Pairing("dev_1", "tok_1", "L"))
+        model().refresh()
+        assertEquals(listOf("fcm tok_1 fcm-1"), calls)
+    }
+
+    @Test fun `I5 a launch after the phone was removed on the dashboard goes back to Welcome and wipes everything`() = runTest {
+        store.save(Pairing("dev_1", "tok_1", "L"))
+        fcmPut = { throw PairException.Unpaired() }
+        val m = model()
+        m.refresh()
+        assertEquals(Screen.WELCOME, m.screen.value)
+        assertTrue(keysDeleted)
+        assertTrue(fcmDeleted)
+        assertNull(store.load())
+    }
+
+    @Test fun `I5 without Firebase the launch check asks Cloud directly, and offline changes nothing`() = runTest {
+        store.save(Pairing("dev_1", "tok_1", "L"))
+        fcm = null
+        checkResult = { throw java.io.IOException("offline") }
+        val m = model()
+        m.refresh()
+        assertEquals(listOf("check tok_1"), calls)
+        assertEquals(Screen.HOME, m.screen.value)
+        checkResult = { throw PairException.Unpaired() }
+        m.refresh()
+        assertEquals(Screen.WELCOME, m.screen.value)
+    }
+
+    @Test fun `I2 unpair also deletes the FCM token`() = runTest {
+        store.save(Pairing("dev_1", "tok_1", "L"))
+        model().unpair()
+        assertTrue(fcmDeleted)
+    }
+
+    @Test fun `refresh does nothing when not paired`() = runTest {
+        model().refresh()
+        assertTrue(calls.isEmpty())
     }
 }

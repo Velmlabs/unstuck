@@ -22,6 +22,8 @@ interface DeviceApi {
     suspend fun putFcm(deviceToken: String, token: String)
     suspend fun test(deviceToken: String): JSONObject?
     suspend fun unpair(deviceToken: String)
+    /** Throws Unpaired when Cloud no longer knows this phone. */
+    suspend fun check(deviceToken: String)
 }
 
 /** Unstuck Cloud's device API: pairing with a code, then calls authenticated with the device token. */
@@ -43,6 +45,10 @@ class PairApi(private val apiOrigin: String) : DeviceApi {
 
     /** Sends a test alert to this phone; the per-channel results. */
     override suspend fun test(deviceToken: String): JSONObject? = self("POST", "/api/v1/devices/self/test", deviceToken, null).second
+
+    override suspend fun check(deviceToken: String) {
+        self("GET", "/api/v1/devices/self", deviceToken, null)
+    }
 
     override suspend fun unpair(deviceToken: String) {
         self("DELETE", "/api/v1/devices/self", deviceToken, null)
