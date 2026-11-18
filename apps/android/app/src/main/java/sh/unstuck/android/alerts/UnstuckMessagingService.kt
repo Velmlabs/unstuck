@@ -22,8 +22,11 @@ class UnstuckMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
         val deviceId = runCatching { EncryptedPairingStore(this).load()?.deviceId }.getOrNull()
-        val spec = AlertHandler.handle(message.data, System.currentTimeMillis(), BuildConfig.VIEW_ORIGIN, deviceId) { link -> unseal(this, link) } ?: return
+        val now = System.currentTimeMillis()
+        val spec = AlertHandler.handle(message.data, now, BuildConfig.VIEW_ORIGIN, deviceId) { link -> unseal(this, link) } ?: return
         Notifications.show(this, spec)
+        // Only a notification the person can see counts as "the test arrived".
+        if (message.data["kind"] == "test" && Notifications.canShow(this)) TestAlerts.shown(now)
     }
 
     /** FCM tokens rotate: Cloud gets the new one (if this phone is paired). */

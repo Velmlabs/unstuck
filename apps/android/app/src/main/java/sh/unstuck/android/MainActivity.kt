@@ -15,6 +15,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +27,7 @@ import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import sh.unstuck.android.alerts.Notifications
+import sh.unstuck.android.alerts.TestAlerts
 import sh.unstuck.android.crypto.AlertCrypto
 import sh.unstuck.android.pair.DeviceKeys
 import sh.unstuck.android.pair.EncryptedPairingStore
@@ -44,7 +46,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var model: AppModel
     private val refresh = mutableIntStateOf(0)
     private val scan = registerForActivityResult(ScanContract()) { r -> r.contents?.let { pair(it) } }
-    private val notificationsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { refresh.intValue++ }
+    private val notificationsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        // Denied twice, Android stops asking: the app's notification settings are the only way left.
+        if (!granted || !Notifications.canShow(this)) openNotificationSettings()
+        refresh.intValue++
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -61,9 +67,7 @@ class MainActivity : ComponentActivity() {
             label = "${Build.MODEL} · App",
             viewOrigin = BuildConfig.VIEW_ORIGIN,
             batteryUnrestricted = { getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(packageName) },
-            notificationsAllowed = {
-                Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
-            },
+            notificationsAllowed = { Notifications.canShow(this) },
         )
         setContent {
             UnstuckTheme {
@@ -71,12 +75,16 @@ class MainActivity : ComponentActivity() {
                     val screen by model.screen.collectAsState()
                     val error by model.error.collectAsState()
                     val notice by model.notice.collectAsState()
+                    val testAgainAt by model.testAgainAt.collectAsState()
+                    val testConfirmed by model.testConfirmed.collectAsState()
+                    val shownAt by TestAlerts.shownAt.collectAsState()
+                    LaunchedEffect(shownAt) { if (shownAt > 0) model.onTestArrived(shownAt) }
                     val tick = refresh.intValue
                     val checklist = remember(tick, screen) { model.checklist() }
                     when (screen) {
                         Screen.WELCOME -> WelcomeScreen(error, onScan = ::startScan, onCode = ::pair)
-                        Screen.SETUP -> SetupScreen(checklist, notice, ::askNotifications, ::openBatterySetting, { lifecycleScope.launch { model.sendTest() } }, model::finishSetup)
-                        Screen.HOME -> HomeScreen(model.pairing()?.label ?: "", notice, { lifecycleScope.launch { model.sendTest() } }, { lifecycleScope.launch { model.unpair() } })
+                        Screen.SETUP -> SetupScreen(checklist, notice, ::askNotifications, ::openBatterySetting, { lifecycleScope.launch { model.sendTest() } }, model::finishSetup, testAgainAt, testConfirmed)
+                        Screen.HOME -> HomeScreen(model.pairing()?.label ?: "", checklist, notice, ::askNotifications, ::openBatterySetting, { lifecycleScope.launch { model.sendTest() } }, { lifecycleScope.launch { model.unpair() } }, testAgainAt)
                     }
                 }
             }
@@ -98,7 +106,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun askNotifications() {
-        if (Build.VERSION.SDK_INT >= 33) notificationsPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val granted = Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        if (!granted) notificationsPermission.launch(Manifest.permission.POST_NOTIFICATIONS) else openNotificationSettings()
+    }
+
+    /** The app's notification settings (also where the Takeovers channel is turned back on). */
+    private fun openNotificationSettings() {
+        runCatching { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)) }
     }
 
     private fun openBatterySetting() {

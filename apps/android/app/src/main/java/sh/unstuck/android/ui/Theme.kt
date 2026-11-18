@@ -24,6 +24,7 @@ object Brand {
     val GreenDim = Color(0xFF14532D)
     val OnGreen = Color(0xFF0F172A)
     val Danger = Color(0xFFF87171)
+    val Amber = Color(0xFFF59E0B)
 }
 
 private val colors = darkColorScheme(

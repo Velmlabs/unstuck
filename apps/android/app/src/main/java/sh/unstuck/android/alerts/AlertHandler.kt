@@ -16,10 +16,20 @@ object AlertHandler {
     private const val TEST_ID = 1
 
     fun handle(data: Map<String, String>, now: Long, viewOrigin: String, deviceId: String?, open: (String) -> AlertPayload?): NotificationSpec? = when (data["kind"]) {
-        "test" -> NotificationSpec(TEST_ID, "Test alert from Unstuck", "Alerts reach this phone.", openLink = null)
+        "test" -> test(data, now)
         "takeover" -> takeover(data, now, viewOrigin, deviceId, open)
         else -> null
     }
+
+    /** Each test is its own notification (a negative id: never a takeover's), and says how long it took to arrive. */
+    private fun test(data: Map<String, String>, now: Long): NotificationSpec {
+        val sentAt = data["sentAt"]?.toLongOrNull()
+        val took = sentAt?.let { (now - it).coerceAtLeast(0) / 1000 }
+        val body = if (took == null) "Alerts reach this phone." else "Alerts reach this phone. This one arrived ${seconds(took)} after Unstuck Cloud sent it."
+        return NotificationSpec(-(1 + (now / 1000 % 1_000_000).toInt()), "Test alert from Unstuck", body, openLink = null)
+    }
+
+    private fun seconds(s: Long) = if (s < 60) "$s s" else "${s / 60} min ${s % 60} s"
 
     private fun takeover(data: Map<String, String>, now: Long, viewOrigin: String, deviceId: String?, open: (String) -> AlertPayload?): NotificationSpec? {
         val link = data["link"] ?: return null

@@ -36,6 +36,13 @@ object Notifications {
         )
     }
 
+    /** Whether an alert can show: notifications allowed for the app, and the Takeovers channel not turned off. */
+    fun canShow(context: Context): Boolean {
+        if (!androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        val ch = context.getSystemService(NotificationManager::class.java).getNotificationChannel(CHANNEL) ?: return true
+        return ch.importance != NotificationManager.IMPORTANCE_NONE
+    }
+
     fun show(context: Context, n: NotificationSpec) {
         ensureChannel(context)
         val tap = Intent().setComponent(ComponentName(context, VIEWER)).apply {

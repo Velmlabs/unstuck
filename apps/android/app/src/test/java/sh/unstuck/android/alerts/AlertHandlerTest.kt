@@ -59,7 +59,17 @@ class AlertHandlerTest {
     @Test fun `test alert`() {
         val n = AlertHandler.handle(mapOf("kind" to "test"), now, VIEW, DEV, opens)!!
         assertEquals("Test alert from Unstuck", n.title)
+        assertEquals("Alerts reach this phone.", n.body)
         assertNull(n.openLink)
+    }
+
+    @Test fun `a test alert says how long it took, and each test is its own notification`() {
+        val a = AlertHandler.handle(mapOf("kind" to "test", "sentAt" to (now - 3_400).toString()), now, VIEW, DEV, opens)!!
+        assertEquals("Alerts reach this phone. This one arrived 3 s after Unstuck Cloud sent it.", a.body)
+        val b = AlertHandler.handle(mapOf("kind" to "test", "sentAt" to (now - 95_000).toString()), now + 1_000, VIEW, DEV, opens)!!
+        assertEquals("Alerts reach this phone. This one arrived 1 min 36 s after Unstuck Cloud sent it.", b.body)
+        assertTrue("two tests don't replace each other", a.id != b.id)
+        assertTrue("never a takeover's id", a.id < 0 && b.id < 0)
     }
 
     @Test fun `unseal fails shows the generic alert`() {

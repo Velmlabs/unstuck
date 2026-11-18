@@ -29,6 +29,8 @@ class AppModelTest {
     private var fcmDeleted = false
     private var keysDeleted = false
     private var battery = false
+    private var notifications = true
+    private var clock = 1_000_000L
     private val store = MemoryPairingStore()
     private fun model() = AppModel(
         store = store,
@@ -40,7 +42,8 @@ class AppModelTest {
         label = "Pixel 8 · App",
         viewOrigin = "https://view.unstuck.sh",
         batteryUnrestricted = { battery },
-        notificationsAllowed = { true },
+        notificationsAllowed = { notifications },
+        now = { clock },
     )
 
     @Test fun `welcome, pair, setup, home`() = runTest {
@@ -96,8 +99,9 @@ class AppModelTest {
         store.save(Pairing("dev_1", "tok_1", "L"))
         val m = model()
         m.sendTest()
-        assertEquals("Test alert sent. It should arrive in a few seconds.", m.notice.value)
+        assertEquals("Test alert sent. Waiting for it to arrive on this phone…", m.notice.value)
         testResult = { JSONObject("""{"results":[{"channel":"fcm","status":"not_configured"}]}""") }
+        clock += AppModel.TEST_COOLDOWN_MS
         m.sendTest()
         assertEquals("Unstuck Cloud can't send app alerts yet.", m.notice.value)
     }
@@ -150,5 +154,43 @@ class AppModelTest {
     @Test fun `refresh does nothing when not paired`() = runTest {
         model().refresh()
         assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `a test that Cloud sent while notifications are off on this phone says they are off`() = runTest {
+        store.save(Pairing("dev_1", "tok_1", "L"))
+        notifications = false
+        val m = model()
+        m.sendTest()
+        assertEquals("Cloud sent the test, but notifications are off for Unstuck on this phone, so it can't show. Tap Allow above.", m.notice.value)
+    }
+
+    @Test fun `send test cools down for 10 s between taps`() = runTest {
+        store.save(Pairing("dev_1", "tok_1", "L"))
+        val m = model()
+        m.sendTest()
+        m.sendTest()
+        assertEquals(listOf("test tok_1"), calls)
+        assertEquals(1_000_000L + AppModel.TEST_COOLDOWN_MS, m.testAgainAt.value)
+        clock += AppModel.TEST_COOLDOWN_MS
+        m.sendTest()
+        assertEquals(listOf("test tok_1", "test tok_1"), calls)
+    }
+
+    @Test fun `the test step is done only when the test notification shows on this phone`() = runTest {
+        store.save(Pairing("dev_1", "tok_1", "L"))
+        val m = model()
+        m.onTestArrived(clock - 1) // an old arrival, before this tap: doesn't count
+        m.sendTest()
+        assertEquals(false, m.testConfirmed.value)
+        m.onTestArrived(clock + 2_400)
+        assertEquals(true, m.testConfirmed.value)
+        assertEquals("Test alert arrived on this phone after 2 s.", m.notice.value)
+    }
+
+    @Test fun `an arrival with nothing sent changes nothing`() = runTest {
+        val m = model()
+        m.onTestArrived(clock)
+        assertEquals(false, m.testConfirmed.value)
+        assertNull(m.notice.value)
     }
 }

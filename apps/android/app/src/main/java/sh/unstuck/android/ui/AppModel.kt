@@ -24,7 +24,22 @@ class AppModel(
     private val viewOrigin: String,
     private val batteryUnrestricted: () -> Boolean,
     private val notificationsAllowed: () -> Boolean,
+    private val now: () -> Long = System::currentTimeMillis,
 ) {
+    companion object {
+        /** Between test alerts (the dashboard waits as long); Cloud also allows 5 a minute per phone. */
+        const val TEST_COOLDOWN_MS = 10_000L
+    }
+
+    private var testSentAt = 0L
+    private val _testConfirmed = MutableStateFlow(false)
+    /** A test alert showed on this phone after the last tap on Send: alerts really arrive. */
+    val testConfirmed: StateFlow<Boolean> = _testConfirmed
+
+    private val _testAgainAt = MutableStateFlow(0L)
+    /** When Send a test alert works again (0 or the past: now). */
+    val testAgainAt: StateFlow<Long> = _testAgainAt
+
     private val _screen = MutableStateFlow(if (store.load() == null) Screen.WELCOME else Screen.HOME)
     val screen: StateFlow<Screen> = _screen
     private val _error = MutableStateFlow<String?>(null)
@@ -71,16 +86,28 @@ class AppModel(
         }
     }
 
+    /** A test notification showed at [at] (TestAlerts): it confirms the test only if it came after the tap. */
+    fun onTestArrived(at: Long) {
+        if (testSentAt == 0L || at < testSentAt) return
+        _testConfirmed.value = true
+        _notice.value = "Test alert arrived on this phone after ${(at - testSentAt) / 1000} s."
+        testSentAt = 0L
+    }
+
     fun finishSetup() {
         _screen.value = Screen.HOME
     }
 
     suspend fun sendTest() {
+        if (now() < _testAgainAt.value) return
         val p = store.load() ?: return forget()
+        val tappedAt = now()
+        _testAgainAt.value = tappedAt + TEST_COOLDOWN_MS
         _notice.value = try {
             val status = api.test(p.deviceToken)?.optJSONArray("results")?.optJSONObject(0)?.optString("status")
             when (status) {
-                "sent" -> "Test alert sent. It should arrive in a few seconds."
+                "sent" -> if (notificationsAllowed()) "Test alert sent. Waiting for it to arrive on this phone…".also { testSentAt = tappedAt }
+                else "Cloud sent the test, but notifications are off for Unstuck on this phone, so it can't show. Tap Allow above."
                 "not_configured" -> "Unstuck Cloud can't send app alerts yet."
                 null, "" -> "The test alert didn't go out: this phone has no app channel yet. Pair again."
                 else -> "The test alert didn't go out ($status)."

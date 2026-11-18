@@ -38,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import sh.unstuck.android.R
 
 private val ButtonHeight = 52.dp
@@ -123,6 +125,19 @@ private fun Notice(text: String, error: Boolean = false) {
     }
 }
 
+/** Seconds left before Send a test alert works again; ticks down while > 0. */
+@Composable
+private fun secondsUntil(at: Long): Int {
+    var left by remember(at) { mutableStateOf(((at - System.currentTimeMillis() + 999) / 1000).toInt().coerceAtLeast(0)) }
+    LaunchedEffect(at) {
+        while (left > 0) {
+            delay(1000)
+            left = ((at - System.currentTimeMillis() + 999) / 1000).toInt().coerceAtLeast(0)
+        }
+    }
+    return left
+}
+
 @Composable
 fun WelcomeScreen(error: String?, onScan: () -> Unit, onCode: (String) -> Unit) {
     var code by remember { mutableStateOf("") }
@@ -169,8 +184,9 @@ fun WelcomeScreen(error: String?, onScan: () -> Unit, onCode: (String) -> Unit) 
 }
 
 @Composable
-fun SetupScreen(checklist: Checklist, notice: String?, onNotifications: () -> Unit, onBattery: () -> Unit, onTest: () -> Unit, onDone: () -> Unit) {
-    val tested = notice?.startsWith("Test alert sent") == true
+fun SetupScreen(checklist: Checklist, notice: String?, onNotifications: () -> Unit, onBattery: () -> Unit, onTest: () -> Unit, onDone: () -> Unit, testAgainAt: Long = 0L, testConfirmed: Boolean = false) {
+    val tested = testConfirmed
+    val wait = secondsUntil(testAgainAt)
     Page {
         Brandmark()
         Spacer(Modifier.height(40.dp))
@@ -182,7 +198,7 @@ fun SetupScreen(checklist: Checklist, notice: String?, onNotifications: () -> Un
         Spacer(Modifier.height(12.dp))
         Step(R.drawable.ic_battery, "Battery: Unrestricted", "Android otherwise holds alerts back while the phone sleeps.", checklist.batteryUnrestricted, "Open", onBattery)
         Spacer(Modifier.height(12.dp))
-        Step(R.drawable.ic_send, "Send a test alert", "It should arrive within a few seconds.", tested, "Send", onTest)
+        Step(R.drawable.ic_send, "Send a test alert", "Done once it shows up on this phone.", tested, if (wait > 0) "${wait} s" else "Send", onTest, enabled = wait == 0)
         notice?.takeUnless { tested }?.let { Notice(it) }
         Spacer(Modifier.height(28.dp))
         PrimaryButton(if (checklist.notificationsAllowed && checklist.batteryUnrestricted) "Finish" else "Finish later", onClick = onDone)
@@ -190,7 +206,7 @@ fun SetupScreen(checklist: Checklist, notice: String?, onNotifications: () -> Un
 }
 
 @Composable
-private fun Step(@DrawableRes icon: Int, title: String, detail: String, done: Boolean, action: String, onClick: () -> Unit) {
+private fun Step(@DrawableRes icon: Int, title: String, detail: String, done: Boolean, action: String, onClick: () -> Unit, enabled: Boolean = true) {
     Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = Brand.Card, contentColor = Brand.Text) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -206,7 +222,7 @@ private fun Step(@DrawableRes icon: Int, title: String, detail: String, done: Bo
             }
             if (!done) {
                 Spacer(Modifier.width(12.dp))
-                OutlinedButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium, colors = ButtonDefaults.outlinedButtonColors(contentColor = Brand.Green)) {
+                OutlinedButton(onClick = onClick, enabled = enabled, modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium, colors = ButtonDefaults.outlinedButtonColors(contentColor = Brand.Green)) {
                     Text(action)
                 }
             }
@@ -214,16 +230,37 @@ private fun Step(@DrawableRes icon: Int, title: String, detail: String, done: Bo
     }
 }
 
+/** Something on this phone that stops or delays alerts, with the one action that fixes it. */
 @Composable
-fun HomeScreen(label: String, notice: String?, onTest: () -> Unit, onUnpair: () -> Unit) {
+private fun Warning(@DrawableRes icon: Int, title: String, detail: String, action: String, danger: Boolean, onClick: () -> Unit) {
+    val tint = if (danger) Brand.Danger else Brand.Amber
+    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = tint.copy(alpha = 0.10f), contentColor = Brand.Text, border = androidx.compose.foundation.BorderStroke(1.dp, tint.copy(alpha = 0.35f))) {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(painterResource(icon), contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(detail, style = MaterialTheme.typography.bodyMedium, color = Brand.Muted)
+            }
+            Spacer(Modifier.width(12.dp))
+            OutlinedButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp), shape = MaterialTheme.shapes.medium, colors = ButtonDefaults.outlinedButtonColors(contentColor = tint)) { Text(action) }
+        }
+    }
+}
+
+@Composable
+fun HomeScreen(label: String, checklist: Checklist, notice: String?, onNotifications: () -> Unit, onBattery: () -> Unit, onTest: () -> Unit, onUnpair: () -> Unit, testAgainAt: Long = 0L) {
+    val wait = secondsUntil(testAgainAt)
     Page {
         Brandmark()
         Spacer(Modifier.height(40.dp))
         Card {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(12.dp).background(Brand.Green, CircleShape).border(3.dp, Brand.Green.copy(alpha = 0.3f), CircleShape))
+                val on = checklist.notificationsAllowed
+                val dot = if (on) Brand.Green else Brand.Danger
+                Box(Modifier.size(12.dp).background(dot, CircleShape).border(3.dp, dot.copy(alpha = 0.3f), CircleShape))
                 Spacer(Modifier.width(10.dp))
-                Text("ALERTS ON", style = MaterialTheme.typography.labelMedium, color = Brand.Green)
+                Text(if (on) "ALERTS ON" else "ALERTS BLOCKED", style = MaterialTheme.typography.labelMedium, color = dot)
             }
             Spacer(Modifier.height(12.dp))
             Heading("You'll get the alert here")
@@ -235,8 +272,16 @@ fun HomeScreen(label: String, notice: String?, onTest: () -> Unit, onUnpair: () 
             Text("Paired as", style = MaterialTheme.typography.labelMedium, color = Brand.Muted)
             Text(label, style = MaterialTheme.typography.titleMedium)
         }
+        if (!checklist.notificationsAllowed) {
+            Spacer(Modifier.height(12.dp))
+            Warning(R.drawable.ic_bell, "Notifications are off", "Alerts reach this phone but can't show. Allow notifications for Unstuck.", "Allow", danger = true, onNotifications)
+        }
+        if (!checklist.batteryUnrestricted) {
+            Spacer(Modifier.height(12.dp))
+            Warning(R.drawable.ic_battery, "Battery is optimized", "Android may hold alerts back while the phone sleeps. Set battery use to Unrestricted.", "Open", danger = false, onBattery)
+        }
         Spacer(Modifier.height(20.dp))
-        PrimaryButton("Send a test alert", icon = R.drawable.ic_send, onClick = onTest)
+        PrimaryButton(if (wait > 0) "Sent ✓ · again in $wait s" else "Send a test alert", icon = R.drawable.ic_send, enabled = wait == 0, onClick = onTest)
         notice?.let { Notice(it) }
         Spacer(Modifier.height(32.dp))
         Text(
