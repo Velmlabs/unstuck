@@ -41,7 +41,7 @@ export function launcherManifest(version) {
     keywords: ['ai', 'agent', 'browser', 'mcp', 'captcha', 'human-in-the-loop', 'cdp'],
     ...common,
     type: 'module',
-    bin: { 'unstuck-engine': 'bin/unstuck-engine.mjs' },
+    bin: { 'unstuck-engine': 'bin/unstuck-engine.mjs', unstuck: 'bin/unstuck-engine.mjs' },
     files: ['bin'],
     engines: { node: '>=18' },
     optionalDependencies: Object.fromEntries(PLATFORMS.map((p) => [`@velmlabs/unstuck-engine-${p.id}`, version])),

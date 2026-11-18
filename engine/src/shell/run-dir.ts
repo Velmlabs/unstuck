@@ -21,6 +21,8 @@ export interface RunFile {
   expiresAt: number;
   /** The start result (link and all), so a repeated start on the same tab can answer with it. */
   start?: Record<string, unknown>;
+  /** Set once the request has ended: its result is kept for `wait`, but it no longer holds its tab or a running slot. */
+  endedAt?: number;
 }
 
 const ID = /^[A-Za-z0-9_-]{16,64}$/;
@@ -66,7 +68,13 @@ export async function removeRunFile(dir: string, id: string): Promise<void> {
   if (ID.test(id)) await unlink(runPath(dir, id)).catch(() => {});
 }
 
-/** Running requests; files of processes that are gone are removed on the way. */
+/** Marks a request's run file as ended (its result stays readable). */
+export async function markEnded(dir: string, id: string): Promise<void> {
+  const f = await readRunFile(dir, id);
+  if (f) await writeRunFile(dir, { ...f, endedAt: Date.now() });
+}
+
+/** Requests whose process is alive, ended ones included; files of processes that are gone are removed on the way. */
 export async function listRunning(dir: string): Promise<RunFile[]> {
   const out: RunFile[] = [];
   for (const name of await readdir(dir)) {
@@ -86,38 +94,83 @@ export async function releaseTab(dir: string, tabKey: string): Promise<void> {
   await unlink(lockPath(dir, tabKey)).catch(() => {});
 }
 
+/** Names the request holding a tab's lock (written by the request's own process, before it reports its link). */
+export async function nameTabLock(dir: string, tabKey: string, id: string): Promise<void> {
+  await writeFile(lockPath(dir, tabKey), id, { mode: 0o600 });
+}
+
+/** Frees a tab's lock only while it still names `id` (a newer request may hold the tab by then). */
+export async function releaseTabIf(dir: string, tabKey: string, id: string): Promise<void> {
+  const lock = lockPath(dir, tabKey);
+  if ((await readFile(lock, 'utf8').catch(() => '')).trim() === id) await unlink(lock).catch(() => {});
+}
+
 export type TabClaim = { claimed: true; setLockId(id: string): Promise<void>; release(): Promise<void> } | { claimed: false; id: string | null };
 
 /**
- * One request per tab: an atomic create of `tab-<sha256(tabKey)>.lock`. A lock naming a request that is gone, or with
- * no id after LOCK_START_GRACE_MS, is taken over. `id: null` means another start for this tab is still under way.
+ * One request per tab: an atomic create of `tab-<sha256(tabKey)>.lock`. A lock naming a request that is gone or has ended,
+ * or with no id after LOCK_START_GRACE_MS, is taken over (atomically). `id: null` means another start for this tab is still under way.
  */
 export async function claimTab(dir: string, tabKey: string): Promise<TabClaim> {
   const lock = lockPath(dir, tabKey);
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const create = async (): Promise<TabClaim | null> => {
     try {
       const fh = await open(lock, 'wx', 0o600);
       await fh.close();
-      return {
-        claimed: true,
-        setLockId: (id) => writeFile(lock, id, { mode: 0o600 }),
-        release: () => unlink(lock).catch(() => {}),
-      };
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      return null;
     }
-    const id = (await readFile(lock, 'utf8').catch(() => '')).trim();
+    return { claimed: true, setLockId: (id) => writeFile(lock, id, { mode: 0o600 }), release: () => unlink(lock).catch(() => {}) };
+  };
+  /** The lock's holder, or `stale` when it may be taken over. */
+  const holder = async (): Promise<{ id: string | null } | 'stale' | 'gone'> => {
+    let id: string;
+    let mtime: number;
+    try {
+      id = (await readFile(lock, 'utf8')).trim();
+      mtime = (await stat(lock)).mtimeMs;
+    } catch {
+      return 'gone';
+    }
     if (id) {
       const f = await readRunFile(dir, id);
-      if (f && alive(f.pid)) return { claimed: false, id };
-    } else {
-      const age = Date.now() - (await stat(lock).then((s) => s.mtimeMs, () => 0));
-      if (age < LOCK_START_GRACE_MS) return { claimed: false, id: null };
+      return f && alive(f.pid) && !f.endedAt ? { id } : 'stale';
     }
-    await unlink(lock).catch(() => {});
+    return Date.now() - mtime < LOCK_START_GRACE_MS ? { id: null } : 'stale';
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const mine = await create();
+    if (mine) return mine;
+    const h = await holder();
+    if (h === 'gone') continue;
+    if (h !== 'stale') return { claimed: false, ...h };
+    // Stale: one shell at a time takes it over, and checks again once it may (another may have just done so).
+    const takeover = `${lock}.takeover`;
+    try {
+      const fh = await open(takeover, 'wx', 0o600);
+      await fh.close();
+    } catch {
+      const age = Date.now() - (await stat(takeover).then((x) => x.mtimeMs, () => Date.now()));
+      if (age > TAKEOVER_STALE_MS) await unlink(takeover).catch(() => {}); // a shell died mid-takeover
+      return { claimed: false, id: null }; // a takeover is under way: the caller waits and asks again
+    }
+    try {
+      const again = await holder();
+      if (again === 'stale') await unlink(lock).catch(() => {});
+      else if (again !== 'gone') return { claimed: false, ...again };
+      const taken = await create();
+      if (taken) return taken;
+    } finally {
+      await unlink(takeover).catch(() => {});
+    }
   }
   return { claimed: false, id: null };
 }
+
+/** A takeover marker older than this belongs to a shell that died while taking over a stale lock. */
+const TAKEOVER_STALE_MS = 10_000;
 
 export interface ControlHandlers {
   token: string;

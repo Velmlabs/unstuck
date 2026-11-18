@@ -35,7 +35,7 @@ describe('platform packages', () => {
   it('the launcher package has a bin and optional dependencies on every platform package, nothing else', () => {
     const m = launcherManifest('0.1.7');
     expect(m.name).toBe('@velmlabs/unstuck-engine');
-    expect(m.bin).toEqual({ 'unstuck-engine': 'bin/unstuck-engine.mjs' });
+    expect(m.bin).toEqual({ 'unstuck-engine': 'bin/unstuck-engine.mjs', unstuck: 'bin/unstuck-engine.mjs' }); // `unstuck`: the shell commands' documented name
     expect(m.type).toBe('module');
     expect(m.optionalDependencies).toEqual(Object.fromEntries(PLATFORMS.map((p) => [`@velmlabs/unstuck-engine-${p.id}`, '0.1.7'])));
     expect(m.dependencies).toBeUndefined();

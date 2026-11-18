@@ -47,6 +47,21 @@ describe('probeCaptchaPaint', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it('a screenshot that never answers reports unknown and the tab is closed', async () => {
+    const tab: CdpClient = {
+      send: <T>(method: string, params?: object) => {
+        if (method === 'Page.captureScreenshot') return new Promise<T>(() => {}); // a background tab that never paints
+        const e = (params as { expression?: string })?.expression ?? '';
+        return Promise.resolve((e.includes('__childLoaded') ? { result: { value: true } } : { result: { value: { x: 1, y: 1, dpr: 1 } } }) as T);
+      },
+      on: () => () => {},
+      onClose: () => () => {},
+    };
+    const close = vi.fn(async () => {});
+    expect(await probeCaptchaPaint(async () => ({ cdp: tab, close }), { stepWaitMs: 300 })).toBe('unknown');
+    expect(close).toHaveBeenCalledTimes(1);
+  }, 10_000);
+
   it('a tab that cannot be opened reports unknown', async () => {
     expect(
       await probeCaptchaPaint(async () => {

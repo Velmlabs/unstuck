@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -11,7 +12,7 @@ import { connectBrowser, connectCdp } from '../src/direct-cdp';
 import { cachedPaintCheck, runRequest } from '../src/shell/request';
 import { runCancel, runStart, runWait, type SpawnRequest } from '../src/shell/start';
 import type { RequestSpec } from '../src/shell/spec';
-import { listRunning, paintCachePath, runDir } from '../src/shell/run-dir';
+import { claimTab, listRunning, paintCachePath, runDir } from '../src/shell/run-dir';
 import { startChromium, type DebugChromium } from './chromium';
 
 const FIX = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../core/test/fixtures/human-checks');
@@ -140,6 +141,72 @@ describe('unstuck rescue / takeover / ask / wait / cancel', () => {
     const w = await wait([r.json.id, '--max-wait', '20']);
     expect(w).toMatchObject({ code: 30, json: { status: 'failed', detail: 'page_closed' } });
   }, 60_000);
+
+  it('once a request has ended, a new rescue on the same tab starts a new request', async () => {
+    await goto('/cf');
+    const a = await start('rescue', ['--cdp', chrome.wsUrl], 3000);
+    const v = person(a.json.link);
+    solved = true;
+    await goto('/cf');
+    v.push({ t: 'done' });
+    expect((await wait([a.json.id, '--max-wait', '20'])).json.status).toBe('resolved');
+    solved = false; // the next page shows a check again
+    await goto('/cf');
+    const b = await start('rescue', ['--cdp', chrome.wsUrl], 3000);
+    expect(b.code).toBe(10);
+    expect(b.json.id).not.toBe(a.json.id);
+  }, 60_000);
+
+  it('answered questions kept for wait do not count toward the three running', async () => {
+    for (const q of ['One?', 'Two?', 'Three?']) {
+      const r = await start('ask', [q, '--choice', 'A', '--choice', 'B'], 3000);
+      person(r.json.link).push({ t: 'answer', choice: 0 });
+      expect((await wait([r.json.id, '--max-wait', '20'])).json.status).toBe('answered');
+    }
+    expect((await start('ask', ['Four?'], 3000)).code).toBe(10);
+  }, 60_000);
+
+  it('the background process names the request in the tab lock itself, and frees the tab when the request ends', async () => {
+    const targetId = await goto('/shop');
+    const dir = runDir(env);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    expect((await claimTab(dir, 'K1')).claimed).toBe(true);
+    let started!: Record<string, unknown>;
+    const ready = new Promise<void>((r) =>
+      children.push(runRequest({ kind: 'takeover', profile: 'cli', reason: 'r', browserWsUrl: chrome.wsUrl, targetId, tabKey: 'K1', site: '127.0.0.1' }, { transport, env, keepMs: 3000 }, (x) => ((started = (x as { start: Record<string, unknown> }).start), r()))),
+    );
+    await ready;
+    expect(await claimTab(dir, 'K1')).toEqual({ claimed: false, id: started.id });
+    person(started.link as string).push({ t: 'done' });
+    expect((await wait([started.id as string, '--max-wait', '20'])).json.status).toBe('resolved');
+    await expect.poll(async () => (await claimTab(dir, 'K1')).claimed, { timeout: 5000 }).toBe(true);
+  }, 30_000);
+
+  it('a request that fails before its link frees the tab it was given', async () => {
+    const dir = runDir(env);
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    expect((await claimTab(dir, 'K2')).claimed).toBe(true);
+    const got = await new Promise<unknown>((resolve) => {
+      children.push(runRequest({ kind: 'takeover', profile: 'cli', reason: 'r', browserWsUrl: 'ws://127.0.0.1:9/devtools/browser/x', targetId: 'x', tabKey: 'K2' }, { transport, env }, resolve));
+    });
+    expect(got).toMatchObject({ final: { status: 'failed' } });
+    await Promise.all(children);
+    expect((await claimTab(dir, 'K2')).claimed).toBe(true);
+  });
+
+  it('a background process that never gets to a link gives up: failed start_timeout', async () => {
+    const hang = net.createServer(() => {}); // accepts, never answers the WebSocket handshake
+    await new Promise<void>((r) => hang.listen(0, '127.0.0.1', () => r()));
+    try {
+      const port = (hang.address() as AddressInfo).port;
+      const got = await new Promise<unknown>((resolve) => {
+        children.push(runRequest({ kind: 'takeover', profile: 'cli', reason: 'r', browserWsUrl: `ws://127.0.0.1:${port}/devtools/browser/x`, targetId: 'x' }, { transport, env, startTimeoutMs: 300 }, resolve));
+      });
+      expect(got).toEqual({ final: { status: 'failed', detail: 'start_timeout' } });
+    } finally {
+      hang.close();
+    }
+  }, 30_000);
 
   it('a fourth running request → exit 2 too_many_requests', async () => {
     for (const q of ['One?', 'Two?', 'Three?']) expect((await start('ask', [q])).code).toBe(10);
@@ -311,15 +378,18 @@ describe('runStart flags and the spec it hands the background process', () => {
     expect([r.code, r.json]).toEqual([30, { status: 'failed', detail: 'start_failed' }]);
   });
 
-  it('another start still under way on the same tab is exit 2 busy', async () => {
+  it('another start still under way on the same tab waits for it and returns the same request (exit 10)', async () => {
     await goto('/shop');
-    let release!: () => void;
-    const slow: SpawnRequest = () => new Promise((r) => (release = () => r({ ready: false, final: { status: 'expired' } })));
+    let go!: () => void;
+    const gate = new Promise<void>((r) => (go = r));
+    const slow: SpawnRequest = async (spec, e) => (await gate, inProcess(3000)(spec, e));
     const first = run((io) => runStart('takeover', ['--cdp', chrome.wsUrl, '--reason', 'r'], io, env, slow));
     await expect.poll(() => fs.readdirSync(runDir(env)).filter((n) => n.endsWith('.lock')).length).toBe(1);
-    const second = await run((io) => runStart('takeover', ['--cdp', chrome.wsUrl, '--reason', 'r'], io, env, slow));
-    expect([second.code, second.json.error]).toEqual([2, 'busy']);
-    release();
-    await first;
+    const second = run((io) => runStart('takeover', ['--cdp', chrome.wsUrl, '--reason', 'r'], io, env, slow));
+    await new Promise((r) => setTimeout(r, 300));
+    go();
+    const [a, b] = await Promise.all([first, second]);
+    expect([a.code, b.code]).toEqual([10, 10]);
+    expect(b.json.id).toBe(a.json.id);
   }, 30_000);
 });

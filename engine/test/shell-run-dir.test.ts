@@ -140,4 +140,38 @@ describe('tab claims and control failures', () => {
       await srv.close();
     }
   });
+
+  it('many shells taking over one stale lock at once: exactly one wins', async () => {
+    for (let round = 0; round < 5; round++) {
+      const key = `STALE${round}`;
+      const c = await claimTab(dir, key);
+      if (!c.claimed) throw new Error('setup');
+      await c.setLockId('deadrequestidxxxxxxxxx'); // its run file doesn't exist: stale
+      const claims = await Promise.all(Array.from({ length: 12 }, () => claimTab(dir, key)));
+      expect(claims.filter((x) => x.claimed).length, `round ${round}`).toBe(1);
+    }
+  });
+
+  it('a lock naming a request that has ended (kept only for wait) is taken over', async () => {
+    const c = await claimTab(dir, 'T7');
+    if (!c.claimed) throw new Error('setup');
+    await writeRunFile(dir, file({ id: 'endedrequestidxxxxxxx', tab: 'T7', endedAt: Date.now() }));
+    await c.setLockId('endedrequestidxxxxxxx');
+    expect((await claimTab(dir, 'T7')).claimed).toBe(true);
+  });
+
+  it('a takeover marker left by a shell that died mid-takeover is cleared, then the stale lock is taken', async () => {
+    const c = await claimTab(dir, 'T6');
+    if (!c.claimed) throw new Error('setup');
+    await c.setLockId('deadrequestidxxxxxxxxx');
+    const lock = fs.readdirSync(dir).find((n) => n.endsWith('.lock'))!;
+    const marker = path.join(dir, `${lock}.takeover`);
+    fs.writeFileSync(marker, '');
+    expect(await claimTab(dir, 'T6')).toEqual({ claimed: false, id: null }); // a fresh marker: someone is on it
+    const old = new Date(Date.now() - 60_000);
+    fs.utimesSync(marker, old, old);
+    expect(await claimTab(dir, 'T6')).toEqual({ claimed: false, id: null }); // the dead shell's marker goes
+    expect(fs.existsSync(marker)).toBe(false);
+    expect((await claimTab(dir, 'T6')).claimed).toBe(true);
+  });
 });

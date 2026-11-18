@@ -23,8 +23,8 @@ import { connectBrowser, connectCdp, type DirectCdp } from '../direct-cdp';
 import { probeCaptchaPaint } from '../browser/paint-check';
 import { nodeStoreFs, unstuckHome } from '../browser/node-store-fs';
 import { DETAIL_NOTE, LINK_NOTE } from '../mcp';
-import { paintCachePath, releaseTab, removeRunFile, runDir, startControlServer, writeRunFile } from './run-dir';
-import { ALERT_WAIT_MS_DEFAULT, type RequestSpec } from './spec';
+import { markEnded, nameTabLock, paintCachePath, releaseTab, releaseTabIf, removeRunFile, runDir, startControlServer, writeRunFile } from './run-dir';
+import { ALERT_WAIT_MS_DEFAULT, REQUEST_START_LIMIT_MS, type RequestSpec } from './spec';
 
 /** How long a finished result stays readable by `wait`: after its first read, or after the end if nobody reads it. */
 export const FINISHED_KEEP_MS = 10 * 60_000;
@@ -34,6 +34,8 @@ export interface RequestDeps {
   alerter?: CloudAlerter;
   env: Record<string, string | undefined>;
   keepMs?: number;
+  /** How long making the link may take (default REQUEST_START_LIMIT_MS). */
+  startTimeoutMs?: number;
   /** Called once everything is closed (the process entry exits there). */
   onExit?: () => void;
 }
@@ -126,11 +128,17 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     resolveLink({ info, alert });
   };
 
-  const closeAll = async () => {
-    if (spec.tabKey) await releaseTab(dir, spec.tabKey);
+  /** With `id`, the tab's lock is freed only while it still names this request (a newer one may hold the tab). */
+  const closeAll = async (id?: string) => {
+    if (spec.tabKey) await (id ? releaseTabIf(dir, spec.tabKey, id) : releaseTab(dir, spec.tabKey));
     await engine.close().catch(() => {});
     await cdp?.close().catch(() => {});
   };
+
+  // Making the link (connecting to the tab included) has a time limit of its own.
+  let startTimer: ReturnType<typeof setTimeout> | undefined;
+  const tooSlow = new Promise<'timeout'>((r) => (startTimer = setTimeout(() => r('timeout'), d.startTimeoutMs ?? REQUEST_START_LIMIT_MS)));
+  const inTime = <T>(p: Promise<T>): Promise<T> => Promise.race([p, tooSlow.then((): never => { throw new Error('start_timeout'); })]);
 
   let finalP: Promise<Final>;
   try {
@@ -149,7 +157,7 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
         })
         .then(askResult);
     } else {
-      const page = (cdp = await connectCdp(spec.browserWsUrl!, { targetId: spec.targetId! }));
+      const page = (cdp = await inTime(connectCdp(spec.browserWsUrl!, { targetId: spec.targetId! })));
       const limiter = createRateLimiter(createFileSessionStore(nodeStoreFs(), profileFile(unstuckHome(env), spec.profile)), { maxPerHour: spec.maxRescuesPerHour });
       const check: HumanCheck = spec.check ?? { kind: 'ask', ruleId: 'ask', evidence: [], url: spec.pageUrl ?? '', site: spec.site ?? '' };
       finalP = rescue(page, check, {
@@ -172,6 +180,7 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
       }).then(rescueResult);
     }
   } catch (e) {
+    clearTimeout(startTimer);
     ready({ final: { status: 'failed', detail: (e as Error).message } });
     await closeAll();
     return d.onExit?.();
@@ -182,7 +191,13 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     (f) => (final = f),
     (e: Error) => (final = { status: 'failed', detail: e.message }),
   );
-  const first = await Promise.race([linked, done.then(() => null)]);
+  const first = await Promise.race([linked, done.then(() => null), tooSlow]);
+  clearTimeout(startTimer);
+  if (first === 'timeout') {
+    ready({ final: { status: 'failed', detail: 'start_timeout' } });
+    await closeAll();
+    return d.onExit?.();
+  }
   if (!first) {
     ready({ final: final! });
     await closeAll();
@@ -218,8 +233,6 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
   });
   // Never longer than keepMs past the request's own expiry, read or not.
   const hardStop = setTimeout(() => void cleanup(), Math.max(0, info.expiresAt - Date.now()) + keepMs);
-  // A result nobody reads still goes keepMs after the end.
-  void done.then(() => scheduleExit());
   await writeRunFile(dir, {
     id: info.sessionId,
     pid: process.pid,
@@ -232,6 +245,14 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     expiresAt: info.expiresAt,
     start,
   });
+  // This process names the request in the tab's lock before reporting, so a concurrent start finds it.
+  if (spec.tabKey) await nameTabLock(dir, spec.tabKey, info.sessionId);
+  // At the end the tab and the running slot are free at once; the result stays readable for keepMs (read or not).
+  void done.then(async () => {
+    await markEnded(dir, info.sessionId);
+    if (spec.tabKey) await releaseTabIf(dir, spec.tabKey, info.sessionId);
+    scheduleExit();
+  });
   ready({ start });
 
   let cleaning = false;
@@ -243,7 +264,7 @@ export async function runRequest(spec: RequestSpec, d: RequestDeps, ready: (r: {
     control?.cancel('engine_closed');
     await server.close().catch(() => {});
     await removeRunFile(dir, info.sessionId);
-    await closeAll();
+    await closeAll(info.sessionId);
     finished();
   }
   await allClosed;

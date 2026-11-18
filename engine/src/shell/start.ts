@@ -12,7 +12,7 @@ import { cdpUrlFrom, parseShell, rescueScope } from './args';
 import { usageError } from './check';
 import { EXIT, emit, exitFor } from './output';
 import { runRequest } from './request';
-import { askControl, claimTab, listRunning, readRunFile, runDir } from './run-dir';
+import { askControl, claimTab, listRunning, readRunFile, runDir, type TabClaim } from './run-dir';
 import { type RequestSpec } from './spec';
 import { ShellError, resolveTab } from './tab';
 
@@ -120,7 +120,7 @@ export async function runStart(kind: 'rescue' | 'takeover' | 'ask', argv: string
       };
       const problem = checkAsk({ ...ask, ...(timeoutS ? { timeoutS } : {}) });
       if (problem) throw new ShellError('usage', undefined, problem);
-      if ((await listRunning(dir)).length >= MAX_RUNNING) throw new ShellError('too_many_requests', undefined, 'finish or cancel a request first');
+      if ((await running(dir)) >= MAX_RUNNING) throw new ShellError('too_many_requests', undefined, 'finish or cancel a request first');
       spec = { ...base, kind, ask };
     } else {
       if (kind === 'takeover' && !v.reason) throw new ShellError('usage', undefined, 'takeover needs --reason "<what the person should do>"');
@@ -129,14 +129,14 @@ export async function runStart(kind: 'rescue' | 'takeover' | 'ask', argv: string
       const maxRescuesPerHour = positiveInt('max-rescues-per-hour', v['max-rescues-per-hour'] as string | undefined);
       const tab = await resolveTab(cdpUrlFrom(v.cdp as string | undefined, env), v.tab as string | undefined);
       const tabKey = `${tab.browserWsUrl}|${tab.targetId}`;
-      const claim = await claimTab(dir, tabKey);
+      const claim = await claimOrJoin(dir, tabKey);
       if (!claim.claimed) {
-        const running = claim.id ? await readRunFile(dir, claim.id) : null;
-        if (running?.start) return emit(io, running.start, EXIT.humanNeeded, 'A person is already being asked about this tab: show them the link, then run unstuck wait.');
+        const current = claim.id ? await readRunFile(dir, claim.id) : null;
+        if (current?.start) return emit(io, current.start, EXIT.humanNeeded, 'A person is already being asked about this tab: show them the link, then run unstuck wait.');
         throw new ShellError('busy', undefined, 'another request for this tab is starting: try again in a moment');
       }
       release = claim.release;
-      if ((await listRunning(dir)).length >= MAX_RUNNING) throw new ShellError('too_many_requests', undefined, 'finish or cancel a request first');
+      if ((await running(dir)) >= MAX_RUNNING) throw new ShellError('too_many_requests', undefined, 'finish or cancel a request first');
       let check;
       if (kind === 'rescue') {
         const cdp = await connectCdp(tab.browserWsUrl, { targetId: tab.targetId });
@@ -165,11 +165,9 @@ export async function runStart(kind: 'rescue' | 'takeover' | 'ask', argv: string
         ...(scope ? { scope } : {}),
         ...(v.reason ? { reason: v.reason as string } : {}),
       };
-      // From here the background process owns the tab's lock.
-      const owned = claim;
+      // From here the background process owns the tab's lock: it names it before reporting and frees it at the end.
       const r = await spawnImpl(spec, env);
-      if (r.ready && typeof (r.start as { id?: unknown })?.id === 'string') await owned.setLockId((r.start as { id: string }).id);
-      release = r.ready ? null : release;
+      release = null;
       return report(io, r);
     }
     return report(io, await spawnImpl(spec, env));
@@ -177,6 +175,26 @@ export async function runStart(kind: 'rescue' | 'takeover' | 'ask', argv: string
     if (release) await release();
     return usageError(io, e);
   }
+}
+
+/** Requests still running (ended ones kept only for `wait` don't count). */
+async function running(dir: string): Promise<number> {
+  return (await listRunning(dir)).filter((f) => !f.endedAt).length;
+}
+
+/**
+ * Claims the tab, or, while another start on it is still under way, waits for that start to name its request (so
+ * both callers get the same link). Gives up after START_TIMEOUT_MS with the last answer.
+ */
+async function claimOrJoin(dir: string, tabKey: string): Promise<TabClaim> {
+  const until = Date.now() + START_TIMEOUT_MS;
+  let claim = await claimTab(dir, tabKey);
+  while (!claim.claimed && claim.id === null && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 200));
+    claim = await claimTab(dir, tabKey);
+  }
+  // A named lock always has its run file (and start) already: the request's process writes it before naming the lock.
+  return claim;
 }
 
 function report(io: IO, r: Record<string, unknown>): number {

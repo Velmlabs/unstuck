@@ -6,6 +6,15 @@ import { PNG } from 'pngjs';
 import type { CdpClient } from '@velmlabs/unstuck-core';
 
 const LOAD_WAIT_MS = 5000;
+/** Each step after the load (the box, the screenshot): a background tab that never paints must not hang the check. */
+const STEP_WAIT_MS = 10_000;
+
+/** `p`, or a rejection after `ms`. */
+const inTime = <T>(p: Promise<T>, ms: number): Promise<T> =>
+  new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error('paint check step timed out')), ms);
+    p.then((v) => (clearTimeout(t), resolve(v)), (e: unknown) => (clearTimeout(t), reject(e)));
+  });
 
 /** Serves one HTML page on 127.0.0.1 or localhost (different sites → a real cross-origin iframe). */
 export async function serve(host: string, html: (port: number) => string): Promise<{ port: number; close(): Promise<void> }> {
@@ -59,15 +68,18 @@ async function evaluate<T>(cdp: CdpClient, expression: string): Promise<T> {
 }
 
 /** In a tab showing the probe pages: is the child's green actually painted? */
-export async function checkIframePaint(tab: CdpClient, loadWaitMs = LOAD_WAIT_MS): Promise<boolean | 'unknown'> {
+export async function checkIframePaint(tab: CdpClient, loadWaitMs = LOAD_WAIT_MS, stepWaitMs = STEP_WAIT_MS): Promise<boolean | 'unknown'> {
   const loaded = await waitFor(() => evaluate<boolean>(tab, 'window.__childLoaded === true'), loadWaitMs);
   if (!loaded) return 'unknown';
   await sleep(300);
-  const box = await evaluate<{ x: number; y: number; dpr: number }>(
-    tab,
-    "(() => { const r = document.getElementById('child').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, dpr: devicePixelRatio }; })()",
+  const box = await inTime(
+    evaluate<{ x: number; y: number; dpr: number }>(
+      tab,
+      "(() => { const r = document.getElementById('child').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, dpr: devicePixelRatio }; })()",
+    ),
+    stepWaitMs,
   );
-  const shot = await tab.send<{ data: string }>('Page.captureScreenshot', { format: 'png' });
+  const shot = await inTime(tab.send<{ data: string }>('Page.captureScreenshot', { format: 'png' }), stepWaitMs);
   const png = PNG.sync.read(Buffer.from(shot.data, 'base64'));
   const px = Math.min(png.width - 1, Math.round(box.x * box.dpr));
   const py = Math.min(png.height - 1, Math.round(box.y * box.dpr));
@@ -79,14 +91,14 @@ export async function checkIframePaint(tab: CdpClient, loadWaitMs = LOAD_WAIT_MS
 /** Serves the probe, opens it in a tab of its own and checks it. Any error is 'unknown'; the tab and servers always close. */
 export async function probeCaptchaPaint(
   openTab: (url: string) => Promise<{ cdp: CdpClient; close(): Promise<void> }>,
-  o: { loadWaitMs?: number } = {},
+  o: { loadWaitMs?: number; stepWaitMs?: number } = {},
 ): Promise<boolean | 'unknown'> {
   let pages: Awaited<ReturnType<typeof serveProbePages>> | undefined;
   let tab: { cdp: CdpClient; close(): Promise<void> } | undefined;
   try {
     pages = await serveProbePages();
     tab = await openTab(pages.url);
-    return await checkIframePaint(tab.cdp, o.loadWaitMs);
+    return await checkIframePaint(tab.cdp, o.loadWaitMs, o.stepWaitMs);
   } catch {
     return 'unknown';
   } finally {
