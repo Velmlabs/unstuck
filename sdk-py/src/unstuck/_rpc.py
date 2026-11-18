@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 from typing import Any, Awaitable, Callable
 
+_LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 PROTOCOL_VERSION = 1
 PROTOCOL_MINOR = 2
 
@@ -28,7 +30,8 @@ class RpcPeer:
         self._listeners: dict[str, list[Callable[[Any], None]]] = {}
 
     def _send(self, msg: dict[str, Any]) -> None:
-        self._write(json.dumps(msg, separators=(",", ":"), ensure_ascii=False))
+        # Lone surrogates can't be UTF-8 encoded: escape them as JSON.stringify does (they occur only inside strings).
+        self._write(_LONE_SURROGATE.sub(lambda m: f"\\u{ord(m.group()):04x}", json.dumps(msg, separators=(",", ":"), ensure_ascii=False)))
 
     async def request(self, method: str, params: Any = None) -> Any:
         if self._closed is not None:

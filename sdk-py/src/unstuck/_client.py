@@ -37,8 +37,8 @@ def _js_blank(s: str) -> bool:
 
 
 def _js_len(s: str) -> int:
-    """JavaScript's String.length: UTF-16 code units (an emoji counts 2), as core's checkAsk counts."""
-    return len(s.encode("utf-16-le")) // 2
+    """JavaScript's String.length: UTF-16 code units (an emoji counts 2; a lone surrogate 1), as core's checkAsk counts."""
+    return len(s.encode("utf-16-le", "surrogatepass")) // 2
 
 
 def _check_ask(question: Any, choices: Any, allow_text: Any, private: Any, details: Any, timeout_s: Any) -> str | None:

@@ -139,9 +139,16 @@ async def test_cancelled_ask_cleans_up_and_client_still_works(tmp_path):
     import asyncio
 
     engine = AskEngine(tmp_path, {"hang_first": True, "result": {"status": "answered", "answer": {"text": "ok"}, "via": "page", "durationS": 1, "sessionId": "s9"}})
+    marker = tmp_path / "ask-calls.jsonl.hung"
     async with Unstuck(engine_path=engine.path, on_link=lambda l: None) as u:
+        task = asyncio.ensure_future(u.ask("Never answered?"))
+        for _ in range(400):  # the ask is in flight once the engine has received it
+            if marker.exists():
+                break
+            await asyncio.sleep(0.05)
+        assert marker.exists() and u._ask_links != {}
         with pytest.raises(asyncio.TimeoutError):
-            await asyncio.wait_for(u.ask("Never answered?"), 0.5)
+            await asyncio.wait_for(task, 0.2)
         assert u._ask_links == {}
         r = await u.ask("Again?")
         assert r.answer.text == "ok" and u._ask_links == {}
@@ -164,3 +171,13 @@ async def test_limits_count_utf16_units_like_the_engine(tmp_path):
             await u.ask("\ufeff \u2003")
         await u.ask("\x1c")
     assert len(engine.calls("ask")) == 4
+
+
+async def test_lone_surrogates_are_counted_not_crashed_on(tmp_path):
+    engine = AskEngine(tmp_path)
+    async with Unstuck(engine_path=engine.path, on_link=lambda l: None) as u:
+        await u.ask("\ud800")
+        await u.ask("Q", choices=["a", "\udc00"])
+        await u.ask("Q", details="\ud800" * 1000)
+        with pytest.raises(UnstuckConfigError, match="details must be"):
+            await u.ask("Q", details="\ud800" * 1001)
