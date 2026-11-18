@@ -18,6 +18,7 @@ object Notifications {
     const val CHANNEL = "takeovers"
     const val EXTRA_LINK = "sh.unstuck.android.LINK"
     private const val VIEWER = "sh.unstuck.android.viewer.ViewerActivity"
+    private const val MAIN = "sh.unstuck.android.MainActivity"
 
     /** "Takeovers": high importance, sound and vibration, so an alert gets through. */
     fun ensureChannel(context: Context) {
@@ -45,7 +46,8 @@ object Notifications {
 
     fun show(context: Context, n: NotificationSpec) {
         ensureChannel(context)
-        val tap = Intent().setComponent(ComponentName(context, VIEWER)).apply {
+        // A takeover opens the viewer; a test (no link) opens the app.
+        val tap = Intent().setComponent(ComponentName(context, if (n.openLink != null) VIEWER else MAIN)).apply {
             n.openLink?.let { putExtra(EXTRA_LINK, it) }
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
@@ -58,6 +60,7 @@ object Notifications {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)
+            .setOnlyAlertOnce(true) // the same alert delivered again updates silently
             .setContentIntent(pi)
             .build()
         context.getSystemService(NotificationManager::class.java).notify(n.id, notification)

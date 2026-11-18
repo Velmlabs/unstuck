@@ -115,4 +115,13 @@ class AlertHandlerTest {
         assertEquals("the Unstuck arrow, not a system icon", sh.unstuck.android.R.drawable.ic_stat_unstuck, posted.smallIcon.resId)
         assertEquals(0xFF22C55E.toInt(), posted.color)
     }
+
+    @Test fun `tapping a test alert opens the app, and a re-sent alert doesn't ring again`() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        Notifications.show(ctx, AlertHandler.handle(mapOf("kind" to "test"), now, VIEW, DEV, opens)!!)
+        val test = shadowOf(nm).allNotifications.single()
+        assertEquals("sh.unstuck.android.MainActivity", shadowOf(test.contentIntent).savedIntent.component!!.className)
+        assertTrue(test.flags and android.app.Notification.FLAG_ONLY_ALERT_ONCE != 0)
+    }
 }

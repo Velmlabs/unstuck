@@ -115,9 +115,13 @@ class MainActivity : ComponentActivity() {
         runCatching { startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)) }
     }
 
+    /**
+     * The app's App info page (Battery → Unrestricted lives there). No REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: Google Play
+     * restricts that permission, so the person makes the change in Android's own settings.
+     */
     private fun openBatterySetting() {
-        val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
-        runCatching { startActivity(direct) }.onFailure { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+        val appInfo = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        runCatching { startActivity(appInfo) }.onFailure { runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) } }
     }
 
     /** The FCM registration token; null when this build has no Firebase config (it can't receive alerts then). */

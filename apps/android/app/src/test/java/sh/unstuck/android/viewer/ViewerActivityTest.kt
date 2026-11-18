@@ -102,4 +102,15 @@ class ViewerActivityTest {
         val sources = java.io.File("src/main").walkTopDown().filter { it.extension == "kt" }.map { it.readText() }.joinToString()
         assertFalse(sources.contains("addJavascriptInterface"))
     }
+
+    @Test fun `a crashed WebView renderer closes the takeover screen instead of the app`() {
+        val a = launch(live) { _, _ -> "laptop" }
+        val web = a.findViewById<WebView>(ViewerActivity.WEB_ID)!!
+        val gone = object : android.webkit.RenderProcessGoneDetail() {
+            override fun didCrash() = true
+            override fun rendererPriorityAtExit() = 0
+        }
+        assertTrue("handled, so Android doesn't kill the app", shadowOf(web).webViewClient.onRenderProcessGone(web, gone))
+        assertTrue(a.isFinishing)
+    }
 }

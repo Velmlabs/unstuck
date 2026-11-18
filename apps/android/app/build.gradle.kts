@@ -11,14 +11,14 @@ if (googleServices.exists()) apply(plugin = "com.google.gms.google-services")
 
 android {
     namespace = "sh.unstuck.android"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "sh.unstuck.android"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 3
-        versionName = "0.1.2"
+        targetSdk = 36
+        versionCode = 4
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -83,7 +83,7 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
-    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("org.robolectric:robolectric:4.16")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     testImplementation("androidx.test:core:1.6.1")

@@ -1,12 +1,14 @@
 # Unstuck for Android
 
 A small native app that gets Unstuck Cloud alerts through Firebase Cloud Messaging at high priority and opens the
-takeover in its own viewer. It's a beta, installed by hand (no Play Store yet). Apache-2.0, like the viewer and SDKs.
+takeover in its own viewer. On Google Play as `sh.unstuck.android`. Apache-2.0, like the viewer and SDKs.
 
 ## How it keeps alerts private
 
-- **The phone's own key.** Pairing creates a P-256 key pair on the phone. The private key stays in the Android Keystore
-  (StrongBox when the phone has it) and can't be exported. Cloud only ever gets the public key.
+- **The phone's own key.** Pairing creates a P-256 key pair on the phone, and Cloud only ever gets the public key. On
+  Android 12+ the private key lives in the Android Keystore (StrongBox when the phone has it) and can't be exported. On
+  Android 8 to 11, where the Keystore can't do this key agreement, it's a software key stored encrypted with a
+  Keystore key that can't be exported.
 - **Sealed alerts.** Cloud sends a data-only FCM message with the alert sealed to that key, the same blob web push
   carries (`protocol/src/alerts.ts`). Neither Cloud nor Google can read the link; the app unseals it on the phone.
 - **The link stays on the phone.** The plain link exists only in memory and in the viewer's URL fragment, which is
@@ -14,7 +16,8 @@ takeover in its own viewer. It's a beta, installed by hand (no Play Store yet). 
 - **The viewer is the hosted one.** The app shows `view.unstuck.sh` in a WebView locked to that origin (anything else
   opens in your browser), with no JavaScript bridge and no file access. It's the same open-source viewer the browser
   shows, so there's no second copy to audit.
-- **No battery drain.** No background service, no connection of its own: FCM wakes the app.
+- **No battery drain.** No background service, no connection of its own: FCM wakes the app. No battery-exemption
+  permission either: the app points to Android's own App info page (Battery → Unrestricted).
 
 ## Build
 

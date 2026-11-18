@@ -128,6 +128,15 @@ class ViewerActivity : ComponentActivity() {
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(u)).addCategory(Intent.CATEGORY_BROWSABLE)) }
                     return true
                 }
+
+                // The WebView's renderer died (low memory, a crash): close this screen; unhandled, Android kills the app.
+                override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                    if (web === view) web = null
+                    (view.parent as? android.view.ViewGroup)?.removeView(view)
+                    view.destroy()
+                    finish()
+                    return true
+                }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onReceivedTitle(view: WebView, title: String?) = onTitle(title)

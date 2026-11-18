@@ -29,6 +29,7 @@ class ScreensScreenshotTest {
     @Test fun setup() = shot("setup") { SetupScreen(Checklist(notificationsAllowed = true, batteryUnrestricted = false), null, {}, {}, {}, {}) }
     @Test fun setupDone() = shot("setup-done") { SetupScreen(Checklist(true, true), "Test alert arrived on this phone after 2 s.", {}, {}, {}, {}, testConfirmed = true) }
     @Test fun home() = shot("home") { HomeScreen("SM-A556E · App", Checklist(true, true), "Test alert sent. Waiting for it to arrive on this phone…", {}, {}, {}, {}, System.currentTimeMillis() + 8_000) }
+    @Test fun homeStore() = shot("home-store") { HomeScreen("Pixel 8 · App", Checklist(true, true), "Test alert arrived on this phone after 2 s.", {}, {}, {}, {}) }
     @Test fun homeBlocked() = shot("home-blocked") { HomeScreen("SM-A556E · App", Checklist(notificationsAllowed = false, batteryUnrestricted = false), null, {}, {}, {}, {}) }
 
     /** The launcher icon as a circle-masked adaptive icon, and the status bar icon, at a glance. */

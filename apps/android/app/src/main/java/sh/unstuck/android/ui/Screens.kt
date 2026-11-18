@@ -196,7 +196,7 @@ fun SetupScreen(checklist: Checklist, notice: String?, onNotifications: () -> Un
         Spacer(Modifier.height(24.dp))
         Step(R.drawable.ic_bell, "Allow notifications", "So Unstuck can show the alert.", checklist.notificationsAllowed, "Allow", onNotifications)
         Spacer(Modifier.height(12.dp))
-        Step(R.drawable.ic_battery, "Battery: Unrestricted", "Android otherwise holds alerts back while the phone sleeps.", checklist.batteryUnrestricted, "Open", onBattery)
+        Step(R.drawable.ic_battery, "Battery: Unrestricted", "In App info, tap Battery, then Unrestricted. Otherwise Android may hold alerts back while the phone sleeps.", checklist.batteryUnrestricted, "Open", onBattery)
         Spacer(Modifier.height(12.dp))
         Step(R.drawable.ic_send, "Send a test alert", "Done once it shows up on this phone.", tested, if (wait > 0) "${wait} s" else "Send", onTest, enabled = wait == 0)
         notice?.takeUnless { tested }?.let { Notice(it) }
@@ -278,7 +278,7 @@ fun HomeScreen(label: String, checklist: Checklist, notice: String?, onNotificat
         }
         if (!checklist.batteryUnrestricted) {
             Spacer(Modifier.height(12.dp))
-            Warning(R.drawable.ic_battery, "Battery is optimized", "Android may hold alerts back while the phone sleeps. Set battery use to Unrestricted.", "Open", danger = false, onBattery)
+            Warning(R.drawable.ic_battery, "Battery is optimized", "Android may hold alerts back while the phone sleeps. In App info, tap Battery, then Unrestricted.", "Open", danger = false, onBattery)
         }
         Spacer(Modifier.height(20.dp))
         PrimaryButton(if (wait > 0) "Sent ✓ · again in $wait s" else "Send a test alert", icon = R.drawable.ic_send, enabled = wait == 0, onClick = onTest)
