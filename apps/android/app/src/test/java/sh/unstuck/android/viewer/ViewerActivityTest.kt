@@ -49,7 +49,7 @@ class ViewerActivityTest {
         assertFalse(s.allowFileAccess)
         assertFalse(s.allowContentAccess)
         assertEquals(WebSettings.MIXED_CONTENT_NEVER_ALLOW, s.mixedContentMode)
-        assertTrue(s.userAgentString.endsWith(" UnstuckAndroid/0.1.0"))
+        assertTrue(s.userAgentString.endsWith(" UnstuckAndroid/${sh.unstuck.android.BuildConfig.VERSION_NAME}"))
         assertTrue(a.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0)
     }
 
