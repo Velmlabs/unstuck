@@ -88,3 +88,32 @@ export function relayFor(search: string, origin: string): { ws: string; http: st
   if (!ok) return own;
   return { ws: `${u.protocol}//${u.host}`, http: `${u.protocol === 'wss:' ? 'https:' : 'http:'}//${u.host}` };
 }
+
+/** An alert the Android app already unsealed and whose sender it checked with Cloud natively. */
+export interface InAppAlert {
+  reason: string;
+  site: string;
+  mode?: 'question' | 'approval';
+  question?: string;
+  sender: () => Promise<{ keyName: string }>;
+}
+
+/** The app's own marker in its WebView's user agent: only pages the app opened carry it. */
+export const IN_APP_UA = 'UnstuckAndroid/';
+
+/**
+ * The Android app's fragment: `#t=…&k=…[&m=q|a]&from=<key>&r=<reason>&s=<site>[&q=<question>]`. Honored only inside
+ * the app (user agent `UnstuckAndroid/…`): anywhere else a link could claim any sender, so these are ignored there.
+ */
+export function inAppAlert(hash: string, userAgent: string): InAppAlert | null {
+  if (!userAgent.includes(IN_APP_UA)) return null;
+  const p = new URLSearchParams(hash.replace(/^#/, ''));
+  const from = p.get('from');
+  const reason = p.get('r');
+  const site = p.get('s');
+  if (!from || reason === null || site === null) return null;
+  const m = p.get('m');
+  const mode = m === 'q' ? 'question' : m === 'a' ? 'approval' : undefined;
+  const question = p.get('q');
+  return { reason, site, ...(mode ? { mode } : {}), ...(question !== null ? { question } : {}), sender: () => Promise.resolve({ keyName: from }) };
+}

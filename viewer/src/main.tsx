@@ -2,7 +2,7 @@ import { render } from 'preact';
 import { App, type AppProps } from './App';
 import { apiBaseForAlerts, checkSender, openAlertLinkSafely } from './alert-link';
 import { indexedDbDeviceStore } from './device-store';
-import { sessionIdFromPath, takeFragment } from './url';
+import { inAppAlert, sessionIdFromPath, takeFragment } from './url';
 import { parseAlertFragment } from '@velmlabs/unstuck-protocol';
 import './styles.css';
 
@@ -48,6 +48,10 @@ async function start() {
         sender: () => checkSender({ apiBase, deviceToken: opened.deviceToken, sessionId }),
       },
     };
+  } else {
+    // Inside the Android app: it unsealed the alert and checked the sender itself (see inAppAlert).
+    const inApp = inAppAlert(window.location.hash, navigator.userAgent);
+    if (inApp) extra = { alert: inApp };
   }
   const hash = takeFragment(loc, tab, window.history);
   render(<App location={{ hash, pathname, origin, search }} {...extra} />, mount());

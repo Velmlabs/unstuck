@@ -180,6 +180,13 @@ function fromLine(keyName: string, sealedSite: string): string {
   return `From your key ${cleanLabel(keyName)}${site ? ` · ${site}` : ''}`;
 }
 
+/** `Unstuck · live` in control, `Unstuck · handed back` once the person finished it, `Unstuck · ended` for any other end. */
+export function viewerTitle(session: boolean, phase: Phase, handedBack: boolean): string {
+  if (handedBack) return 'Unstuck · handed back';
+  if (!session || phase === 'ended' || phase === 'closed') return 'Unstuck · ended';
+  return phase === 'live' ? 'Unstuck · live' : 'Unstuck';
+}
+
 function formatRemaining(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -313,6 +320,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const pressed = useRef<'left' | 'middle' | 'right' | null>(null);
   const site = info?.site || alert?.site || '';
   const live = screen.kind === 'session' && phase === 'live';
+  // The session's state in the title, for the Android app's WebView (it watches the title: no JS bridge).
+  useEffect(() => {
+    document.title = viewerTitle(screen.kind === 'session', phase, finished.current || answered !== null);
+  }, [screen, phase, answered]);
   const liveRef = useRef(live);
   liveRef.current = live && !asking && !helping;
   const tips = useTips();
