@@ -12,6 +12,7 @@ if [ ! -x "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
   mv "$tmp/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
   rm -rf "$tmp"
 fi
-yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses >/dev/null
+# `yes` gets SIGPIPE once sdkmanager stops reading: that is not a failure (pipefail would make it one).
+(yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" --licenses >/dev/null
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_HOME" "platform-tools" "platforms;android-36" "build-tools;36.0.0" >/dev/null
 echo "Android SDK ready in $ANDROID_HOME (set ANDROID_HOME or sdk.dir in local.properties)"
