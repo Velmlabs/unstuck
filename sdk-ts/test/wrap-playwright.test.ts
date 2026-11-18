@@ -237,7 +237,7 @@ describe('wrap (Playwright)', () => {
     await quick.goto('https://shop.example/signin');
     expect(takeover).toHaveBeenCalledWith(quick, expect.objectContaining({ mode: 'approval', kind: 'approval', timeoutS: 120 }));
 
-    // A challenge keeps today's takeover options: no mode, and the wrap's own timeout.
+    // The client's approvalTimeoutS (here through the deps) is the default for an approval takeover.
     const withDefault = createWrap({ takeover: takeover as never, store: () => store, approvalTimeoutS: 60 });
     takeover.mockClear();
     approved = false;

@@ -57,8 +57,9 @@ export class Unstuck {
   private readonly renderChecks = new WeakMap<object, RenderCheck>();
   private readonly browserIds = new WeakMap<object, string>();
   private nextOpener = 0;
-  /** Questions waiting for their link, in the order asked: the engine's ask.link notification names no request. */
-  private readonly askLinks: { question: string; onLink: (l: TakeoverLink) => void; linked: boolean }[] = [];
+  /** Questions waiting for their link by linkId: the engine echoes it in ask.link, so concurrent asks never swap links. */
+  private readonly askLinks: Map<string, (l: TakeoverLink) => void> = new Map();
+  private nextAskLink = 0;
   private readonly wrapper: ReturnType<typeof createWrap>;
 
   constructor(private readonly opts: UnstuckOptions = {}) {
@@ -176,22 +177,22 @@ export class Unstuck {
     const params = askParams(question, opts);
     const engine = await this.ensureEngine();
     if (!engine.capabilities.includes('ask')) throw new UnstuckEngineError(ENGINE_TOO_OLD_FOR_ASK, undefined, 'engine_too_old');
-    const pending = { question, onLink: opts.onLink ?? this.opts.onLink ?? defaultOnLink, linked: false };
-    this.askLinks.push(pending);
+    const linkId = `ask-${this.nextAskLink++}`;
+    this.askLinks.set(linkId, opts.onLink ?? this.opts.onLink ?? defaultOnLink);
     engine.setBusy(++this.inFlight > 0);
     const died = engine.exited.then((code): never => {
       throw new UnstuckEngineError(`engine exited with code ${code}`);
     });
     died.catch(() => {});
     try {
-      return await Promise.race([engine.peer.request<AskResult>(Methods.ask, params), died]);
+      return await Promise.race([engine.peer.request<AskResult>(Methods.ask, { ...params, linkId }), died]);
     } catch (e) {
       if (e instanceof RpcCallError && e.code === 'closed') throw new UnstuckEngineError(`engine exited with code ${await engine.exited}`);
       // The engine refused the params (bad_params) or the options (config_error): the same error as a bad call.
       if (e instanceof RpcCallError && (e.code === 'bad_params' || e.code === 'config_error')) throw new UnstuckConfigError(e.message);
       throw e;
     } finally {
-      this.askLinks.splice(this.askLinks.indexOf(pending), 1);
+      this.askLinks.delete(linkId);
       engine.setBusy(--this.inFlight > 0);
     }
   }
@@ -289,13 +290,11 @@ export class Unstuck {
       });
       engine.peer.onNotification(Methods.askLink, (raw) => {
         const l = raw as AskLinkParams;
-        // The link of the question it names (its reason is the question), else of the oldest one still waiting for its link.
-        const waiting = this.askLinks.filter((a) => !a.linked);
-        const ask = waiting.find((a) => a.question === l.reason) ?? waiting[0];
-        if (!ask) return;
-        ask.linked = true;
+        // Only the ask that sent this linkId gets the link (and its code); anything else is ignored.
+        const onLink = l.linkId === undefined ? undefined : this.askLinks.get(l.linkId);
+        if (!onLink) return;
         const link: TakeoverLink = { url: l.url, reason: l.reason, sessionId: l.sessionId, expiresAt: l.expiresAt, ...(l.code ? { code: l.code } : {}) };
-        callUserOnLink(ask.onLink, link);
+        callUserOnLink(onLink, link);
       });
       void engine.exited.then(() => {
         if (this.engine === started) this.engine = null;

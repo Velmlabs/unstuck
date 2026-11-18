@@ -102,6 +102,8 @@ export interface AskParams {
   details?: string;
   timeoutS?: number;
   alerts?: boolean | 'required';
+  /** Echoed in the `ask.link` notification of this ask, so a caller with several asks in flight can tell the links apart (at most 64 characters). */
+  linkId?: string;
 }
 export interface CdpSendParams {
   pageId: string;
@@ -141,6 +143,8 @@ export interface AskLinkParams {
   reason: string;
   expiresAt: number;
   code?: string;
+  /** The `linkId` of the ask this link belongs to, when it had one. */
+  linkId?: string;
 }
 
 export interface GuardOpenParams {

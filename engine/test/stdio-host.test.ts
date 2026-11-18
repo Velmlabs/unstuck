@@ -297,6 +297,18 @@ describe('runStdioHost ask and approval takeovers', () => {
     await h.done;
   });
 
+  it('ask echoes linkId in its link notification; a bad linkId is bad_params', async () => {
+    const h = start(vi.fn(async () => ({ delivered: 1 })) as any);
+    const links: any[] = [];
+    h.sdk.onNotification(Methods.askLink, (p) => links.push(p));
+    void h.sdk.request<any>(Methods.ask, { question: 'Which?', linkId: 'ask-7', timeoutS: 30 }).catch(() => {});
+    await vi.waitFor(() => expect(links).toHaveLength(1));
+    expect(links[0]).toMatchObject({ linkId: 'ask-7', reason: 'Which?' });
+    for (const linkId of [5, 'x'.repeat(65)]) await expect(h.sdk.request(Methods.ask, { question: 'Q?', linkId })).rejects.toMatchObject({ code: 'bad_params' });
+    h.input.end();
+    await h.done;
+  });
+
   it('a private question sends no quick text to the alerter', async () => {
     const alerter = vi.fn(async (_info: any, _site: string | undefined, _extra?: any) => ({ delivered: 1 }));
     const h = start(alerter as any);

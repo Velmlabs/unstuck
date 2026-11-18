@@ -36,7 +36,8 @@ const KINDS: readonly unknown[] = ['challenge', 'approval', 'login', 'question',
 
 /** What checkAsk leaves open: the flags' types (an RPC peer may send anything). */
 function askTypeProblem(p: AskParams): string | null {
-  const { allowText, private: priv, alerts } = p as { [k in keyof AskParams]?: unknown };
+  const { allowText, private: priv, alerts, linkId } = p as { [k in keyof AskParams]?: unknown };
+  if (linkId !== undefined && (typeof linkId !== 'string' || linkId.length > 64)) return 'linkId must be a string of at most 64 characters';
   if (allowText !== undefined && typeof allowText !== 'boolean') return 'allowText must be true or false';
   if (priv !== undefined && typeof priv !== 'boolean') return 'private must be true or false';
   if (alerts !== undefined && typeof alerts !== 'boolean' && alerts !== 'required') return "alerts must be true, false or 'required'";
@@ -157,7 +158,7 @@ export function runStdioHost(opts: StdioHostOptions): Promise<void> {
         // Like linkFor: the alert starts first.
         sendAskAlert(opts.alerter, p.alerts, info, takeover, p);
         const { sessionId, url, reason, expiresAt, code } = info;
-        peer.notify(Methods.askLink, { sessionId, url, reason, expiresAt, ...(code ? { code } : {}) } satisfies AskLinkParams);
+        peer.notify(Methods.askLink, { sessionId, url, reason, expiresAt, ...(code ? { code } : {}), ...(p.linkId !== undefined ? { linkId: p.linkId } : {}) } satisfies AskLinkParams);
       },
     });
   });

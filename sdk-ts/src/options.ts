@@ -59,7 +59,7 @@ export interface UnstuckOptions {
   host?: string;
   /** Node only: port the engine's local server binds to. */
   port?: number;
-  /** Default takeover timeout in seconds (engine default: 600). */
+  /** Default takeover timeout in seconds (engine default: 600; not ask(): see AskOptions.timeoutS). */
   timeoutS?: number;
   /** How long wrap() waits for a person to approve a sign-in, in seconds (default 300). */
   approvalTimeoutS?: number;

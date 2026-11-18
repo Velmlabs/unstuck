@@ -8,6 +8,7 @@ function askEngine(caps: string[] | null, onAsk: string, onTakeover = "out({ id:
 import readline from 'node:readline';
 const out = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
 const note = (method, params) => out({ method, params });
+const held = [];
 readline.createInterface({ input: process.stdin }).on('line', (l) => {
   const m = JSON.parse(l);
   if (m.method === 'engine.hello') out({ id: m.id, result: { engineVersion: 'fake', protocolVersion: 1${caps ? `, capabilities: ${JSON.stringify(caps)}` : ''} } });
@@ -34,9 +35,9 @@ describe('Unstuck.ask (binary)', () => {
     const engine = askEngine(['ask'], `out({ id: m.id, result: { status: 'answered', answer: { text: JSON.stringify(m.params) }, durationS: 3, sessionId: 's1' } });`);
     const r = await make(engine).ask('Which plan?', { choices: ['Free', 'Pro'], private: false, details: 'd', timeoutS: 60, allowText: true });
     expect(r).toMatchObject({ status: 'answered', sessionId: 's1' });
-    expect(JSON.parse(r.answer!.text!)).toEqual({ question: 'Which plan?', choices: ['Free', 'Pro'], private: false, details: 'd', timeoutS: 60, allowText: true });
+    expect(JSON.parse(r.answer!.text!)).toEqual({ linkId: expect.stringMatching(/^ask-\d+$/), question: 'Which plan?', choices: ['Free', 'Pro'], private: false, details: 'd', timeoutS: 60, allowText: true });
     const bare = await make(engine).ask('Name?');
-    expect(JSON.parse(bare.answer!.text!)).toEqual({ question: 'Name?' });
+    expect(JSON.parse(bare.answer!.text!)).toEqual({ linkId: expect.any(String), question: 'Name?' });
   });
 
   it('on an engine without the ask capability throws engine_too_old, before any ask request', async () => {
@@ -70,7 +71,7 @@ describe('Unstuck.ask (binary)', () => {
   });
 
   it('ask.link goes to the per-call onLink, else the option onLink, else the default printer (stderr)', async () => {
-    const link = "note('ask.link', { sessionId: 's1', url: 'https://v.example/s/1#t=secret', reason: m.params.question, expiresAt: 5, code: '123456' });";
+    const link = "note('ask.link', { sessionId: 's1', url: 'https://v.example/s/1#t=secret', reason: m.params.question, expiresAt: 5, code: '123456', linkId: m.params.linkId });";
     const engine = askEngine(['ask'], `${link} ${ANSWER}`);
     const mine: unknown[] = [];
     const u = make(engine, { onLink: (l) => mine.push(['option', l]) });
@@ -87,7 +88,7 @@ describe('Unstuck.ask (binary)', () => {
   });
 
   it('a throwing onLink is reported without the link and the ask goes on', async () => {
-    const engine = askEngine(['ask'], `note('ask.link', { sessionId: 's1', url: 'https://v.example/s/1#t=secret', reason: 'Q?', expiresAt: 5 }); ${ANSWER}`);
+    const engine = askEngine(['ask'], `note('ask.link', { sessionId: 's1', url: 'https://v.example/s/1#t=secret', reason: 'Q?', expiresAt: 5, linkId: m.params.linkId }); ${ANSWER}`);
     const err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const r = await make(engine).ask('Q?', {
       onLink: () => {
@@ -98,20 +99,29 @@ describe('Unstuck.ask (binary)', () => {
     expect(String(err.mock.calls[0]![0])).not.toContain('secret');
   });
 
-  it('two asks in flight each get their own link', async () => {
+  it('two asks with the same question whose links arrive in reverse order each get their own link', async () => {
+    // The engine holds the first ask until the second arrives, then links the second first (no timing involved).
     const engine = askEngine(
       ['ask'],
-      `setTimeout(() => { note('ask.link', { sessionId: 'id-' + m.params.question, url: 'https://v.example/' + m.params.question, reason: m.params.question, expiresAt: 5 }); ${ANSWER} }, m.params.question === 'A' ? 80 : 10);`,
+      `held.push(m);
+      if (held.length === 2) {
+        for (const h of [held[1], held[0]]) note('ask.link', { sessionId: 'sess-' + h.params.linkId, url: 'https://v.example/' + h.params.linkId, reason: h.params.question, expiresAt: 5, code: 'code-' + h.params.linkId, linkId: h.params.linkId });
+        for (const h of held) out({ id: h.id, result: { status: 'answered', answer: { text: h.params.linkId }, durationS: 1, sessionId: 'sess-' + h.params.linkId } });
+      }`,
     );
     const u = make(engine);
-    const seen: string[] = [];
-    const [a, b] = await Promise.all([u.ask('A', { onLink: (l) => seen.push(`a:${l.url}`) }), u.ask('B', { onLink: (l) => seen.push(`b:${l.url}`) })]);
-    expect([a.status, b.status]).toEqual(['answered', 'answered']);
-    expect(seen.sort()).toEqual(['a:https://v.example/A', 'b:https://v.example/B']);
+    const seen: Record<string, unknown> = {};
+    const [a, b] = await Promise.all([
+      u.ask('Same?', { onLink: (l) => (seen.a = l) }),
+      u.ask('Same?', { onLink: (l) => (seen.b = l) }),
+    ]);
+    expect(seen.a).toMatchObject({ url: `https://v.example/${a.answer!.text}`, code: `code-${a.answer!.text}` });
+    expect(seen.b).toMatchObject({ url: `https://v.example/${b.answer!.text}`, code: `code-${b.answer!.text}` });
+    expect(a.answer!.text).not.toBe(b.answer!.text);
   });
 
-  it('a link for an ask nobody is waiting for is ignored; an engine that dies fails the ask with UnstuckEngineError', async () => {
-    const stray = askEngine(['ask'], `note('ask.link', { sessionId: 'x', url: 'https://v.example/x', reason: 'other', expiresAt: 5 }); ${ANSWER}`);
+  it('a link without a matching linkId is ignored; an engine that dies fails the ask with UnstuckEngineError', async () => {
+    const stray = askEngine(['ask'], `note('ask.link', { sessionId: 'x', url: 'https://v.example/x', reason: 'Q?', expiresAt: 5 }); note('ask.link', { sessionId: 'y', url: 'https://v.example/y', reason: 'Q?', expiresAt: 5, linkId: 'ask-999' }); ${ANSWER}`);
     expect((await make(stray, { onLink: () => {} }).ask('Q?')).status).toBe('answered');
     const dies = askEngine(['ask'], 'process.exit(3);');
     await expect(make(dies).ask('Q?')).rejects.toBeInstanceOf(UnstuckEngineError);
