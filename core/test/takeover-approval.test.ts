@@ -61,6 +61,16 @@ beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setI
 afterEach(() => vi.useRealTimers());
 
 describe('approval-mode takeover', () => {
+  it('cleans the agent name before the mode frame', async () => {
+    const t = setup({ agentName: '\u202eTravel\u200b bot\n' });
+    await settle();
+    const v = await t.join();
+    expect(v.json()[1]).toMatchObject({ t: 'mode', agentName: 'Travel bot' });
+    const t2 = setup({ agentName: '\u200b' });
+    await settle();
+    expect((await t2.join()).json()[1]).not.toHaveProperty('agentName');
+  });
+
   it('approval mode: ready, mode frame and one preview frame; no screencast; input ignored', async () => {
     const t = setup();
     await settle();

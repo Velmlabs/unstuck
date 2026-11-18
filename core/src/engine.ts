@@ -5,6 +5,7 @@ import type { Transport } from './transport';
 import { importSecret, newSecret } from './session/tokens';
 import { CAPTURE_TIMEOUT_MS, within } from './stream/within';
 import { runTakeover, type LinkHandler, type PopupSource, type RunningTakeover } from './session/takeover';
+import { cleanAgentName } from './session/agent-name';
 import { ASK_TIMEOUT_S, checkAsk, runAsk } from './session/ask';
 
 export type { LinkHandler, LinkInfo, PopupSource, TakeoverControl } from './session/takeover';
@@ -74,6 +75,7 @@ export function createEngine(opts: EngineOptions): Engine {
       // Subscribe before any await so a page that closes during setup is not missed.
       let closedBefore: string | undefined;
       const off = cdp.onClose((reason) => (closedBefore ??= reason));
+      const agentName = cleanAgentName(call.agentName);
       const k = await key;
       // Where the approval prompt is: the watcher reports `navigated` only once the page has left this URL.
       const approvalSince = call.mode === 'approval' && closedBefore === undefined ? await pageUrl(cdp) : undefined;
@@ -91,7 +93,7 @@ export function createEngine(opts: EngineOptions): Engine {
         ...(call.allowedSites ? { allowedSites: call.allowedSites } : {}),
         ...(call.mode ? { mode: call.mode } : {}),
         ...(call.kind ? { kind: call.kind } : {}),
-        ...(call.agentName ? { agentName: call.agentName } : {}),
+        ...(agentName ? { agentName } : {}),
         ...(approvalSince !== undefined ? { approvalSince } : {}),
       });
       running.add(session);
@@ -104,6 +106,7 @@ export function createEngine(opts: EngineOptions): Engine {
     async ask(call) {
       const problem = checkAsk(call);
       if (problem) throw new TypeError(problem);
+      const agentName = cleanAgentName(call.agentName);
       const k = await key;
       if (closed) return { status: 'cancelled', sessionId: '', durationS: 0, detail: 'engine_closed' };
       const session = runAsk(
@@ -114,7 +117,7 @@ export function createEngine(opts: EngineOptions): Engine {
           allowText: call.allowText ?? !call.choices,
           ...(call.details !== undefined ? { details: call.details } : {}),
           timeoutS: call.timeoutS ?? ASK_TIMEOUT_S,
-          ...(call.agentName ? { agentName: call.agentName } : {}),
+          ...(agentName ? { agentName } : {}),
           quickAnswers: call.private === false,
           onLink: call.onLink ?? opts.onLink,
           requireCode: opts.requireCode,

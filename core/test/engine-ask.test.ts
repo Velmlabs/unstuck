@@ -31,6 +31,17 @@ beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setI
 afterEach(() => vi.useRealTimers());
 
 describe('engine.ask', () => {
+  it('cleans the agent name before the mode frame (and an empty one is left out)', async () => {
+    const t = setup({ choices: ['Free', 'Pro'], agentName: '\u202eAva\u200b\n' });
+    await settle();
+    const v = await t.join();
+    expect(v.json()[1]).toMatchObject({ t: 'mode', agentName: 'Ava' });
+    const t2 = setup({ choices: ['Free', 'Pro'], agentName: '\u200b \u202e' });
+    await settle();
+    expect(t2.links).toHaveLength(1);
+    expect((await t2.join()).json()[1]).not.toHaveProperty('agentName');
+  });
+
   it('maps the session result to an AskResult (no url)', async () => {
     const t = setup({ choices: ['Free', 'Pro'], agentName: 'Ava' });
     await settle();

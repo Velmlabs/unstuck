@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { newDeviceKeyPair, exportDevicePublicKey, openAlert } from '@velmlabs/unstuck-protocol';
 import type { LinkInfo } from '../../src/engine';
-import { ALERT_TIMEOUT_MS, createCloudAlerter, sendTakeoverAlert } from '../../src/cloud/alerts';
+import { ALERT_TIMEOUT_MS, cleanAgentName, createCloudAlerter, sendTakeoverAlert, type CloudAlerter } from '../../src/cloud/alerts';
 import { settle } from '../settle';
 
 const T = 'tok_SECRET_value';
@@ -18,7 +18,11 @@ async function device(id: string) {
   return { id, label: id, publicKey: await exportDevicePublicKey(pair.publicKey), priv: pair.privateKey };
 }
 
-function setup(devicesReply: () => Response | Promise<Response>, notifyReply: () => Response | Promise<Response> = () => new Response('', { status: 202 })) {
+function setup(
+  devicesReply: () => Response | Promise<Response>,
+  notifyReply: () => Response | Promise<Response> = () => new Response('', { status: 202 }),
+  agentName?: string,
+) {
   const calls: { url: string; init: RequestInit }[] = [];
   const lines: string[] = [];
   let clock = 1_000_000;
@@ -26,7 +30,7 @@ function setup(devicesReply: () => Response | Promise<Response>, notifyReply: ()
     calls.push({ url, init });
     return url.endsWith('/devices') ? devicesReply() : notifyReply();
   }) as unknown as typeof globalThis.fetch;
-  const alert = createCloudAlerter({ apiBase: 'https://api.test', apiKey: 'APIKEY', fetch, log: (l) => lines.push(l), now: () => clock });
+  const alert = createCloudAlerter({ apiBase: 'https://api.test', apiKey: 'APIKEY', fetch, log: (l) => lines.push(l), now: () => clock, ...(agentName ? { agentName } : {}) });
   return { alert, calls, lines, tick: (ms: number) => (clock += ms) };
 }
 const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status });
@@ -351,5 +355,198 @@ describe('sendTakeoverAlert', () => {
 
   it("'required' never fails a takeover someone already joined through the link", async () => {
     expect(await run(none, 'required', true)).toEqual({ sent: 1, fail: [], looked: true, outcome: { delivered: 0, problem: 'no_devices' } });
+  });
+});
+
+
+describe('cleanAgentName', () => {
+  it('removes control, zero-width and bidi characters, trims and caps at 40 code points', () => {
+    expect(cleanAgentName('‮A'.padEnd(60, 'b'))).toHaveLength(40);
+    expect(cleanAgentName('  Travel​\u0007 bot\n ')).toBe('Travel bot');
+    expect(cleanAgentName('⁦x⁩﻿⁠')).toBe('x');
+    expect(cleanAgentName('😀'.repeat(50))).toBe('😀'.repeat(40));
+  });
+  it('is undefined when nothing is left (or not a string)', () => {
+    expect(cleanAgentName(undefined)).toBeUndefined();
+    expect(cleanAgentName('')).toBeUndefined();
+    expect(cleanAgentName(' ​‮\n')).toBeUndefined();
+    expect(cleanAgentName(7 as never)).toBeUndefined();
+  });
+});
+
+describe('alert privacy and content', () => {
+  const body = async (i: LinkInfo, site: string | undefined, extra?: Parameters<CloudAlerter>[2], agentName?: string) => {
+    const a = await device('d1');
+    const s = setup(() => json({ devices: [a] }), undefined, agentName);
+    await s.alert(i, site, extra);
+    const raw = s.calls[1]!.init.body as string;
+    return { raw, body: JSON.parse(raw), a, sealed: JSON.parse(raw).sealed[0].blob as string };
+  };
+  const approval: LinkInfo = { ...info, reason: 'Please approve a sign-in on your phone', kind: 'approval', mode: 'approval' };
+  const question: LinkInfo = { ...info, reason: 'Should I wire $4,200 to Acme Corp?', kind: 'question', mode: 'question' };
+
+  it('notify body carries kind, agentName and expiresAt, never reason or site', async () => {
+    const r = await body(approval, 'accounts.example.com', undefined, 'Travel bot');
+    expect(r.body).toMatchObject({ kind: 'approval', agentName: 'Travel bot', expiresAt: info.expiresAt });
+    expect(r.raw).not.toMatch(/accounts\.example|approve a sign-in/);
+    expect(r.body).not.toHaveProperty('question');
+    expect(r.body).not.toHaveProperty('choices');
+  });
+
+  it("kind defaults to 'other'; no agentName key when none is set; a dirty name is cleaned", async () => {
+    const r = await body(info, 'x.com');
+    expect(r.body.kind).toBe('other');
+    expect(r.body).not.toHaveProperty('agentName');
+    const r2 = await body(info, 'x.com', undefined, '‮Bot​');
+    expect(r2.body.agentName).toBe('Bot');
+  });
+
+  it('a private question: the question text is in the sealed payload only, never in the readable body', async () => {
+    const r = await body(question, undefined, undefined, 'Pay bot');
+    expect(r.body).toMatchObject({ kind: 'question', agentName: 'Pay bot' });
+    expect(r.raw).not.toContain('wire');
+    expect(r.raw).not.toContain('Acme');
+    expect(r.body).not.toHaveProperty('question');
+    expect(r.body).not.toHaveProperty('choices');
+    expect(await openAlert(r.a.priv, 'd1', 'sess1', r.sealed)).toMatchObject({ mode: 'question', question: 'Should I wire $4,200 to Acme Corp?', t: T, k: K });
+  });
+
+  it('a takeover: the sealed payload carries mode and no question; the body has no reason or site', async () => {
+    const r = await body(approval, 'accounts.example.com');
+    const opened = await openAlert(r.a.priv, 'd1', 'sess1', r.sealed);
+    expect(opened).toMatchObject({ mode: 'approval', reason: 'Please approve a sign-in on your phone', site: 'accounts.example.com' });
+    expect(opened).not.toHaveProperty('question');
+  });
+
+  it('a quick question adds question and choices to the readable body', async () => {
+    const quick = { question: 'Ship it?', choices: ['Yes', 'No'] };
+    const r = await body({ ...question, reason: 'Ship it?' }, undefined, { quick });
+    expect(r.body).toMatchObject({ kind: 'question', question: 'Ship it?', choices: ['Yes', 'No'] });
+    expect(await openAlert(r.a.priv, 'd1', 'sess1', r.sealed)).toMatchObject({ mode: 'question', question: 'Ship it?' });
+  });
+});
+
+describe('end report', () => {
+  const endCall = (s: ReturnType<typeof setup>) => s.calls.filter((c) => c.url.endsWith('/alerts/end'));
+
+  it('posts status, duration and label (and byAgent) to /api/v1/alerts/end with the key', async () => {
+    const s = setup(() => json({ devices: [] }));
+    await s.alert.end!({ sessionId: 'sess1', status: 'answered', durationS: 12.5, label: 'Yes' });
+    await s.alert.end!({ sessionId: 'sess2', status: 'cancelled', durationS: 3, byAgent: true });
+    const [c1, c2] = endCall(s);
+    expect(c1!.url).toBe('https://api.test/api/v1/alerts/end');
+    expect(c1!.init.method).toBe('POST');
+    expect((c1!.init.headers as Record<string, string>).Authorization).toBe('Bearer APIKEY');
+    expect(JSON.parse(c1!.init.body as string)).toEqual({ sessionId: 'sess1', status: 'answered', durationS: 12.5, label: 'Yes' });
+    expect(JSON.parse(c2!.init.body as string)).toEqual({ sessionId: 'sess2', status: 'cancelled', durationS: 3, byAgent: true });
+  });
+
+  it('a failure is logged once and never throws', async () => {
+    const s = setup(() => json({ devices: [] }), () => new Response('', { status: 500 }));
+    await expect(s.alert.end!({ sessionId: 'sess1', status: 'resolved', durationS: 1 })).resolves.toBeUndefined();
+    expect(s.lines).toHaveLength(1);
+    expect(s.lines[0]).toMatch(/^\[unstuck\] /);
+    expect(s.lines[0]).not.toContain('APIKEY');
+    const lines: string[] = [];
+    const boom = createCloudAlerter({ apiBase: 'https://api.test', apiKey: 'APIKEY', fetch: (async () => { throw new Error('net down APIKEY'); }) as unknown as typeof fetch, log: (l) => lines.push(l) });
+    await expect(boom.end!({ sessionId: 's', status: 'failed', durationS: 0 })).resolves.toBeUndefined();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).not.toContain('APIKEY');
+  });
+
+  it('gives up after ALERT_TIMEOUT_MS', async () => {
+    vi.useFakeTimers();
+    try {
+      const lines: string[] = [];
+      const hang = createCloudAlerter({ apiBase: 'https://api.test', apiKey: 'k', fetch: (() => new Promise(() => {})) as unknown as typeof fetch, log: (l) => lines.push(l) });
+      const p = hang.end!({ sessionId: 's', status: 'timed_out', durationS: 1 });
+      await vi.advanceTimersByTimeAsync(ALERT_TIMEOUT_MS + 1);
+      await p;
+      expect(lines).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  describe('from sendTakeoverAlert', () => {
+    type R = import('@velmlabs/unstuck-protocol').TakeoverResult;
+    const result = (r: Partial<R> = {}): R => ({ status: 'resolved', sessionId: 'sess1', url: '', durationS: 8, ...r });
+    const run = async (r: R, o: { delivered?: number; quick?: { question: string; choices: string[] }; noEnd?: boolean; alerts?: boolean | 'required' } = {}) => {
+      const end = vi.fn(async () => {});
+      const alerter = Object.assign(async () => ({ delivered: o.delivered ?? 1 }), o.noEnd ? {} : { end }) as CloudAlerter;
+      let finish!: (r: R) => void;
+      const ended = new Promise<R>((res) => (finish = res));
+      const fail = vi.fn();
+      void sendTakeoverAlert(alerter, o.alerts ?? true, info, 'x.com', { fail, cancel: vi.fn(), ended, joined: () => false }, o.quick);
+      await settle();
+      const before = end.mock.calls.length;
+      finish(r);
+      await settle();
+      return { end: (end.mock.calls as unknown[][]).map((c) => c[0]), before, fail };
+    };
+
+    it('reports after the takeover ends, only when an alert was delivered', async () => {
+      const a = await run(result({ durationS: 8 }));
+      expect(a.before).toBe(0);
+      expect(a.end).toEqual([{ sessionId: 'sess1', status: 'resolved', durationS: 8 }]);
+      expect((await run(result(), { delivered: 0 })).end).toEqual([]);
+    });
+
+    it('works with an alerter that has no end (a plain function), and swallows one that throws or rejects', async () => {
+      expect((await run(result(), { noEnd: true })).end).toEqual([]);
+      for (const bad of [() => Promise.reject(new Error('x')), () => { throw new Error('y'); }]) {
+        const unhandled = vi.fn();
+        process.on('unhandledRejection', unhandled);
+        const alerter = Object.assign(async () => ({ delivered: 1 }), { end: bad }) as unknown as CloudAlerter;
+        sendTakeoverAlert(alerter, true, info, 'x.com', { fail: vi.fn(), cancel: vi.fn(), ended: Promise.resolve(result()), joined: () => false });
+        await settle();
+        await new Promise((r) => setTimeout(r, 0));
+        process.off('unhandledRejection', unhandled);
+        expect(unhandled).not.toHaveBeenCalled();
+      }
+    });
+
+    it('byAgent only for cancelled_by_agent and engine_closed; the detail text never goes', async () => {
+      const a = await run(result({ status: 'cancelled', detail: 'cancelled_by_agent' }));
+      const b = await run(result({ status: 'cancelled', detail: 'engine_closed' }));
+      const c = await run(result({ status: 'failed', detail: 'viewer_left' }));
+      const d = await run(result({ status: 'failed', detail: 'alert_failed' }));
+      expect(a.end).toEqual([{ sessionId: 'sess1', status: 'cancelled', durationS: 8, byAgent: true }]);
+      expect(b.end).toEqual([{ sessionId: 'sess1', status: 'cancelled', durationS: 8, byAgent: true }]);
+      expect(c.end).toEqual([{ sessionId: 'sess1', status: 'failed', durationS: 8 }]);
+      expect(JSON.stringify([a, b, c, d].map((x) => x.end))).not.toMatch(/viewer_left|cancelled_by_agent|engine_closed|alert_failed/);
+    });
+
+    const quick = { question: 'Ship it?', choices: ['Yes', 'No'] };
+    const answered = (answer: R['answer'], via: R['via'] = 'telegram') => result({ status: 'answered', answer, via });
+
+    it('label only for a quick question answered with a choice label', async () => {
+      expect((await run(answered({ choice: 0, label: 'Yes' }), { quick })).end).toEqual([{ sessionId: 'sess1', status: 'answered', durationS: 8, label: 'Yes' }]);
+      expect((await run(answered({ choice: 1, label: 'No' }, 'page'), { quick })).end[0]).toMatchObject({ label: 'No' });
+    });
+
+    it('no label for a private question (no quick), typed text, or a quick question that ended otherwise', async () => {
+      expect((await run(answered({ choice: 0, label: 'Yes' }, 'page'))).end[0]).not.toHaveProperty('label');
+      expect((await run(answered({ text: 'wire it to ACCT-99' }, 'page'), { quick })).end[0]).not.toHaveProperty('label');
+      expect(JSON.stringify((await run(answered({ text: 'wire it to ACCT-99' }, 'page'), { quick })).end)).not.toContain('ACCT');
+      expect((await run(result({ status: 'timed_out' }), { quick })).end[0]).not.toHaveProperty('label');
+    });
+
+    it("'required' still fails a takeover no phone got, with no end report", async () => {
+      const r = await run(result(), { delivered: 0, alerts: 'required' });
+      expect(r.fail.mock.calls).toEqual([['alert_failed']]);
+      expect(r.end).toEqual([]);
+    });
+  });
+
+  it('passes quick to the alerter only when given, keeping the 5-argument call', async () => {
+    const seen: unknown[][] = [];
+    const alerter = (async (...a: unknown[]) => (seen.push(a), { delivered: 0 as const, problem: 'no_devices' as const })) as unknown as CloudAlerter;
+    const t = { fail: vi.fn(), cancel: vi.fn(), ended: new Promise<never>(() => {}), joined: () => false };
+    sendTakeoverAlert(alerter, true, info, 'x.com', t);
+    sendTakeoverAlert(alerter, true, info, 'x.com', t, { question: 'q', choices: ['a', 'b'] });
+    await settle();
+    expect(seen[0]).toHaveLength(2);
+    expect(seen[1]![2]).toEqual({ quick: { question: 'q', choices: ['a', 'b'] } });
   });
 });

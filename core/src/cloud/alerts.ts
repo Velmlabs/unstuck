@@ -1,5 +1,8 @@
-import { sealAlert, type AlertPayload } from '@velmlabs/unstuck-protocol';
+import { sealAlert, type AlertPayload, type TakeoverStatus } from '@velmlabs/unstuck-protocol';
 import type { LinkInfo, TakeoverControl } from '../engine';
+import { cleanAgentName } from '../session/agent-name';
+
+export { cleanAgentName };
 
 export interface CloudAlerterOptions {
   /** Unstuck Cloud's API origin, e.g. https://unstuck.sh. */
@@ -9,13 +12,33 @@ export interface CloudAlerterOptions {
   /** One line per problem; never contains the link secret or the API key. */
   log?: (line: string) => void;
   now?: () => number;
+  /** Who is asking, shown on the alert (cleaned; empty means Cloud uses the key's name). */
+  agentName?: string;
 }
 
 /** Why no phone got the link: the key may not send alerts, no phone is paired, no phone's key could seal it, Cloud refused it. */
 export type AlertProblem = 'alerts_not_allowed' | 'no_devices' | 'seal_failed' | 'notify_failed' | 'unauthorized' | 'error';
 /** How many paired phones Unstuck Cloud accepted the alert for, or why none. */
 export type AlertOutcome = { delivered: number } | { delivered: 0; problem: AlertProblem };
-export type CloudAlerter = (info: LinkInfo, site: string | undefined) => Promise<AlertOutcome>;
+/** A question that opted in with `private: false`: the only text Cloud may read. */
+export interface QuickQuestion {
+  question: string;
+  choices: string[];
+}
+/** What Cloud is told when an alerted session ends. `byAgent` is all it learns of the detail. */
+export interface AlertEnd {
+  sessionId: string;
+  status: TakeoverStatus;
+  durationS: number;
+  /** The chosen label of a quick question; never a private question's, never typed text. */
+  label?: string;
+  /** The agent ended it (`cancelled_by_agent` or `engine_closed`). */
+  byAgent?: true;
+}
+export interface CloudAlerter {
+  (info: LinkInfo, site: string | undefined, extra?: { quick?: QuickQuestion }): Promise<AlertOutcome>;
+  end?(e: AlertEnd): Promise<void>;
+}
 
 /** A failure that already has its outcome (the message is what gets logged). */
 class AlertFailure extends Error {
@@ -110,14 +133,24 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
 
   const none = (problem: AlertProblem): AlertOutcome => ({ delivered: 0, problem });
 
-  return async (info, site) => {
+  const agentName = cleanAgentName(o.agentName);
+
+  const alert = async (info: LinkInfo, site: string | undefined, extra?: { quick?: QuickQuestion }): Promise<AlertOutcome> => {
     try {
       const link = splitLink(info.url);
       if (!link) return none('error');
       const list = await devices();
       if (!list) return none('alerts_not_allowed');
       if (list.length === 0) return none('no_devices');
-      const payload: AlertPayload = { t: link.t, k: link.k, reason: cut(info.reason, MAX_REASON), site: cut(site ?? '', MAX_SITE), expiresAt: info.expiresAt };
+      // For a question the reason IS the question: it travels only inside the sealed payload.
+      const payload: AlertPayload = {
+        t: link.t,
+        k: link.k,
+        reason: cut(info.reason, MAX_REASON),
+        site: cut(site ?? '', MAX_SITE),
+        expiresAt: info.expiresAt,
+        ...(info.kind === 'question' ? { mode: 'question' as const, question: info.reason } : info.mode ? { mode: info.mode } : {}),
+      };
       // Each phone on its own: one with a bad key is skipped, the others still get the alert.
       const results = await Promise.all(
         list.map(async (d) => {
@@ -141,7 +174,16 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
         doFetch(`${base}/api/v1/agent/notify`, {
           method: 'POST',
           headers: { ...headers, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: info.sessionId, viewerUrl: link.viewerUrl, sealed }),
+          // Readable by Cloud: never the reason, site, link secret or a private question.
+          body: JSON.stringify({
+            sessionId: info.sessionId,
+            viewerUrl: link.viewerUrl,
+            sealed,
+            kind: info.kind ?? 'other',
+            ...(agentName ? { agentName } : {}),
+            expiresAt: info.expiresAt,
+            ...(extra?.quick ? { question: extra.quick.question, choices: extra.quick.choices } : {}),
+          }),
           signal,
         }),
       );
@@ -153,7 +195,29 @@ export function createCloudAlerter(o: CloudAlerterOptions): CloudAlerter {
       return none(e instanceof AlertFailure ? e.problem : 'error');
     }
   };
+
+  /** Tells Cloud how an alerted session ended. Never rejects: a failure is one log line. */
+  async function end(e: AlertEnd): Promise<void> {
+    try {
+      const res = await within('end report', (signal) =>
+        doFetch(`${base}/api/v1/alerts/end`, {
+          method: 'POST',
+          headers: { ...headers, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId: e.sessionId, status: e.status, durationS: e.durationS, ...(e.label !== undefined ? { label: e.label } : {}), ...(e.byAgent ? { byAgent: true } : {}) }),
+          signal,
+        }),
+      );
+      if (!res.ok) throw new AlertFailure(`end report answered ${res.status}`, 'error');
+    } catch (err) {
+      log(`[unstuck] could not send the end report: ${String((err as Error)?.message ?? err).replaceAll(o.apiKey, '***')}`);
+    }
+  }
+
+  return Object.assign(alert, { end });
 }
+
+/** The detail values that mean the agent itself ended the session. */
+const BY_AGENT = new Set(['cancelled_by_agent', 'engine_closed']);
 
 /**
  * A takeover's alert, from its link handler: none with `alerts: false`; with `'required'`, a link that reached no paired
@@ -167,15 +231,32 @@ export function sendTakeoverAlert(
   info: LinkInfo,
   site: string | undefined,
   takeover: TakeoverControl,
+  /** A question that opted in with `private: false` (its text and choices may go to Cloud; the chosen label too). */
+  quick?: QuickQuestion,
 ): Promise<AlertOutcome> | null {
   if (alerts === false || !alerter) return null;
   const failed = (): AlertOutcome => ({ delivered: 0, problem: 'error' });
   let sent: Promise<AlertOutcome>;
   try {
-    sent = Promise.resolve(alerter(info, site)).catch(failed);
+    sent = Promise.resolve(quick ? alerter(info, site, { quick }) : alerter(info, site)).catch(failed);
   } catch {
     sent = Promise.resolve(failed());
   }
+  // Once a phone got the alert, Cloud hears how it ended (never the detail text, never typed text).
+  void sent
+    .then(async (r) => {
+      if (r.delivered === 0 || !alerter.end) return;
+      const res = await takeover.ended;
+      const label = quick && res.status === 'answered' ? res.answer?.label : undefined;
+      await alerter.end({
+        sessionId: info.sessionId,
+        status: res.status,
+        durationS: res.durationS,
+        ...(label ? { label: cut(label, 80) } : {}),
+        ...(res.detail && BY_AGENT.has(res.detail) ? { byAgent: true as const } : {}),
+      });
+    })
+    .catch(() => {});
   if (alerts === 'required') void sent.then((r) => r.delivered === 0 && !takeover.joined() && takeover.fail('alert_failed'));
   return sent;
 }

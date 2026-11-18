@@ -34,7 +34,7 @@ export interface AskSessionOptions {
 
 /** Why `p` can't be asked, or null. Checks types too: the params may come straight from an RPC call. */
 export function checkAsk(p: AskParams): string | null {
-  const { question, choices, details, timeoutS } = p as { [k in keyof AskParams]?: unknown };
+  const { question, choices, details, timeoutS, allowText } = p as { [k in keyof AskParams]?: unknown };
   if (typeof question !== 'string' || !question.trim() || question.length > ASK_LIMITS.question) return 'question must be 1-300 characters';
   if (
     choices !== undefined &&
@@ -44,6 +44,7 @@ export function checkAsk(p: AskParams): string | null {
       !choices.every((c) => typeof c === 'string' && c.trim() !== '' && c.length <= ASK_LIMITS.choices.label))
   )
     return 'choices must be 2-6 labels of at most 80 characters';
+  if (allowText === false && choices === undefined) return 'a question needs choices or allowText';
   if (details !== undefined && (typeof details !== 'string' || details.length > ASK_LIMITS.details)) return 'details must be at most 1000 characters';
   if (timeoutS !== undefined && (typeof timeoutS !== 'number' || !(timeoutS >= ASK_LIMITS.timeoutS.min && timeoutS <= ASK_LIMITS.timeoutS.max)))
     return 'timeoutS must be 10-3600';

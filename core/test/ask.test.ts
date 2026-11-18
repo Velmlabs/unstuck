@@ -422,6 +422,14 @@ describe('checkAsk', () => {
     expect(checkAsk({ question: 'q'.repeat(301) })).toBe('question must be 1-300 characters');
   });
 
+  it('a question needs choices or allowText', () => {
+    const msg = 'a question needs choices or allowText';
+    expect(checkAsk({ ...ok, allowText: false })).toBe(msg);
+    expect(checkAsk({ ...ok, allowText: true })).toBeNull();
+    expect(checkAsk({ ...ok, choices: ['a', 'b'], allowText: false })).toBeNull();
+    expect(checkAsk({ ...ok, choices: ['a', 'b'] })).toBeNull();
+  });
+
   it('rejects every other out-of-range or mistyped field', () => {
     const question = 'question must be 1-300 characters';
     const choices = 'choices must be 2-6 labels of at most 80 characters';
