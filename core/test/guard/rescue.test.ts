@@ -4,6 +4,7 @@ import { createRateLimiter } from '../../src/guard/rate-limit';
 import { createMemorySessionStore } from '../../src/guard/store';
 import { fakePage, page, blocked, cfCheck, runner } from './helpers';
 import type { HumanCheck } from '@velmlabs/unstuck-protocol';
+import type { PageFacts } from '../../src/guard/facts';
 
 const limiter = () => createRateLimiter(createMemorySessionStore());
 
@@ -16,6 +17,7 @@ describe('reasonFor', () => {
     expect(reasonFor(c({ vendor: 'generic' }))).toBe("shop.example asks to verify you're human");
     expect(reasonFor(c({ kind: 'login', vendor: undefined }))).toBe('shop.example asks you to log in');
     expect(reasonFor(c({ kind: '2fa', vendor: undefined }))).toBe('shop.example asks for a verification code');
+    expect(reasonFor(c({ kind: 'approval', vendor: undefined, site: 'accounts.example' }))).toBe('accounts.example asks you to approve a sign-in');
   });
 });
 
@@ -24,13 +26,13 @@ describe('rescue', () => {
     const run = runner();
     const cdp = fakePage({ facts: page() });
     expect(await rescue(cdp, cfCheck, { takeover: run, limiter: limiter(), quietMs: 10 })).toMatchObject({ status: 'resolved', waitedS: expect.any(Number), check: cfCheck, takeover: { status: 'resolved' } });
-    expect(run).toHaveBeenCalledWith({ reason: "Cloudflare asks to verify you're human on shop.example", site: 'shop.example' });
+    expect(run).toHaveBeenCalledWith({ reason: "Cloudflare asks to verify you're human on shop.example", site: 'shop.example', kind: 'challenge' });
   });
 
   it('uses the given reason', async () => {
     const run = runner();
     await rescue(fakePage({ facts: page() }), cfCheck, { takeover: run, limiter: limiter(), quietMs: 10, reason: 'Log in to the bank' });
-    expect(run).toHaveBeenCalledWith({ reason: 'Log in to the bank', site: 'shop.example' });
+    expect(run).toHaveBeenCalledWith({ reason: 'Log in to the bank', site: 'shop.example', kind: 'challenge' });
   });
 
   it('the check still there after Done is still_blocked, with no second takeover', async () => {
@@ -134,5 +136,114 @@ describe('rescue on a browser that cannot paint cross-origin iframes', () => {
     const run = runner();
     expect((await rescue(fakePage({ facts: page() }), cfCheck, { takeover: run, limiter: limiter(), canRenderCaptcha: async () => 'unknown', quietMs: 10 })).status).toBe('resolved');
     expect(run).toHaveBeenCalledTimes(1);
+  });
+});
+
+const approvalCheck: HumanCheck = { kind: 'approval', ruleId: 'approval.prompt', evidence: ['text "check your phone"'], url: 'https://accounts.example/signin', site: 'accounts.example' };
+const approvalPage = (o: Partial<PageFacts> = {}) => page({ url: 'https://accounts.example/signin', title: 'Sign in', bodyTextLength: 120, bodyTextHead: 'Check your phone to approve this sign-in.', ...o });
+
+describe('rescue for approvals', () => {
+  it('an approval check runs an approval-mode takeover with 300 s and kind approval', async () => {
+    const takeover = runner('resolved', 'approval_navigated');
+    await rescue(fakePage({ facts: page({ url: 'https://accounts.example/home' }) }), approvalCheck, { takeover, limiter: limiter(), quietMs: 10 });
+    expect(takeover).toHaveBeenCalledWith(expect.objectContaining({ mode: 'approval', kind: 'approval', timeoutS: 300, reason: 'accounts.example asks you to approve a sign-in' }));
+  });
+
+  it('uses the given approval timeout', async () => {
+    const takeover = runner('resolved', 'approval_navigated');
+    await rescue(fakePage({ facts: page() }), approvalCheck, { takeover, limiter: limiter(), quietMs: 10, approvalTimeoutS: 90 });
+    expect(takeover).toHaveBeenCalledWith({ reason: 'accounts.example asks you to approve a sign-in', site: 'accounts.example', kind: 'approval', mode: 'approval', timeoutS: 90 });
+  });
+
+  // Review Focus 1
+  it('approval prompt replaced by a timeout message is still_blocked', async () => {
+    const t0 = Date.now();
+    const cdp = fakePage({ facts: approvalPage({ bodyTextHead: "We didn't hear from you. Try again." }) });
+    const o = await rescue(cdp, approvalCheck, { takeover: runner('resolved', 'approval_changed'), limiter: limiter(), quietMs: 10, clearWaitMs: 2000 });
+    expect(o).toMatchObject({ status: 'still_blocked', detail: 'approval_failed.timed_out' });
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it('a denied push and a retry page are still_blocked, even with the prompt wording still there', async () => {
+    const denied = await rescue(fakePage({ facts: approvalPage({ bodyTextHead: 'Sign-in denied.' }) }), approvalCheck, { takeover: runner(), limiter: limiter(), quietMs: 10 });
+    expect(denied).toMatchObject({ status: 'still_blocked', detail: 'approval_failed.denied' });
+    const retry = await rescue(fakePage({ facts: approvalPage({ bodyTextHead: 'Check your phone to approve this sign-in. Try again' }) }), approvalCheck, { takeover: runner(), limiter: limiter(), quietMs: 10 });
+    expect(retry).toMatchObject({ status: 'still_blocked', detail: 'approval_failed.retry' });
+  });
+
+  // Review Focus 2
+  it('approved by person but prompt still showing', async () => {
+    const t0 = Date.now();
+    const o = await rescue(fakePage({ facts: approvalPage() }), approvalCheck, { takeover: runner('resolved', 'approved_by_person'), limiter: limiter(), quietMs: 10, clearWaitMs: 300 });
+    expect(o).toMatchObject({ status: 'still_blocked', detail: 'approval_still_showing' });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(280);
+  });
+
+  it('approved by person, the prompt clears within the clear wait: resolved', async () => {
+    const state = { facts: approvalPage() };
+    const run = runner('resolved', 'approved_by_person');
+    run.mockImplementation(async () => {
+      setTimeout(() => (state.facts = page({ url: 'https://accounts.example/home' })), 200);
+      return { status: 'resolved', sessionId: 's1', url: '', durationS: 3, detail: 'approved_by_person' };
+    });
+    expect(await rescue(fakePage(state), approvalCheck, { takeover: run, limiter: limiter(), quietMs: 10, clearWaitMs: 2000 })).toMatchObject({ status: 'resolved' });
+  });
+
+  it('approval resolved when the page navigated and nothing matches', async () => {
+    const o = await rescue(fakePage({ facts: page({ url: 'https://accounts.example/home', bodyTextHead: 'Welcome back' }) }), approvalCheck, { takeover: runner('resolved', 'approval_navigated'), limiter: limiter(), quietMs: 10 });
+    expect(o).toMatchObject({ status: 'resolved', takeover: { status: 'resolved', detail: 'approval_navigated' } });
+  });
+
+  it('approval followed by a 2FA page is still_blocked with 2fa.code even though scope lacks 2fa', async () => {
+    const t0 = Date.now();
+    const facts = page({ url: 'https://accounts.example/2fa', otpVisible: true, bodyTextHead: 'Enter the verification code' });
+    const o = await rescue(fakePage({ facts }), approvalCheck, { takeover: runner('resolved', 'approval_changed'), limiter: limiter(), quietMs: 10, scope: ['challenge', 'approval'], clearWaitMs: 2000 });
+    expect(o).toMatchObject({ status: 'still_blocked', detail: '2fa.code' });
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it('approval followed by a challenge is still_blocked with its rule', async () => {
+    const o = await rescue(fakePage({ facts: blocked() }), approvalCheck, { takeover: runner('resolved', 'approval_changed'), limiter: limiter(), quietMs: 10, clearWaitMs: 2000 });
+    expect(o).toMatchObject({ status: 'still_blocked', detail: 'generic.heading' });
+  });
+
+  it('an unreadable page is never resolved: still_blocked approval_unreadable at the deadline', async () => {
+    const t0 = Date.now();
+    const o = await rescue(fakePage({ facts: null as unknown as PageFacts }), approvalCheck, { takeover: runner('resolved', 'approved_by_person'), limiter: limiter(), quietMs: 10, clearWaitMs: 300 });
+    expect(o).toMatchObject({ status: 'still_blocked', detail: 'approval_unreadable' });
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(280);
+  });
+
+  it('an unreadable page that becomes readable and clear is resolved', async () => {
+    const state = { facts: null as unknown as PageFacts };
+    const run = runner('resolved', 'approval_navigated');
+    run.mockImplementation(async () => {
+      setTimeout(() => (state.facts = page({ url: 'https://accounts.example/home' })), 200);
+      return { status: 'resolved', sessionId: 's1', url: '', durationS: 3, detail: 'approval_navigated' };
+    });
+    expect(await rescue(fakePage(state), approvalCheck, { takeover: run, limiter: limiter(), quietMs: 10, clearWaitMs: 2000 })).toMatchObject({ status: 'resolved' });
+  });
+
+  it('approvals count toward the hourly limit', async () => {
+    const run = runner('resolved', 'approval_navigated');
+    const l = createRateLimiter(createMemorySessionStore(), { maxPerHour: 1 });
+    const cdp = fakePage({ facts: page() });
+    expect((await rescue(cdp, approvalCheck, { takeover: run, limiter: l, quietMs: 10 })).status).toBe('resolved');
+    expect((await rescue(cdp, approvalCheck, { takeover: run, limiter: l, quietMs: 10 })).status).toBe('rescue_limited');
+    expect((await rescue(cdp, cfCheck, { takeover: run, limiter: l, quietMs: 10 })).status).toBe('rescue_limited');
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('login and 2fa checks get kind login; askHuman gets kind other', async () => {
+    const run = runner();
+    const cdp = fakePage({ facts: page() });
+    await rescue(cdp, { ...cfCheck, kind: 'login', vendor: undefined, ruleId: 'login.redirect' }, { takeover: run, limiter: limiter(), quietMs: 10 });
+    await rescue(cdp, { ...cfCheck, kind: '2fa', vendor: undefined, ruleId: '2fa.code' }, { takeover: run, limiter: limiter(), quietMs: 10 });
+    await rescue(cdp, { kind: 'ask', ruleId: 'ask_human', evidence: ['Type the code'], url: 'https://shop.example/', site: 'shop.example' }, { takeover: run, limiter: limiter(), quietMs: 10, reason: 'Type the code' });
+    expect(run.mock.calls.map((c) => c[0])).toEqual([
+      { reason: 'shop.example asks you to log in', site: 'shop.example', kind: 'login' },
+      { reason: 'shop.example asks for a verification code', site: 'shop.example', kind: 'login' },
+      { reason: 'Type the code', site: 'shop.example', kind: 'other' },
+    ]);
   });
 });

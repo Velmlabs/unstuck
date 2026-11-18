@@ -114,7 +114,7 @@ describe('createGuard', () => {
     const run = runner();
     const g = await createGuard({ cdp: fakePage(state), takeover: run, store: createMemorySessionStore(), maxRescuesPerHour: 1, widgetGraceMs: 5 });
     expect(await g.askHuman('Type the code from the SMS')).toMatchObject({ status: 'resolved', check: { kind: 'ask', ruleId: 'ask_human', evidence: ['Type the code from the SMS'], site: 'shop.example' } });
-    expect(run).toHaveBeenCalledWith({ reason: 'Type the code from the SMS', site: 'shop.example' });
+    expect(run).toHaveBeenCalledWith({ reason: 'Type the code from the SMS', site: 'shop.example', kind: 'other' });
     expect(await g.askHuman('again')).toMatchObject({ status: 'rescue_limited' });
     expect(run).toHaveBeenCalledTimes(1);
   });
@@ -151,6 +151,41 @@ describe('createGuard on a browser that cannot paint CAPTCHAs', () => {
     const run = runner();
     const g = await createGuard({ cdp: fakePage({ facts: blocked() }), takeover: run, store: createMemorySessionStore(), canRenderCaptcha: async () => false, widgetGraceMs: 5 });
     expect(await g.after()).toMatchObject({ status: 'browser_cannot_render_captcha' });
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
+describe('createGuard and approvals', () => {
+  const approvalFacts = () => page({ url: 'https://accounts.example/signin', title: 'Sign in', bodyTextLength: 120, bodyTextHead: 'Check your phone to approve this sign-in.' });
+
+  it('guard default scope detects approvals', async () => {
+    const state = { facts: approvalFacts() };
+    const run = runner();
+    run.mockImplementation(async () => {
+      state.facts = page({ url: 'https://accounts.example/home' });
+      return { status: 'resolved', sessionId: 's1', url: '', durationS: 1, detail: 'approval_navigated' };
+    });
+    const g = await createGuard({ cdp: fakePage(state), takeover: run, store: createMemorySessionStore(), widgetGraceMs: 5 });
+    expect(await g.after()).toMatchObject({ status: 'resolved', check: { kind: 'approval', ruleId: 'approval.prompt' } });
+    expect(run).toHaveBeenCalledWith({ reason: 'accounts.example asks you to approve a sign-in', site: 'accounts.example', kind: 'approval', mode: 'approval', timeoutS: 300 });
+  });
+
+  it('passes approvalTimeoutS to the rescue', async () => {
+    const state = { facts: approvalFacts() };
+    const run = runner();
+    run.mockImplementation(async () => {
+      state.facts = page({ url: 'https://accounts.example/home' });
+      return { status: 'resolved', sessionId: 's1', url: '', durationS: 1 };
+    });
+    const g = await createGuard({ cdp: fakePage(state), takeover: run, store: createMemorySessionStore(), approvalTimeoutS: 120, widgetGraceMs: 5 });
+    await g.after();
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ mode: 'approval', timeoutS: 120 }));
+  });
+
+  it("rescue ['challenge'] ignores approvals as before", async () => {
+    const run = runner();
+    const g = await createGuard({ cdp: fakePage({ facts: approvalFacts() }), takeover: run, store: createMemorySessionStore(), rescue: ['challenge'], widgetGraceMs: 5 });
+    expect(await g.after()).toBeNull();
     expect(run).not.toHaveBeenCalled();
   });
 });

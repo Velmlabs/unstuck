@@ -23,6 +23,8 @@ export interface GuardOptions {
   widgetGraceMs?: number;
   now?: () => number;
   canRenderCaptcha?: RenderCheck;
+  /** How long an approval takeover waits for the person (default 300 s). */
+  approvalTimeoutS?: number;
 }
 
 /** Watches one page: checks it around the agent's actions and brings in a person when a human check appears. */
@@ -52,7 +54,7 @@ const hostOf = (u: string) => {
 
 export async function createGuard(o: GuardOptions): Promise<Guard> {
   const { cdp, store } = o;
-  const scope = o.rescue ?? (['challenge'] as const);
+  const scope = o.rescue ?? (['challenge', 'approval'] as const);
   const limiter = createRateLimiter(store, { maxPerHour: o.maxRescuesPerHour, now: o.now });
   await cdp.send('Page.enable');
   const tracker = await trackMainDocument(cdp);
@@ -71,7 +73,7 @@ export async function createGuard(o: GuardOptions): Promise<Guard> {
   };
 
   const run = async (check: HumanCheck, reason?: string): Promise<RescueOutcome> => {
-    const outcome = await rescue(cdp, check, { takeover: o.takeover, limiter, profile: o.profile, scope, now: o.now, canRenderCaptcha: o.canRenderCaptcha, ...(reason ? { reason } : {}) });
+    const outcome = await rescue(cdp, check, { takeover: o.takeover, limiter, profile: o.profile, scope, now: o.now, canRenderCaptcha: o.canRenderCaptcha, approvalTimeoutS: o.approvalTimeoutS, ...(reason ? { reason } : {}) });
     lastRescue = outcome;
     o.onRescue?.(outcome);
     if (o.remember && outcome.status === 'resolved') {
