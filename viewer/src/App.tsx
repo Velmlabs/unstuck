@@ -227,6 +227,13 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
   const approvalCanvas = useRef<HTMLCanvasElement>(null);
   /** A frame that came in before the preview canvas was on the page. */
   const previewWait = useRef<{ f: Frame; drawn: (f: Frame) => void } | null>(null);
+  /** Gives a held frame's credit back without drawing it (the frame is no longer wanted). */
+  const dropPreview = () => {
+    const w = previewWait.current;
+    previewWait.current = null;
+    w?.drawn(w.f);
+  };
+  useEffect(() => () => dropPreview(), []);
   useEffect(() => {
     const w = previewWait.current;
     if (w && approvalCanvas.current) {
@@ -341,16 +348,17 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         // Frame credit: the engine sends the next frame once this one is on screen (a slow phone never builds a backlog).
         const drawn = (d: Frame) => sockRef.current?.ack(d);
         const target = modeRef.current?.mode === 'approval' ? approvalCanvas.current : modeRef.current?.mode === 'question' ? null : canvasRef.current;
-        previewWait.current = null;
+        dropPreview(); // a held preview frame is replaced: it still gets its credit back
         if (target) drawFrame(target, f, drawn);
         else if (modeRef.current?.mode === 'approval') previewWait.current = { f, drawn }; // drawn once the preview mounts
         else drawn(f);
-        if (target === canvasRef.current && !framedRef.current) {
+        if (target !== null && target === canvasRef.current && !framedRef.current) {
           framedRef.current = true;
           setFramed(true);
         }
       },
       onMode: (m) => {
+        if (m.mode !== 'approval') dropPreview();
         modeRef.current = m; // a frame right behind it (same tick) must already go to the right canvas
         setModeFrame(m);
       },

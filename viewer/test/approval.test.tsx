@@ -54,8 +54,51 @@ describe('approval screen', () => {
     act(() => a.h().onMode?.({ ...approvalMode, mode: 'control' }));
     expect(screen.getByTestId('screen')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Done' })).toBeTruthy();
-    // The preview frame wasn't drawn on the control canvas: the live view still waits for its own first frame.
+
+  });
+
+  it('after Show me the page the live view waits for its own first frame (preview frame or question frame before)', () => {
+    const frame = { width: 400, height: 300, jpeg: new Uint8Array([1]) };
+    const a = fakeApp();
+    a.ready();
+    act(() => a.h().onMode?.(approvalMode));
+    act(() => a.h().onFrame(frame)); // drawn on the preview
+    act(() => a.h().onMode?.({ ...approvalMode, mode: 'control' }));
     expect(screen.getByText('Waiting for the page…')).toBeTruthy();
+    cleanup();
+    const b = fakeApp();
+    b.ready();
+    act(() => b.h().onMode?.({ ...approvalMode, mode: 'question', question: { text: 'Q?', allowText: true } }));
+    act(() => b.h().onFrame(frame)); // drawn nowhere
+    act(() => b.h().onMode?.({ ...approvalMode, mode: 'control' }));
+    expect(screen.getByText('Waiting for the page…')).toBeTruthy();
+  });
+
+  it('a held preview frame is acked once when the mode leaves approval, and once when replaced', () => {
+    const a = fakeApp();
+    a.ready();
+    const f1 = { width: 4, height: 3, jpeg: new Uint8Array([1]), seq: 1 };
+    const f2 = { ...f1, seq: 2 };
+    // Mode frame and two frames in one tick: the preview isn't mounted, so f1 is held, then replaced by f2.
+    act(() => {
+      a.h().onMode?.(approvalMode);
+      a.h().onFrame(f1);
+      a.h().onFrame(f2);
+    });
+    expect(a.acked).toEqual([f1]); // f1 replaced: acked; f2 drawn on the preview (drawFrame is a mock: ack is its job)
+    expect(a.acked.filter((x) => x === f1)).toHaveLength(1);
+    cleanup();
+    // Held frame discarded by a mode change before the effect runs (nothing is mounted yet).
+    const b = fakeApp();
+    b.ready();
+    const f3 = { ...f1, seq: 3 };
+    act(() => {
+      b.h().onMode?.(approvalMode);
+      b.h().onFrame(f3);
+      b.h().onMode?.({ ...approvalMode, mode: 'control' });
+    });
+    expect(b.acked).toEqual([f3]);
+    expect(b.drawFrame).not.toHaveBeenCalled();
   });
 
   it('a resolved approval says Approved, thank you', () => {
