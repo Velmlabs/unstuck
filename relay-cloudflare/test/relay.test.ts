@@ -497,7 +497,9 @@ describe('modes and quick answers', () => {
     });
     await evictDurableObject(stub(SID));
     expect((await post(SID, '{"choice":1}')).status).toBe(204); // rebuilt from the mode-less record
-    await runDurableObjectAlarm(stub(SID));
+    ws.send('{"t":"end"}');
+    await waitFor(() => probe.events.some((e) => e.name === 'session_closed'));
+    expect(probe.events.find((e) => e.name === 'session_closed')).toMatchObject({ sessionId: SID, mode: 'control' });
     ws.close();
   });
 });

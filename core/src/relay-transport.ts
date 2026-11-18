@@ -119,7 +119,7 @@ export function createRelayTransport(opts: RelayTransportOptions): Transport & {
         ws.close();
         reject(new RelayError('relay_unreachable'));
       }, timeoutMs);
-      ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', expiresAt: s.expiresAt, secret: s.secret, ...(s.mode ? { mode: s.mode } : {}) }));
+      ws.onopen = () => ws.send(JSON.stringify({ t: 'hello', expiresAt: s.expiresAt, secret: s.secret, ...(s.mode && s.mode !== 'control' ? { mode: s.mode } : {}) }));
       // Workers' client sockets deliver binary as Blob: read it without letting later messages overtake it.
       let reading: Promise<void> | null = null;
       ws.onmessage = (e: MessageEvent) => {

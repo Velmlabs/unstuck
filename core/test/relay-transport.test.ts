@@ -184,17 +184,26 @@ describe('createRelayTransport', () => {
     expect(closed).toBe(1);
   });
 
-  it('publish sends mode in the hello, and omits it when none is given', async () => {
+  it.each(['approval', 'question'] as const)('publish sends mode %s in the hello', async (mode) => {
     const t = make('K');
-    const p = t.publish(ID, { expiresAt: 5_000, mode: 'question' });
+    const p = t.publish(ID, { expiresAt: 5_000, mode });
     const ws = FakeWs.all.at(-1)!;
     ws.accept();
     await flush();
-    expect(ws.json()[0]).toMatchObject({ t: 'hello', mode: 'question' });
+    expect(ws.json()[0]).toMatchObject({ t: 'hello', expiresAt: 5_000, mode });
     ws.text({ t: 'registered' });
     await p;
-    const { ws: plain } = await published();
-    expect(plain.json()[0]).not.toHaveProperty('mode');
+  });
+
+  it('a control hello is byte-identical to the pre-mode hello (older relays refuse unknown keys)', async () => {
+    const t = make('K');
+    const p = t.publish(ID, { expiresAt: 5_000, mode: 'control' });
+    const ws = FakeWs.all.at(-1)!;
+    ws.accept();
+    await flush();
+    expect(ws.json()[0]).toEqual({ t: 'hello', expiresAt: 5_000, secret: expect.any(String) });
+    ws.text({ t: 'registered' });
+    await p;
   });
 
   it('delivers a quick_answer to the registered handler, and never opens a viewer connection', async () => {
@@ -372,6 +381,8 @@ describe('in-process engine over the relay transport', () => {
     ws.text({ t: 'registered' });
     await until(() => links.length > 0);
     expect(links[0]!.url).toMatch(/^https:\/\/r\.test\/s\/[A-Za-z0-9_-]{22}#t=[^&]+&k=/);
+    // The real call path (takeover defaults to control): the hello has no `mode` key.
+    expect(ws.json()[0]).toEqual({ t: 'hello', expiresAt: expect.any(Number), secret: expect.any(String) });
     await engine.close();
     await expect(r).resolves.toMatchObject({ status: 'cancelled' });
     expect(ws.json().at(-1)).toEqual({ t: 'end' });
