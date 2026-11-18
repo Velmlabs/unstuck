@@ -8,9 +8,11 @@ import net, { type AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
+/** The start page's button: Start takeover, Answer (a question) or Open (an approval). */
+const START = /^(Start takeover|Answer|Open)$/;
 /** Taps Start on a takeover link (the page connects only then; a reload by the same phone goes straight back in). */
-async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
-  const b = p.getByRole('button', { name: 'Start takeover' });
+async function tapStart(p: { getByRole: (role: 'button', o: { name: string | RegExp }) => { isVisible: () => Promise<boolean>; click: () => Promise<void> } }) {
+  const b = p.getByRole('button', { name: START });
   if (await b.isVisible()) await b.click();
 }
 

@@ -54,6 +54,7 @@ describe('question session', () => {
     const t = await setup();
     expect(t.links[0]).toMatchObject({ reason: 'Ship the release today?', kind: 'question', mode: 'question' });
     expect(t.links[0]!.code).toBeUndefined();
+    expect(t.links[0]!.url).toMatch(/#t=[^&]+&k=[A-Za-z0-9_-]{43}&m=q$/); // the viewer's start page says what this is
     expect(t.transport.modes.get(t.id())).toBe('question');
     const v = await t.join();
     const [ready, mode, ...rest] = v.json();

@@ -22,6 +22,24 @@ describe('openAlertLink', () => {
     expect(out).toMatchObject({ hash: `#t=TOK&k=${KEY}`, reason: 'Solve the CAPTCHA', site: 'news.example.com', deviceToken: 'dt' });
   });
 
+  it('a sealed question or approval says so (mode, question) and keeps the hint in the fragment for a reload', async () => {
+    const { pub, store } = await paired();
+    const q = await sealAlert(pub, 'dev1', 'SESSION', { ...payload, site: '', reason: 'Window or aisle?', mode: 'question', question: 'Window or aisle?' });
+    expect(await openAlertLink(`#x=dev1.${q}`, '/s/SESSION', store)).toMatchObject({ hash: `#t=TOK&k=${KEY}&m=q`, mode: 'question', question: 'Window or aisle?' });
+    const a = await sealAlert(pub, 'dev1', 'SESSION', { ...payload, mode: 'approval' });
+    const out = await openAlertLink(`#x=dev1.${a}`, '/s/SESSION', store);
+    expect(out).toMatchObject({ hash: `#t=TOK&k=${KEY}&m=a`, mode: 'approval' });
+    expect(out).not.toHaveProperty('question');
+    // control, an unknown mode or a question that isn't text: today's link
+    for (const extra of [{ mode: 'control' }, { mode: 'nope' }, { question: 7 }]) {
+      const b = await sealAlert(pub, 'dev1', 'SESSION', { ...payload, ...extra } as never);
+      const o = await openAlertLink(`#x=dev1.${b}`, '/s/SESSION', store);
+      expect(o).toMatchObject({ hash: `#t=TOK&k=${KEY}` });
+      expect(o).not.toHaveProperty('mode');
+      expect(o).not.toHaveProperty('question');
+    }
+  });
+
   it('url-encodes the token', async () => {
     const { pub, store } = await paired();
     const blob = await sealAlert(pub, 'dev1', 'SESSION', { ...payload, t: 'a&b=c' });

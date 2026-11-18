@@ -25,8 +25,8 @@ export interface PublishLinkOptions {
 export type PublishOutcome = { url: string } | { failed: string } | { ended: true };
 
 /**
- * Publishes the session and returns its link `<baseUrl>#t=<token>&k=<e2e key>`. Viewer connections are sealed with
- * the link's key before they reach the gate. Never rejects. A session that ended before the transport answered is
+ * Publishes the session and returns its link `<baseUrl>#t=<token>&k=<e2e key>` (plus `&m=q` or `&m=a` for a question or
+ * an approval). Viewer connections are sealed with the link's key before they reach the gate. Never rejects. A session that ended before the transport answered is
  * unpublished again here (its finish ran before `onPublished`).
  */
 export async function publishLink(o: PublishLinkOptions): Promise<PublishOutcome> {
@@ -42,7 +42,9 @@ export async function publishLink(o: PublishLinkOptions): Promise<PublishOutcome
     o.transport.onConnection(o.sessionId, (conn) => o.gate.onConnection(sealConnection(conn, e2eKey, o.sessionId)));
     o.transport.onStatus?.(o.sessionId, o.onStatus);
     const token = await signToken(o.key, o.sessionId, o.expiresAt);
-    return o.isEnded() ? { ended: true } : { url: `${baseUrl}#t=${token}&k=${b64urlEncode(rawE2e)}` };
+    // `m`: a hint for the viewer's start page (q: a question, a: a sign-in approval); not a secret, older viewers ignore it.
+    const hint = o.mode === 'question' ? '&m=q' : o.mode === 'approval' ? '&m=a' : '';
+    return o.isEnded() ? { ended: true } : { url: `${baseUrl}#t=${token}&k=${b64urlEncode(rawE2e)}${hint}` };
   } catch (e) {
     // A relay says why it refused (relay_unauthorized, relay_quota_exceeded, ...): pass that through.
     const detail = (e as { detail?: unknown }).detail;

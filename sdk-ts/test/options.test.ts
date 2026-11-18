@@ -87,6 +87,14 @@ describe('callUserOnLink', () => {
     expect(out).toEqual(['Unstuck: your onLink handler threw (a <link> b <link secret> c <link secret> d <link secret> e <link secret>); the takeover goes on (session abc)']);
     vi.restoreAllMocks();
   });
+  it("the start-page hint (m=q / m=a) is not a secret: a message's letters q and a stay", () => {
+    const out = lines();
+    callUserOnLink(() => {
+      throw new Error('a quick TOKEN123');
+    }, { ...link, url: 'https://view.example/s/abc#t=TOKEN123&k=KEY4567&m=q' });
+    expect(out[0]).toBe('Unstuck: your onLink handler threw (a quick <link secret>); the takeover goes on (session abc)');
+    vi.restoreAllMocks();
+  });
   it('a link with no fragment: only the URL is replaced', () => {
     const out = lines();
     callUserOnLink(() => {

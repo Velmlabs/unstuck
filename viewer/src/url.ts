@@ -13,6 +13,12 @@ export function parseFragment(hash: string): Fragment | null {
   return { token, key };
 }
 
+/** The start-page hint of a question or approval link (`&m=q`, `&m=a`); null for any other link. */
+export function modeHint(hash: string): 'question' | 'approval' | null {
+  const m = new URLSearchParams(hash.replace(/^#/, '')).get('m');
+  return m === 'q' ? 'question' : m === 'a' ? 'approval' : null;
+}
+
 /** The session id is the last path segment (/s/<id>, or /takeover/<id> in integrations). */
 export function sessionIdFromPath(pathname: string): string | null {
   const m = /\/([A-Za-z0-9_-]+)\/?$/.exec(pathname);

@@ -161,9 +161,11 @@ export async function launchWithCdpPort(chromium: any, attempts = 3): Promise<{ 
   }
 }
 
+/** The start page's button: Start takeover, Answer (a question) or Open (an approval). */
+const START = /^(Start takeover|Answer|Open)$/;
 /** Taps Start on a takeover link (the page connects only then), waiting for the button to appear. */
-export async function tapStart(p: { getByRole: (role: 'button', o: { name: string }) => { waitFor: (o: { timeout: number }) => Promise<void>; click: () => Promise<void> } }) {
-  const b = p.getByRole('button', { name: 'Start takeover' });
+export async function tapStart(p: { getByRole: (role: 'button', o: { name: string | RegExp }) => { waitFor: (o: { timeout: number }) => Promise<void>; click: () => Promise<void> } }) {
+  const b = p.getByRole('button', { name: START });
   await b.waitFor({ timeout: 5_000 });
   await b.click();
 }

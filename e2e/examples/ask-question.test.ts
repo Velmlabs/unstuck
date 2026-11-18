@@ -9,7 +9,7 @@ async function answerOnPhone(link: string, answer: { choice: string } | { text: 
   try {
     const human = await (await browser.newContext({ ...devices['iPhone 13'] })).newPage();
     await human.goto(link);
-    await human.getByRole('button', { name: 'Start takeover' }).click();
+    await human.getByRole('button', { name: 'Answer' }).click(); // a question's start page
     await human.getByRole('heading', { name: 'Which flight should I book?' }).waitFor({ timeout: 60_000 });
     if ('choice' in answer) await human.getByRole('button', { name: answer.choice }).click();
     else await human.getByLabel('Or write a reply').fill(answer.text);

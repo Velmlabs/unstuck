@@ -39,7 +39,15 @@ async function start() {
     loc = { hash: opened.hash, pathname, search };
     const sessionId = sessionIdFromPath(pathname)!;
     const apiBase = apiBaseForAlerts(hostname, opened);
-    extra = { alert: { reason: opened.reason, site: opened.site, sender: () => checkSender({ apiBase, deviceToken: opened.deviceToken, sessionId }) } };
+    extra = {
+      alert: {
+        reason: opened.reason,
+        site: opened.site,
+        ...(opened.mode ? { mode: opened.mode } : {}),
+        ...(opened.question !== undefined ? { question: opened.question } : {}),
+        sender: () => checkSender({ apiBase, deviceToken: opened.deviceToken, sessionId }),
+      },
+    };
   }
   const hash = takeFragment(loc, tab, window.history);
   render(<App location={{ hash, pathname, origin, search }} {...extra} />, mount());

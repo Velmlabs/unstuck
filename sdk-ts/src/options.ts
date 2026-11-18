@@ -152,7 +152,8 @@ export function optionEnv(o: UnstuckOptions): Record<string, string | undefined>
 function redactLink(text: string, url: string): string {
   const hash = url.indexOf('#');
   const fragment = hash < 0 ? '' : url.slice(hash + 1);
-  const values = [...new URLSearchParams(fragment).values()].filter(Boolean).sort((a, b) => b.length - a.length);
+  // `m` (the viewer's start-page hint: q or a) is no secret, and replacing one letter would mangle the message.
+  const values = [...new URLSearchParams(fragment)].flatMap(([k, v]) => (k === 'm' || !v ? [] : [v])).sort((a, b) => b.length - a.length);
   let out = text.replaceAll(url, '<link>');
   if (fragment) out = out.replaceAll(fragment, '<link secret>');
   for (const v of values) out = out.replaceAll(v, '<link secret>');

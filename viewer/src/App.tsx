@@ -7,8 +7,8 @@ import { attachBridge, configureBridge } from './bridge';
 import { bridgeBox, clipBox, fieldBox, hitField, keepInside, liftOffset, type Box } from './fields';
 import { keyEventToMessage, modifiersOf } from './keys';
 import { FIT_VIEW, MAX_ZOOM, NO_INSET, clampToPage, clampView, imageRect, isFit, pinchView, sizeChangedALot, toPagePoint, viewTransform, visiblePageRect, zoomAt, type Inset, type Pinch, type Point, type Rect, type View } from './mapping';
-import { forgetFragment, parseFragment, relayFor, sessionIdFromPath } from './url';
-import { cleanLabel, type Sender } from './alert-link';
+import { forgetFragment, modeHint, parseFragment, relayFor, sessionIdFromPath } from './url';
+import { cleanLabel, type Sender, type StartMode } from './alert-link';
 import { CheckIcon, ChevronDownIcon, ChevronUpIcon, DragIcon, FitIcon, FlagIcon, HelpIcon, KeyboardIcon, ZoomInIcon, ZoomOutIcon } from './icons';
 import { HelpSheet } from './help';
 import { TipButton, useFirstTimeHint, useTips } from './tips';
@@ -27,8 +27,14 @@ export interface AppProps {
    * What a sealed link said (shown before the relay's own answer arrives). `sender` asks Cloud whether it really sent
    * this alert to this phone: only then is the key named.
    */
-  alert?: { reason: string; site: string; sender?: () => Promise<Sender> };
+  alert?: { reason: string; site: string; mode?: StartMode; question?: string; sender?: () => Promise<Sender> };
 }
+
+/** The start page of a question or an approval (a takeover's says "Start takeover"). */
+const START_COPY: Record<StartMode, { title: string; lede: string; button: string }> = {
+  question: { title: 'Your agent has a question', lede: 'Tap Answer to see it and reply.', button: 'Answer' },
+  approval: { title: 'Approve a sign-in', lede: 'Tap Open to see what to approve on your phone.', button: 'Open' },
+};
 
 type Screen =
   | { kind: 'session' }
@@ -194,7 +200,10 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
    * browser never takes the link, never sees the screen and is never charged. The phone that already started this
    * takeover (it holds the resume key) goes straight back in.
    */
-  const [started, setStarted] = useState(() => !!(sessionId && resumeStore.get(sessionId)));
+  // ?embed=1: the inbox's own frame, opened by the person's tap on Answer, so there is nothing to wait for.
+  const [started, setStarted] = useState(() => new URLSearchParams(location.search ?? '').get('embed') === '1' || !!(sessionId && resumeStore.get(sessionId)));
+  /** What the start page says: from the sealed payload, else the plain link's `&m=` hint; null for a takeover. */
+  const startMode = alert?.mode ?? modeHint(location.hash);
   const [codeAsk, setCodeAsk] = useState<{ invalid: boolean } | null>(null);
   const [code, setCode] = useState('');
   const [phase, setPhase] = useState<Phase>('connecting');
@@ -1073,6 +1082,32 @@ export function App({ location, connectFn = defaultConnect, drawFrame = drawFram
         <div class="message-card">
           <h1>{screen.title}</h1>
           <p>{screen.body}</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!started && startMode) {
+    const copy = START_COPY[startMode];
+    const about = startMode === 'question' ? alert?.question : alert?.reason;
+    return (
+      <main class="message start">
+        <div class="message-card">
+          <p class="start-kicker">Unstuck</p>
+          <h1>{copy.title}</h1>
+          {about ? <p class="start-about">{about}</p> : null}
+          {startMode === 'approval' && alert?.site ? <p class="site">{cleanLabel(alert.site, 253)}</p> : null}
+          {sender && sender !== 'not_sent' ? <p class="from">{fromLine(sender.keyName, alert?.site ?? '')}</p> : null}
+          {sender === 'not_sent' ? (
+            <p class="not-sent" role="alert">
+              {NOT_SENT}
+            </p>
+          ) : null}
+          <p>{copy.lede}</p>
+          <button type="button" class="btn btn-primary btn-start" onClick={() => setStarted(true)}>
+            {copy.button}
+          </button>
+          <p class="start-note">Opening this link in a preview doesn't use it.</p>
         </div>
       </main>
     );

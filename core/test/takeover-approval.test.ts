@@ -77,6 +77,7 @@ describe('approval-mode takeover', () => {
     const t = setup();
     await settle();
     expect(t.links[0]).toMatchObject({ kind: 'approval', mode: 'approval' });
+    expect(t.links[0]!.url).toMatch(/#t=[^&]+&k=[A-Za-z0-9_-]{43}&m=a$/); // the viewer's start page says what this is
     expect(t.transport.modes.get(t.links[0]!.sessionId)).toBe('approval');
     const v = await t.join();
     const [ready, mode, ...rest] = v.json();

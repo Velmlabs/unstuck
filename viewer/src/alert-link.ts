@@ -6,7 +6,11 @@ import { sessionIdFromPath } from './url';
 /** `no_device`: this browser has no paired phone. `not_for_this_device`: it has one, but the link wasn't sealed to it. */
 export type AlertLinkError = 'no_device' | 'not_for_this_device';
 /** The plain fragment and what was sealed with it, plus this phone's token and the API it was paired with. */
-export type OpenedAlert = { hash: string; reason: string; site: string; deviceToken: string; apiBase?: string };
+export type OpenedAlert = { hash: string; reason: string; site: string; deviceToken: string; apiBase?: string; mode?: StartMode; question?: string };
+/** The sessions whose start page says what they are (a takeover's says "Start takeover"). */
+export type StartMode = 'question' | 'approval';
+/** The `m` hint a question or approval link carries in its fragment (`&m=q`, `&m=a`). */
+export const MODE_HINT: Record<StartMode, string> = { question: 'q', approval: 'a' };
 
 /**
  * Unseals a notified link's `#x=<device id>.<blob>` with this browser's paired-phone key and returns the plain
@@ -35,10 +39,15 @@ export async function openAlertLink(hash: string, pathname: string, store: Devic
     !Number.isFinite(p.expiresAt)
   )
     return { error: 'not_for_this_device' };
+  const mode = p.mode === 'question' || p.mode === 'approval' ? p.mode : undefined;
+  const question = mode === 'question' && typeof p.question === 'string' ? p.question : undefined;
   return {
-    hash: `#t=${encodeURIComponent(p.t)}&k=${encodeURIComponent(p.k)}`,
+    // The hint goes in the fragment too, so a reload in this tab (the sealed #x is gone by then) keeps the start page.
+    hash: `#t=${encodeURIComponent(p.t)}&k=${encodeURIComponent(p.k)}${mode ? `&m=${MODE_HINT[mode]}` : ''}`,
     reason: p.reason,
     site: p.site,
+    ...(mode ? { mode } : {}),
+    ...(question !== undefined ? { question } : {}),
     deviceToken: rec.deviceToken,
     ...(rec.apiBase ? { apiBase: rec.apiBase } : {}),
   };

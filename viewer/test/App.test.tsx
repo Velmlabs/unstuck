@@ -92,6 +92,48 @@ describe('tap to start: link previews and scanners never use a link', () => {
     expect(screen.getByText('portal.example')).toBeTruthy();
   });
 
+  it("a question link (m=q) says it's a question and offers Answer", () => {
+    render(<App location={loc(`#t=TOK&k=${KEY}&m=q`)} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    expect(connects).toBe(0);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Your agent has a question');
+    expect(screen.queryByRole('button', { name: 'Start takeover' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Answer' }));
+    expect(connects).toBe(1);
+  });
+
+  it('an approval link (m=a) says it is a sign-in to approve and offers Open', () => {
+    render(<App location={loc(`#t=TOK&k=${KEY}&m=a`)} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Approve a sign-in');
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(connects).toBe(1);
+  });
+
+  it('an unknown hint keeps the takeover copy', () => {
+    render(<App location={loc(`#t=TOK&k=${KEY}&m=zz`)} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Someone needs your help in a browser');
+    expect(screen.getByRole('button', { name: 'Start takeover' })).toBeTruthy();
+  });
+
+  it('a sealed question shows the question; a sealed approval its reason and site', () => {
+    render(<App location={loc()} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} alert={{ reason: 'Window or aisle?', site: '', mode: 'question', question: 'Window or aisle?' }} />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Your agent has a question');
+    expect(screen.getByText('Window or aisle?')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Answer' })).toBeTruthy();
+    cleanup();
+    render(<App location={loc()} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} alert={{ reason: 'Approve the sign-in on your phone', site: 'okta.example', mode: 'approval' }} />);
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Approve a sign-in');
+    expect(screen.getByText('Approve the sign-in on your phone')).toBeTruthy();
+    expect(screen.getByText('okta.example')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy();
+    expect(connects).toBe(0);
+  });
+
+  it('embed=1 (the inbox opened it on a tap) starts at once', () => {
+    render(<App location={{ ...loc(`#t=TOK&k=${KEY}&m=q`), search: '?r=wss://r.example&embed=1' }} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
+    expect(connects).toBe(1);
+    expect(screen.queryByRole('button', { name: 'Answer' })).toBeNull();
+  });
+
   it('the same phone coming back (it holds the resume key) goes straight in', () => {
     localStorage.setItem('unstuck:resume:SESSION', 'k');
     render(<App location={loc()} connectFn={connectFn} drawFrame={drawFrame} now={() => NOW} />);
